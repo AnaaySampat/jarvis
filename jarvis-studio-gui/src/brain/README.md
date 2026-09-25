@@ -12,7 +12,7 @@ the React HUD calls it directly through `hooks/useBrain.js`.
 ## Port map — TypeScript file ↔ Python original
 
 The Python originals live in the desktop app's `jarvis-studio-backend/` (a separate
-repo). They're what you diff against when a behaviour differs between the phone and the
+project, not in this repository). They're what you diff against when a behaviour differs between the phone and the
 PC. Maintainers keep a read-only local copy at `reference/python-backend-spec/`; it is
 gitignored and not part of this repository.
 

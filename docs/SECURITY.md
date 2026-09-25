@@ -408,7 +408,7 @@ in cleartext through multiple channels, any one of which hands an attacker full 
 
 ### H1 — Shipped APK is debuggable + cleartext; all secrets extractable over USB
 **Where:** debug manifest
-[…/merged_manifests/universalDebug/…/AndroidManifest.xml:92](../jarvis-studio-gui/src-tauri/gen/android/app/build/intermediates/merged_manifests/universalDebug/processUniversalDebugManifest/AndroidManifest.xml)
+the merged debug manifest (build output, `…/merged_manifests/universalDebug/…/AndroidManifest.xml:92`)
 — `android:debuggable="true"`, `android:usesCleartextTraffic="true"`. The repo ships
 `JARVIS-arm64-debug.apk` (root) — a debug build. `allowBackup` is not set anywhere → defaults
 to **true**.

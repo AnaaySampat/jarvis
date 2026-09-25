@@ -210,7 +210,8 @@ jarvis/
 ├── docs/
 │   ├── ARCHITECTURE.md          ← how the app is put together
 │   ├── STATUS.md                ← what works, what's open, how it was verified
-│   ├── SECURITY.md              ← the white-hat audit and its fix status
+│   ├── SECURITY.md              ← the security model, then the audit history
+│   ├── images/                  ← README screenshots
 │   └── archive/                 ← the original 2026-06 plan + build log (history)
 ├── jarvis-studio-gui/           ← the app
 │   ├── src/                     ← React HUD

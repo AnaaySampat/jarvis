@@ -27,6 +27,9 @@ touching all four — and nothing else. **Don't build a second path.**
 | File | Role |
 |---|---|
 | `PhonePlugin.kt` | The `@TauriPlugin` command surface — every entry point |
+| `OperatorCore.kt` | The phone-task loop (observe → one JSON command → act → repeat) and its R0–R3 risk policy. Pure Kotlin, JVM-tested |
+| `NativeOperator.kt` | Android glue for that loop: the accessibility device, the HTTP model ladder, the Room journal, and the start/status registry the WebView polls |
+| `RoutePacer.kt` | Per-route pacing for the operator's model ladder (per-minute limits, backoff) |
 | `JarvisAccessibilityService.kt` | Node-tree dump; tap/type/scroll/gesture/back/home; screenshot fallback; the STOP overlay |
 | `WakeWordManager.kt`, `WakeWordService.kt` | On-device "Hey Jarvis" (openWakeWord ONNX) as a foreground service |
 | `SecureSecretStore.kt` | Provider credentials under a non-exportable Keystore key (AES-GCM); SharedPreferences holds ciphertext + IV only |
@@ -35,14 +38,14 @@ touching all four — and nothing else. **Don't build a second path.**
 | `AutonomySupervisorService.kt` | Foreground service owning task lifecycle: start / cancel / suspend / complete |
 | `AutonomyBootReceiver.kt`, `AutonomyRecoveryWorker.kt` | Reconcile task state after reboot or app upgrade |
 | `ActiveTaskRegistry.kt`, `NavigationWaitGate.kt` | Who may act now; and a pure gate so an *accepted* navigation is never mistaken for a *verified* transition (STOP wins ties) |
-| `ReminderReceiver.kt` | `BroadcastReceiver` for scheduled reminders |
 
 **Rust** (`src/`): `commands.rs`, `mobile.rs`, `desktop.rs` (stubs), `models.rs`,
 `error.rs`, `lib.rs`.
 
 **Commands** — the authoritative list is `build.rs`'s `COMMANDS` array. Grouped:
 
-- Operator: `observe`, `tap`, `tap_xy`, `double_tap`, `long_press`, `swipe`, `set_text`,
+- Native operator loop: `operator_start`, `operator_status`
+- Single actions: `observe`, `tap`, `tap_xy`, `double_tap`, `long_press`, `swipe`, `set_text`,
   `type_text`, `scroll`, `back`, `home`, `is_enabled`
 - Apps & system: `open_app`, `close_app`, `open_url`, `set_volume`, `read_clipboard`,
   `open_system_settings`, `open_accessibility_settings`
@@ -63,12 +66,13 @@ return `{ ok, summary }`.
 
 ## Gotchas that are still live
 
-- **`npx tauri android init` regenerates `gen/android` and drops manual manifest edits.**
-  `gen/android/app/src/main/AndroidManifest.xml` is **not** tracked in git, so the app-level
+- **Don't run `npx tauri android init`.** It regenerates `gen/android` and drops the hand
+  edits there. That folder is tracked in git (including
+  `gen/android/app/src/main/AndroidManifest.xml`) precisely so they survive: the app-level
   permissions (`RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `CAMERA`, `SYSTEM_ALERT_WINDOW`,
-  `INTERNET`) and the `<queries>` block must be re-added after an init. The `<queries>`
-  block is what makes `open_app` able to see other apps at all — without it, app launching
-  silently fails.
+  `INTERNET`), `allowBackup="false"`, and the `<queries>` block. The `<queries>` block is
+  what makes `open_app` able to see other apps at all — without it, app launching silently
+  fails. If you ever do run init, diff against git and restore them.
   The accessibility `<service>`, the wake-word and autonomy services, and their permissions
   come from **this plugin's** manifest via the merger, so those survive an init.
 - **The event/Channel bridge silently drops callbacks** during WebView startup reloads on

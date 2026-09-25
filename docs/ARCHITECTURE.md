@@ -35,9 +35,10 @@ The seam is `src/hooks/useAssistant.js`: it picks `useBrain` (in-app brain) on a
 stable hook. `useBrain.js` deliberately mirrors `useWebSocket`'s shape, so `App.jsx` and
 the HUD never learn which transport is behind them.
 
-`reference/python-backend-spec/` (local-only, gitignored — not in the public repo) is a
-read-only copy of the original Python backend: the blueprint to compare against, never
-edited, imported or shipped.
+The desktop app is a separate project, not in this repository. Python file names below
+(`main.py`, `llm/*_bridge.py`, `autopilot.py`, …) name what each part was ported from.
+Maintainers may keep a gitignored `reference/python-backend-spec/` copy of it as a
+blueprint; it is never edited, imported or shipped.
 
 ### What's in the brain
 
@@ -46,10 +47,10 @@ edited, imported or shipped.
 | Turn loop | `index.ts`, `loop.ts`, `ask.ts` | The observe→act orchestration ported from `main.py` |
 | Config | `config.ts`, `resolveConfig.ts`, `configSecrets.ts` | What provider/model we'd *like* to use; secrets live in the Keystore (see §5) |
 | Route ladder | `routes.ts`, `quota.ts`, `modelPolicy.ts`, `modelCatalog.ts`, `modelRanker.ts` | What we actually try, in what order (see §2) |
-| Providers | `providers/{gemini,groq,vertexAuth,models}.ts` | Ported from `llm/*_bridge.py` |
+| Providers | `providers/{gemini,openaiCompat,catalog,vertexAuth,models}.ts` | Gemini/Vertex in `gemini.ts`; Groq, OpenRouter, NVIDIA and Mistral share `openaiCompat.ts`. Ported from `llm/*_bridge.py` |
 | Tools | `tools/registry.ts`, `tools/dispatch.ts`, `tools/http.ts` | One advertisement point, one execution point (see §3) |
 | Phone operator | `operator/controller.ts` → **Kotlin** `OperatorCore.kt` / `NativeOperator.kt` | Drives other apps — the loop is native (see §4) |
-| Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` | Three separate stores — check which one a feature reads |
+| Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` (+ `playbooks.ts`) | Three separate stores — check which one a feature reads (see §7) |
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
 | Native bridge | `platform/*.ts` | The JS side of the Kotlin plugin (see §5) |
 | Scheduling | `schedule/{store,reminderTime}.ts` | Reminders, alarms, timers |
@@ -420,16 +421,24 @@ The operator loop is tested without a device on the JVM: `OperatorCoreTest.kt` d
 `OperatorLoop` with a fake device, a scripted model and a fake journal
 (`./gradlew :tauri-plugin-phone:testDebugUnitTest` from `src-tauri/gen/android`).
 
-### STT and TTS use the WebView, not a Kotlin plugin
+### Speech: input in the WebView, output through native TTS
 
-This was deliberate. `platform/webspeech.ts` uses `window.speechSynthesis` for replies and
-`platform/stt.ts` uses `MediaRecorder` → Groq Whisper (falling back to Vertex Chirp when
-Groq fails, so one provider outage doesn't take voice input down) for listening, relying on Wry's
-WebView already granting `getUserMedia` once `RECORD_AUDIO` is in the manifest. It works
-and it's simpler — don't reintroduce a native STT/TTS plugin without a specific reason.
+**Listening** stays in the WebView on purpose. `platform/stt.ts` records with
+`MediaRecorder` (Wry's WebView grants `getUserMedia` once `RECORD_AUDIO` is in the
+manifest) and transcribes with Groq Whisper (`whisper-large-v3`, temperature 0, a short
+vocabulary prompt), falling back to Vertex Chirp when Groq fails so one provider outage
+doesn't take voice input down. After "Hey Jarvis", `MicRecorder.untilSilence()` ends the
+recording ~0.9 s after you stop talking (an energy VAD on the same stream, 10 s ceiling)
+instead of a fixed window. Don't add a native speech-recognition plugin.
 
-(The native `speak`/`stop_speaking`/`poll_speaking` commands are a *different* thing: the
-Android system TTS used when the phone is speaking *as* the remote-controlled device.)
+**Speaking** goes through native Android TextToSpeech: Android System WebView does not
+implement `window.speechSynthesis`, so `platform/webspeech.ts` calls
+`plugin:phone|speak` and polls `poll_speaking` for real completion (the event bridge is
+unreliable, §5). `speechSynthesis` is only the browser-preview fallback. The same native
+commands also let the phone talk when the PC drives it remotely.
+
+Known gap: the wake-word engine and `MediaRecorder` can't share the mic, so the handoff
+after the wake cue drops roughly the first half-second of a command (STATUS.md).
 
 ---
 
@@ -554,5 +563,5 @@ mid-boot. Don't "tidy" it back into an effect.
   commit. `tauri.settings.gradle` (absolute local paths) and keystores stay ignored.
 - **Check before you assume a feature is missing.** [STATUS.md](STATUS.md) records what's
   been verified on a real device; a lot of what looks unfinished has been tested live.
-- **After changing code**, run `graphify update .` to keep the knowledge graph in
-  `graphify-out/` current (AST-only, no API cost).
+- **If you use graphify**, run `graphify update .` after changing code to keep the
+  gitignored `graphify-out/` graph current. Nothing in the build depends on it.

@@ -4,12 +4,12 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this is
 
-`aura-android` is the Android port of JARVIS (a voice assistant with app/PC control). It
-is a **separate fork** of the Windows desktop app (`aura`, the sibling folder) — same
-Tauri 2 + React shell, but the Python backend brain is **reimplemented in TypeScript and
-runs inside the app** (no on-device Python). `reference/python-backend-spec/` (local-only,
-gitignored, like `graphify-out/`) is a read-only copy of the original Python backend kept
-only as a porting blueprint — never edit or import it.
+This is JARVIS for Android, a voice assistant with phone and PC control. It began as a
+fork of a Windows desktop app (a separate project, not in this repository): same Tauri 2
++ React shell, but the desktop's Python backend brain is **reimplemented in TypeScript and
+runs inside the app** (no on-device Python). Maintainers may keep a gitignored
+`reference/python-backend-spec/` copy of that Python backend as a porting blueprint;
+never edit or import it, and don't assume it exists.
 
 ## Read these before assuming anything
 
@@ -18,9 +18,9 @@ only as a porting blueprint — never edit or import it.
 - **[docs/STATUS.md](docs/STATUS.md)** — what is live-verified vs merely built vs open.
   **Check it before calling a feature unfinished or untested** — a lot of what looks
   half-done has been confirmed on a real device.
-- **[docs/SECURITY.md](docs/SECURITY.md)** — the white-hat audit. Read its *Current
-  status* section first; the findings below it are a 2026-07 snapshot and several are
-  closed.
+- **[docs/SECURITY.md](docs/SECURITY.md)** — the security model (top half) and the audit
+  history (bottom half). Inside the history, *Current status* says which of the 2026-07
+  findings still stand.
 - `docs/archive/` is history. Not maintained, and it loses to the two docs above.
 
 ## Commands
@@ -88,18 +88,20 @@ These are the ones that get broken by well-meaning changes. Details in ARCHITECT
    singleton (`syncWakeWord()`, keyed by a config-hash signature) on purpose — StrictMode's
    mount→unmount→remount was killing the engine mid-boot. (§8)
 
-7. **`quota.ts` currently LEADS the desktop's `llm/quota.py`.** They're meant to mirror
+7. **`quota.ts` currently LEADS the desktop app's quota logic.** They're meant to mirror
    each other, but the per-minute vs per-day bench windows (2026-09-23) and the capped
-   transient ladder (20s → 2m → 10m, 2026-09-25) exist only on the phone so far. Port them
-   before assuming the two behave the same. (§2)
+   transient ladder (20s → 2m → 10m, 2026-09-25) exist only on the phone so far. Don't
+   assume the desktop behaves the same. (§2)
 
 8. **"Memory" is ambiguous here — check which store.** Keyword recall
    (`memory/store.ts`), semantic/embedding recall (`memory/vectorStore.ts`), and verified
    procedural workflows (`memory/proceduralLearning.ts`) are three separate systems. (§7)
 
-9. **Don't reintroduce a native STT/TTS plugin.** Speech deliberately uses the WebView
-   (`platform/webspeech.ts`, `platform/stt.ts`). The native `speak`/`stop_speaking` commands
-   are a different thing — the phone talking *as* a remote-controlled device. (§5)
+9. **Speech input stays in the WebView; speech output is native.** `platform/stt.ts`
+   records with `MediaRecorder` → Groq Whisper (Vertex Chirp fallback) — don't add a
+   native speech-recognition plugin. Android System WebView has no `speechSynthesis`, so
+   `platform/webspeech.ts` speaks through native `plugin:phone|speak` and polls
+   `poll_speaking` for completion. (§5)
 
 10. **Tests are colocated** — `foo.test.ts` next to `foo.ts`, not in a `tests/` tree.
 
@@ -108,8 +110,9 @@ These are the ones that get broken by well-meaning changes. Details in ARCHITECT
     WebView is paused ~60s after JARVIS leaves the foreground (measured on-device), and a
     phone task is backgrounded by definition. Nothing mid-task may wait on the WebView. (§4)
 
-12. **After modifying code, run `graphify update .`** to keep `graphify-out/` current
-    (AST-only, no API cost). For codebase questions, `graphify query "<question>"` first.
+12. **If you use graphify** (an optional code-graph tool), its
+    `graphify-out/` graph is gitignored: run `graphify update .` after changing code and
+    `graphify query "<question>"` for codebase questions. Nothing depends on it.
 
 13. **The search-grounded model estimate runs ONLY from the Re-rank button**
     (`modelRanker.estimateUnknown`). It spends the Gemini quota chat and phone tasks
@@ -117,8 +120,8 @@ These are the ones that get broken by well-meaning changes. Details in ARCHITECT
     Pooled providers stay out of the ranked ladder (tail fallbacks only). (§2)
 
 14. **`src-tauri/gen/android` is committed.** It carries `allowBackup="false"`, the
-    release cleartext rule (allowed, for `ws://` pairing over Tailscale) and signing. `tauri android init` overwrites it — diff
-    before committing. Keep `npm run lint` at 0 problems; a new `eslint-disable` needs a
+    release cleartext rule (allowed, for `ws://` pairing over Tailscale) and signing.
+    `tauri android init` overwrites it — diff before committing. Keep `npm run lint` at 0 problems; a new `eslint-disable` needs a
     reason next to it. (§9)
 
 ## Keeping the docs true
@@ -127,5 +130,6 @@ When a change makes one of the docs wrong, fix the doc in the same pass:
 
 - New subsystem, new bridge command, or a changed rule → `docs/ARCHITECTURE.md`
 - A feature verified on a device, or a new known gap → `docs/STATUS.md`
-- A security finding closed or introduced → `docs/SECURITY.md` *Current status*
+- A security finding closed or introduced → `docs/SECURITY.md` (the model at the top, and
+  *Current status* in the history)
 - Anything a newcomer needs in the first five minutes → `README.md`

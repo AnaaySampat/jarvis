@@ -1,6 +1,7 @@
 # Status
 
-Last reviewed: **2026-09-25** (routing regression fixed and live-verified; pre-publish audit).
+Last reviewed: **2026-09-25** (routing regression fixed and live-verified; Gemma reasoning
+hidden; voice capture ends on silence; release APK verified on a phone; published).
 
 This is the honest state of the app. It separates three different things, because
 conflating them is how you end up debugging something that was never tested:
@@ -11,17 +12,15 @@ conflating them is how you end up debugging something that was never tested:
 | 🟡 **Built** | In source, typecheck/lint/tests green, but no recorded on-device test |
 | ⬜ **Open** | Not done |
 
-Repo checks as of 2026-09-25: `npm test` **263 passed / 31 files**, JVM plugin tests 46
-passed, `npm run typecheck` clean, `npm run build` clean, and **`npm run lint` clean — 0
+Repo checks as of 2026-09-25: `npm test` **276 passed / 32 files** (also run by CI on
+every push), JVM plugin tests 46 passed, `npm run typecheck` clean, `npm run build` clean, and **`npm run lint` clean — 0
 problems** (was 59 errors / 26 warnings). Two suppressions remain, each with its reason in
 place: App.jsx's `uiCommand` effect (an event delivered as state by two transports) and
 useBrain's model-discovery effect (the rule can't see the setState is after an `await`).
-A debug APK and a release APK both exist in
-`src-tauri/gen/android/app/build/outputs/apk/universal/`.
-
-> **The debug APK was last rebuilt and installed on the real phone (Galaxy M15) on
-> 2026-09-25.** What that run confirmed is in *The 2026-09-25 rate-limit regression fix*
-> below. The release APK (2026-07-26) still predates all of this.
+> **Both APKs were rebuilt on 2026-09-25 and installed on the real phone (Galaxy M15,
+> Android 16).** The debug run is in *The 2026-09-25 rate-limit regression fix* below; the
+> release APK (33 MB, not debuggable, debug-key signed) booted clean with the wake word
+> listening. Voice and a phone task have not yet been run on the release build.
 
 ---
 
@@ -405,11 +404,13 @@ turn answered on its first route.
 
 ## Open items worth doing next
 
-0. **Before publishing:** choose a LICENSE, enable GitHub's private vulnerability
-   reporting (README points to it), then publish the single-commit snapshot.
+0. **Try the 2026-09-25 voice and Gemma changes by voice on the phone:** that commands end
+   ~1s after you stop talking, how often Whisper gets them right now, and that a Gemma
+   reply no longer includes its reasoning. Then decide on native command capture (the
+   wake-word handoff still clips the start of a command — see *Voice*).
 0a. **Finish the smart-routing check on the device.** Phone-side Gemini Omni is marked
    non-chat and chat turns are live-verified (2026-09-25); still to do: add the same
-   `^gemini-omni` row to the desktop's `llm/model_catalog.py`, open Settings ▸
+   `^gemini-omni` row to the desktop app's model catalog, open Settings ▸
    Routing on the phone (list populated, no Omni), and open MEMORY there (add + forget a
    fact).
 0b. **Watch one long phone task after the 09-25 routing fixes** — the verified runs were
@@ -424,7 +425,7 @@ turn answered on its first route.
    action. This is the biggest untested surface in the app.
 2. **Wake-word soak test.** Long session, real voice, app backgrounded.
 3. **A real release keystore**, then a signed APK installed on a clean phone with the
-   permissions checked one by one.
+   permissions checked one by one, and attached to a GitHub Release.
 4. **Icons and splash.**
 
 ---
