@@ -1,0 +1,41 @@
+{
+  "identifier": "default",
+  "description": "Default capability for JARVIS. windows includes a '*' wildcard so it binds on Android — Tauri-mobile's single WebView can report a label other than 'main', which would otherwise leave http permissions unbound and make every network call CORS-fail ('Failed to fetch'). The native device-control command set (phone:default) is NOT granted here — see phone-main-only.json — since overlay/browser-panel/control-overlay never call it and don't need it.",
+  "windows": ["main", "overlay", "browser-panel", "control-overlay", "*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-start-dragging",
+    "allow-jarvis-commands",
+    "biometric:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.open-meteo.com/*" },
+        { "url": "https://air-quality-api.open-meteo.com/*" },
+        { "url": "https://ipwho.is/*" },
+        { "url": "https://ipapi.co/*" },
+        { "url": "https://nominatim.openstreetmap.org/*" },
+        { "url": "https://router.project-osrm.org/*" },
+        { "url": "https://overpass-api.de/*" },
+        { "url": "https://maps.mail.ru/*" },
+        { "url": "https://news.google.com/*" },
+        { "url": "https://generativelanguage.googleapis.com/*" },
+        { "url": "https://api.groq.com/*" },
+        { "url": "https://openrouter.ai/*" },
+        { "url": "https://api.mistral.ai/*" },
+        { "url": "https://integrate.api.nvidia.com/*" },
+        { "url": "https://oauth2.googleapis.com/*" },
+        { "url": "https://aiplatform.googleapis.com/*" },
+        { "url": "https://*.aiplatform.googleapis.com/*" },
+        { "url": "https://*.speech.googleapis.com/*" },
+        { "url": "https://*.googleapis.com/*" }
+      ]
+    }
+  ]
+}

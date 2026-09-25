@@ -1,0 +1,40 @@
+# Android fork — regenerable / heavy artifacts (kept out so the fork stays small).
+# (No git repo is required here; this just documents what's safe to delete.)
+
+# Node / Vite
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Rust / Tauri
+**/target/
+# The generated Android project IS tracked: allowBackup=false, the release
+# no-cleartext split and signing live in its hand-edited files, and a fresh
+# `tauri android init` would silently drop them. Its own .gitignores skip build output.
+jarvis-studio-gui/src-tauri/gen/schemas/
+**/android/build/
+**/android/.tauri/
+**/.gradle/
+
+# Local-only, never published: the Python reference spec (held a live Spotify token)
+# and the graphify graph (absolute paths from the dev machine, ~50 MB).
+reference/
+graphify-out/
+
+# Logs & local
+*.log
+.DS_Store
+
+# Secrets — never commit keys / keystores
+*.keystore
+*.jks
+**/app_secrets_local.*
+keystore.properties
+local.properties
+.env
+.env.*
+*service-account*.json
+
+# Build output — regenerate with `npm run android:build[:debug]`
+*.apk
+*.aab

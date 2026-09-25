@@ -1,0 +1,8 @@
+dist
+node_modules
+src-tauri/target
+src-tauri/gen
+src-tauri/tauri-plugin-phone/target
+src-tauri/tauri-plugin-phone/android/build
+src-tauri/tauri-plugin-phone/android/.tauri
+package-lock.json

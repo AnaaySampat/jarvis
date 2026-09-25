@@ -1,0 +1,10 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "J.A.R.V.I.S"
+      }
+    ]
+  }
+}

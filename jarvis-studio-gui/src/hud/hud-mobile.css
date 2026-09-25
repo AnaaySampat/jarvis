@@ -1,0 +1,443 @@
+/* hud-mobile.css — ANDROID FORK reflow.
+   Turns the fixed 1442×902 desktop HUD (centred reactor + two absolute side-rails +
+   a bottom dock) into a single stacked, vertically-scrolling column that reads well
+   on a phone. Everything is scoped under `.hud-viewport--mobile`, which ViewportScale
+   adds only on a narrow / touch viewport — so the desktop layout is never affected. */
+
+.hud-viewport--mobile {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overscroll-behavior: contain;
+}
+
+/* The stage stops being a fixed scaled box and flows to full width. */
+.hud-viewport--mobile .hud-stage {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 100%;
+  transform: none !important;
+}
+
+/* The HUD becomes a stacked column instead of an absolute-positioned canvas. */
+.hud-viewport--mobile .hud {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  padding: calc(64px + env(safe-area-inset-top, 0px)) 12px
+    calc(172px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Drop the decorative frame + scanline on a phone — they assume a fixed-size box
+   and just add clutter / overflow on a tall scroll page. Keep the ambient glow. */
+.hud-viewport--mobile .hud-frame,
+.hud-viewport--mobile .hud-scanline {
+  display: none !important;
+}
+.hud-viewport--mobile .hud-grid-bg,
+.hud-viewport--mobile .hud-bg {
+  position: fixed;
+}
+
+/* ── Reactor core: from absolute-centred to in-flow at the top, shrunk to fit ── */
+.hud-viewport--mobile .hud-core-zone {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin: 6px auto 26px;
+  width: 100%;
+}
+.hud-viewport--mobile .core-readout {
+  position: relative !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin-top: 16px;
+  width: 100%;
+}
+
+/* ── Side rails: from absolute 330px columns to full-width stacked sections ── */
+.hud-viewport--mobile .hud-rail {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  overflow: visible !important;
+  gap: 14px;
+}
+.hud-viewport--mobile .hud-rail--right .clock,
+.hud-viewport--mobile .hud-rail--right .statp {
+  align-items: flex-start;
+}
+.hud-viewport--mobile .hud-rail [data-slot="schedule"] .cbox-body,
+.hud-viewport--mobile .hud-rail [data-slot="terminal"] .cbox-body {
+  max-height: none;
+}
+
+/* ── Bottom dock: sticky above the mic FAB so CONVERSATION is always reachable ── */
+.hud-viewport--mobile [data-slot="dock"] {
+  position: sticky !important;
+  left: auto !important;
+  bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important;
+  transform: none !important;
+  margin: 8px auto 12px;
+  z-index: 180;
+  width: calc(100% - 16px);
+  max-width: 520px;
+  background: color-mix(in oklab, var(--bg-0) 82%, transparent);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 8px 6px;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
+  overflow: visible;
+}
+.hud-viewport--mobile .dock {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.hud-viewport--mobile .dock-btn {
+  min-height: 44px;
+  padding: 8px 10px;
+}
+.hud-viewport--mobile .dock-btn--chat {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin-top: 4px;
+}
+.hud-viewport--mobile .dock-l {
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.hud-viewport--mobile .sys-mobile-note {
+  margin: 8px 0 0;
+  font-size: 10px;
+  opacity: 0.55;
+  line-height: 1.35;
+}
+
+/* ── Full-screen overlays: pin to the visible viewport, not the tall .hud canvas.
+   Without this, the conversation log (and other panels) stretch with the scroll
+   height of the stacked HUD and extend off-screen. ── */
+.hud-viewport--mobile .boot {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  z-index: 260 !important;
+}
+
+/* ── Top control bar: horizontal, wrapping bar pinned to the top of the screen. ── */
+@media (max-width: 640px), (pointer: coarse) {
+  .hud-fixed-controls {
+    position: fixed !important;
+    top: env(safe-area-inset-top, 0px);
+    left: 0;
+    right: 0;
+    flex-direction: row !important;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 8px 10px;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    background: color-mix(in oklab, var(--bg-0) 78%, transparent);
+    backdrop-filter: blur(6px);
+    z-index: 200;
+  }
+  .hud-fixed-controls::-webkit-scrollbar {
+    display: none;
+  }
+  .hud-fixed-btn {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+
+  .hud-top-stack,
+  .hud-warns {
+    left: 8px !important;
+    right: 8px !important;
+    top: calc(56px + env(safe-area-inset-top, 0px)) !important;
+    width: auto !important;
+    transform: none !important;
+  }
+
+  .perm-overlay {
+    padding: 16px;
+  }
+  .perm-dialog,
+  .onboard-panel,
+  .settings-panel {
+    max-height: calc(
+      100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+    );
+    overflow-y: auto;
+  }
+}
+
+/* ── Push-to-talk mic FAB (mobile only) ── */
+.mobile-mic {
+  position: fixed;
+  left: 50%;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  z-index: 210;
+  color: var(--bg-0, #02060a);
+  background: var(--ac, #00e5ff);
+  border: none;
+  box-shadow:
+    0 0 18px color-mix(in oklab, var(--ac) 60%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.2s ease;
+}
+.mobile-mic:active {
+  transform: translateX(-50%) scale(0.94);
+}
+.mobile-mic--busy {
+  opacity: 0.55;
+}
+.mobile-mic--listening {
+  background: #ff4d4f;
+  color: #fff;
+  animation: mic-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(255, 77, 79, 0.55),
+      0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 14px rgba(255, 77, 79, 0),
+      0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Lock page scroll while a full-screen HUD overlay is open. */
+html.app-mobile--overlay-open,
+html.app-mobile--overlay-open body {
+  overflow: hidden !important;
+  height: 100%;
+  touch-action: none;
+}
+html.app-mobile--overlay-open .hud-viewport--mobile {
+  overflow: hidden;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE TYPE SCALE + SPACING RHYTHM
+   ══════════════════════════════════════════════════════════════════════════
+   The HUD's typography was drawn for a 1442px stage, where 14px type on 4.5px
+   of tracking reads as a wide, deliberate display face. Reflowed into a ~360px
+   column the same absolute numbers are simply too loose — 4.5px between glyphs
+   is a third of the cap height, so words stop reading as words and the panel
+   header (title left, code right) reads as two unrelated fragments rather than
+   one line. 22 rules carry >=3px of it.
+
+   Fixing them one by one would drift again the next time one is added, so
+   tracking is re-expressed in `em` here: proportional to whatever size the
+   element ends up at, and consistent across the tiers by construction.
+   Scoped to .hud-viewport--mobile — the desktop stage keeps its own look. */
+.hud-viewport--mobile {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+}
+
+/* Tier 1 — hero numerals and wordmarks. */
+.hud-viewport--mobile .clock-hh {
+  font-size: 52px;
+  letter-spacing: 0.05em;
+}
+.hud-viewport--mobile .core-name,
+.hud-viewport--mobile .boot-name {
+  letter-spacing: 0.22em;
+}
+
+/* Tier 2 — panel and overlay titles. */
+.hud-viewport--mobile .cbox-title {
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+}
+.hud-viewport--mobile .ocrov-title {
+  letter-spacing: 0.16em;
+}
+
+/* Tier 3 — the small mono labels that carry most of the panel content. */
+.hud-viewport--mobile .cbox-code,
+.hud-viewport--mobile .clock-date,
+.hud-viewport--mobile .statp-label,
+.hud-viewport--mobile .core-sub,
+.hud-viewport--mobile .rg-label,
+.hud-viewport--mobile .mr-label,
+.hud-viewport--mobile .sb-label,
+.hud-viewport--mobile .sys-spark-lbl,
+.hud-viewport--mobile .wx-loc,
+.hud-viewport--mobile .wx-cond,
+.hud-viewport--mobile .ocrov-kicker {
+  letter-spacing: 0.13em;
+}
+.hud-viewport--mobile .cbox-code {
+  font-size: 10px;
+}
+.hud-viewport--mobile .clock-date {
+  font-size: 11px;
+}
+.hud-viewport--mobile .statp-label {
+  font-size: 12px;
+}
+
+/* ── Panel frame ──
+   3px borders and 3.5px corner ticks were drawn to survive the desktop stage's
+   downscale. At phone DPR nothing is downscaling them, so they render as heavy
+   toy-like outlines. Thinner frame, larger radius, tighter ticks. */
+.hud-viewport--mobile .cbox {
+  border-width: 1.5px;
+  border-radius: 14px;
+  padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  /* Each panel was its own backdrop-filter layer. Six of them stacked over a
+     position:fixed background means re-blurring the whole column on every scroll
+     frame — janky AND a real GPU cost, to blur a background that is near-solid
+     dark anyway. The gradient below carries the same depth for free. */
+  backdrop-filter: none;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--ac) 5%, transparent), transparent 60%),
+    rgba(7, 13, 21, 0.82);
+}
+.hud-viewport--mobile .cbox-c {
+  width: 9px;
+  height: 9px;
+  border-width: 2px;
+  opacity: 0.55;
+}
+.hud-viewport--mobile .cbox-hd {
+  margin-bottom: var(--sp-3);
+}
+.hud-viewport--mobile .cbox-body {
+  gap: var(--sp-3);
+}
+.hud-viewport--mobile .clock-ss {
+  border-width: 1.5px;
+  border-radius: 7px;
+}
+
+/* ── Spacing rhythm ──
+   Was 6 / 10 / 12 / 13 / 14 / 16px chosen ad hoc per component; one scale so
+   the stacked column has a readable vertical beat instead of near-misses. */
+.hud-viewport--mobile .hud {
+  gap: var(--sp-5);
+}
+.hud-viewport--mobile .hud-rail {
+  gap: var(--sp-4);
+}
+.hud-viewport--mobile .sys-grid {
+  gap: var(--sp-5);
+}
+.hud-viewport--mobile .sys-mini {
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.hud-viewport--mobile .statp {
+  gap: var(--sp-3);
+}
+.hud-viewport--mobile .clock {
+  gap: var(--sp-2);
+}
+
+/* ── Memory overlay: full-screen sheet; sections become a tab row ── */
+.hud-viewport--mobile .memx {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 260 !important;
+}
+.hud-viewport--mobile .memx-panel {
+  inset: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--ac);
+}
+.hud-viewport--mobile .memx-hd {
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px 10px;
+}
+.hud-viewport--mobile .memx-title {
+  font-size: 24px;
+}
+.hud-viewport--mobile .memx-tl {
+  padding: 0 16px 12px;
+}
+.hud-viewport--mobile .memx-body {
+  display: flex;
+  flex-direction: column;
+}
+.hud-viewport--mobile .memx-nav {
+  flex-direction: row;
+  padding: 10px 12px;
+  border-right: none;
+  border-bottom: 1px solid var(--line);
+}
+.hud-viewport--mobile .memx-navbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 8px;
+  font-size: 13px;
+  gap: 6px;
+}
+.hud-viewport--mobile .memx-navl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hud-viewport--mobile .memx-navnote {
+  display: none;
+}
+.hud-viewport--mobile .memx-main {
+  flex: 1;
+  padding: 16px 16px max(24px, env(safe-area-inset-bottom, 0px));
+}
+.hud-viewport--mobile .memx-row {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.hud-viewport--mobile .memx-text {
+  flex-basis: 100%;
+}
+/* No hover on touch: Forget must always be visible. */
+.hud-viewport--mobile .memx-forget {
+  opacity: 1;
+  min-height: 36px;
+}
+.hud-viewport--mobile .memx-open {
+  min-height: 36px;
+}

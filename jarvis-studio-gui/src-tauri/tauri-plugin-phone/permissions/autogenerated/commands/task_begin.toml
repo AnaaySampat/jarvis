@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-task-begin"
+description = "Enables the task_begin command without any pre-configured scope."
+commands.allow = ["task_begin"]
+
+[[permission]]
+identifier = "deny-task-begin"
+description = "Denies the task_begin command without any pre-configured scope."
+commands.deny = ["task_begin"]

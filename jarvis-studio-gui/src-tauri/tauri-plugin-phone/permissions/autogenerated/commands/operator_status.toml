@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-operator-status"
+description = "Enables the operator_status command without any pre-configured scope."
+commands.allow = ["operator_status"]
+
+[[permission]]
+identifier = "deny-operator-status"
+description = "Denies the operator_status command without any pre-configured scope."
+commands.deny = ["operator_status"]

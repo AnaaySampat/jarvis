@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-identity-verify-host-envelope"
+description = "Enables the identity_verify_host_envelope command without any pre-configured scope."
+commands.allow = ["identity_verify_host_envelope"]
+
+[[permission]]
+identifier = "deny-identity-verify-host-envelope"
+description = "Denies the identity_verify_host_envelope command without any pre-configured scope."
+commands.deny = ["identity_verify_host_envelope"]

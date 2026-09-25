@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-close-app"
+description = "Enables the close_app command without any pre-configured scope."
+commands.allow = ["close_app"]
+
+[[permission]]
+identifier = "deny-close-app"
+description = "Denies the close_app command without any pre-configured scope."
+commands.deny = ["close_app"]

@@ -1,0 +1,17 @@
+[package]
+name = "tauri-plugin-phone"
+version = "0.1.0"
+description = "On-phone app control for JARVIS via Android's AccessibilityService."
+edition = "2021"
+# Required for Tauri mobile plugins: the build script emits a link directive Tauri
+# uses to locate the plugin's native (android/) project at app-build time.
+links = "tauri-plugin-phone"
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

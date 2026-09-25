@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-identity-sign-envelope"
+description = "Enables the identity_sign_envelope command without any pre-configured scope."
+commands.allow = ["identity_sign_envelope"]
+
+[[permission]]
+identifier = "deny-identity-sign-envelope"
+description = "Denies the identity_sign_envelope command without any pre-configured scope."
+commands.deny = ["identity_sign_envelope"]

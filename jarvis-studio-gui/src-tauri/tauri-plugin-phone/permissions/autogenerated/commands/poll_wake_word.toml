@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-poll-wake-word"
+description = "Enables the poll_wake_word command without any pre-configured scope."
+commands.allow = ["poll_wake_word"]
+
+[[permission]]
+identifier = "deny-poll-wake-word"
+description = "Denies the poll_wake_word command without any pre-configured scope."
+commands.deny = ["poll_wake_word"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-open-system-settings"
+description = "Enables the open_system_settings command without any pre-configured scope."
+commands.allow = ["open_system_settings"]
+
+[[permission]]
+identifier = "deny-open-system-settings"
+description = "Denies the open_system_settings command without any pre-configured scope."
+commands.deny = ["open_system_settings"]

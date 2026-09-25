@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-home"
+description = "Enables the home command without any pre-configured scope."
+commands.allow = ["home"]
+
+[[permission]]
+identifier = "deny-home"
+description = "Denies the home command without any pre-configured scope."
+commands.deny = ["home"]

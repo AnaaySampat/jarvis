@@ -1,0 +1,491 @@
+.pill-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.pill {
+  --pill-rgb: 0, 229, 255;
+  --pill-accent: rgb(var(--pill-rgb));
+  position: relative;
+  /* Keep the design at its natural 120px proportions, then scale the WHOLE pill
+     down uniformly with zoom so every label/position/font shrinks together.
+     (Shrinking width alone left the fixed-px text at full size → jumbled.) */
+  width: 120px;
+  zoom: 0.8;
+  aspect-ratio: 877 / 284;
+  color: var(--pill-accent);
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translateZ(0);
+  filter: drop-shadow(0 9px 16px rgba(0, 0, 0, 0.66))
+    drop-shadow(0 0 10px rgba(var(--pill-rgb), 0.32));
+  transition:
+    transform 0.14s ease,
+    filter 0.14s ease;
+}
+
+.pill:hover {
+  transform: translateY(-1px);
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.72))
+    drop-shadow(0 0 15px rgba(var(--pill-rgb), 0.44));
+}
+
+.pill.is-busy {
+  cursor: default;
+}
+
+.pill-face {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  isolation: isolate;
+  background:
+    radial-gradient(70% 90% at 50% 48%, rgba(var(--pill-rgb), 0.2), transparent 70%),
+    linear-gradient(180deg, rgba(28, 42, 48, 0.94), rgba(3, 8, 13, 0.98));
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--pill-rgb), 0.44),
+    inset 0 0 0 4px rgba(255, 255, 255, 0.07),
+    inset 0 0 18px rgba(var(--pill-rgb), 0.18),
+    inset 0 -9px 17px rgba(0, 0, 0, 0.7);
+}
+
+.pill-face::before,
+.pill-face::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.pill-face::before {
+  inset: 6px;
+  z-index: 1;
+  border: 1px solid rgba(var(--pill-rgb), 0.42);
+  box-shadow:
+    inset 0 0 12px rgba(var(--pill-rgb), 0.16),
+    0 0 10px rgba(var(--pill-rgb), 0.22);
+}
+
+.pill-face::after {
+  inset: 2px;
+  z-index: 4;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.22),
+      rgba(255, 255, 255, 0.04) 20%,
+      transparent 46%
+    ),
+    radial-gradient(82% 28% at 50% 6%, rgba(255, 255, 255, 0.16), transparent 72%);
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+.pill-carbon {
+  position: absolute;
+  inset: 13% 11%;
+  z-index: 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 25%, rgba(0, 0, 0, 0.42)),
+    repeating-linear-gradient(35deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(125deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 5px), #061016;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 0 20px rgba(0, 0, 0, 0.9);
+}
+
+.pill-glass {
+  position: absolute;
+  inset: 21% 14%;
+  z-index: 1;
+  border-radius: 999px;
+  background:
+    radial-gradient(46% 46% at 50% 50%, rgba(var(--pill-rgb), 0.16), transparent 74%),
+    linear-gradient(90deg, transparent, rgba(var(--pill-rgb), 0.12), transparent);
+  mix-blend-mode: screen;
+  opacity: 0.78;
+  pointer-events: none; /* decorative — never intercept clicks to the buttons */
+}
+
+.pill.is-busy .pill-glass {
+  animation: pill-core-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes pill-core-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scaleX(0.96);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scaleX(1.02);
+  }
+}
+
+.pill-circuit {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  color: var(--pill-accent);
+  pointer-events: none;
+}
+
+.pill-capsule-outline {
+  fill: none;
+  stroke: currentColor;
+  vector-effect: non-scaling-stroke;
+}
+
+.pill-capsule-outline--wide {
+  stroke-width: 2.4;
+  opacity: 0.42;
+  filter: url("#pillCircuitGlow");
+}
+
+.pill-capsule-outline--tight {
+  stroke-width: 1.2;
+  opacity: 0.28;
+}
+
+.pill-trace path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.66;
+  filter: url("#pillCircuitGlow");
+  vector-effect: non-scaling-stroke;
+}
+
+.pill-trace--side path {
+  opacity: 0.76;
+}
+
+.pill-nodes circle {
+  fill: currentColor;
+  opacity: 0.84;
+  filter: url("#pillCircuitGlow");
+}
+
+.pill-brand {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  font-family: "Orbitron", "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 1.1px;
+  line-height: 1;
+  color: rgba(224, 255, 255, 0.9);
+  -webkit-text-stroke: 0.8px var(--pill-accent);
+  text-shadow:
+    0 0 4px rgba(var(--pill-rgb), 0.9),
+    0 0 11px rgba(var(--pill-rgb), 0.82),
+    0 0 24px rgba(var(--pill-rgb), 0.55);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pill-state {
+  position: absolute;
+  left: 50%;
+  bottom: 27%;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(2, 15, 22, 0.5), transparent);
+  color: rgba(219, 253, 255, 0.95);
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 5px;
+  letter-spacing: 1.4px;
+  line-height: 1;
+  text-shadow:
+    0 0 4px rgba(var(--pill-rgb), 0.85),
+    0 0 9px rgba(var(--pill-rgb), 0.45);
+  white-space: nowrap;
+}
+
+.pill.is-busy .pill-state {
+  top: 31%;
+  bottom: auto;
+}
+
+.pill-state-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pill-accent);
+  box-shadow:
+    0 0 6px var(--pill-accent),
+    0 0 11px var(--pill-accent);
+}
+
+.pill.is-busy .pill-state-dot {
+  animation: pill-dot-pulse 850ms ease-in-out infinite;
+}
+
+@keyframes pill-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.16);
+  }
+}
+
+.pill-wave {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  z-index: 5;
+  width: 62px;
+  height: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+.pill.is-busy > .pill-face > .pill-wave {
+  top: 57%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+}
+
+.pill-bar {
+  width: 2px;
+  min-height: 2px;
+  border-radius: 999px;
+  background: var(--pill-accent);
+  box-shadow: 0 0 6px var(--pill-accent);
+  animation: pill-wave 720ms ease-in-out infinite;
+}
+
+.pill--thinking .pill-bar {
+  animation-duration: 1040ms;
+}
+
+.pill--speaking .pill-bar {
+  animation-duration: 520ms;
+}
+
+/* Autopilot at work (silent browser/desktop task) — green, steady cadence. */
+.pill--working {
+  --pill-rgb: 34, 227, 154;
+}
+.pill--working .pill-bar {
+  animation-duration: 800ms;
+}
+
+@keyframes pill-wave {
+  0%,
+  100% {
+    height: 3px;
+    opacity: 0.34;
+  }
+  50% {
+    height: 11px;
+    opacity: 1;
+  }
+}
+
+.pill-listen-controls {
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  bottom: auto;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transform: translate(-50%, -50%);
+}
+
+.pill-listen-controls .pill-wave {
+  position: static;
+  transform: none;
+}
+
+.pill-action {
+  position: relative;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 19px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--pill-rgb), 0.62);
+  background: rgba(2, 8, 14, 0.62);
+  color: var(--pill-accent);
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow:
+    0 0 8px rgba(var(--pill-rgb), 0.32),
+    inset 0 0 8px rgba(var(--pill-rgb), 0.12);
+}
+
+button.pill-action {
+  cursor: pointer;
+}
+
+.pill-action--cancel {
+  border-color: rgba(var(--pill-rgb), 0.62);
+  color: rgba(219, 253, 255, 0.92);
+}
+
+.pill-action--cancel:hover {
+  background: rgba(var(--pill-rgb), 0.18);
+  color: #fff;
+  box-shadow:
+    0 0 10px rgba(var(--pill-rgb), 0.42),
+    inset 0 0 8px rgba(var(--pill-rgb), 0.16);
+}
+
+.pill-action--ok::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid var(--pill-accent);
+  border-bottom: 2px solid var(--pill-accent);
+  transform: translateY(-1px) rotate(-45deg);
+  filter: drop-shadow(0 0 5px var(--pill-accent));
+}
+
+.pill-stop {
+  position: absolute;
+  top: 50%;
+  right: 12%;
+  z-index: 6;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  border: 1px solid rgba(var(--pill-rgb), 0.62);
+  background: rgba(2, 8, 14, 0.58);
+  color: rgba(219, 253, 255, 0.92);
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    0 0 8px rgba(var(--pill-rgb), 0.3),
+    inset 0 0 8px rgba(var(--pill-rgb), 0.12);
+  backdrop-filter: blur(4px);
+}
+
+.pill-stop:hover {
+  background: rgba(var(--pill-rgb), 0.18);
+  color: #fff;
+}
+
+/* ── Floating Approve/Deny card (permission requests shown on ANY app) ────── */
+.perm-card {
+  --pill-rgb: 0, 229, 255;
+  --pill-accent: rgb(var(--pill-rgb));
+  pointer-events: auto;
+  width: 336px;
+  padding: 10px 14px 12px;
+  border-radius: 14px;
+  color: var(--pill-accent);
+  font-family: "Share Tech Mono", "Consolas", monospace;
+  background:
+    radial-gradient(80% 100% at 50% 0%, rgba(var(--pill-rgb), 0.16), transparent 70%),
+    linear-gradient(180deg, rgba(24, 36, 42, 0.97), rgba(3, 8, 13, 0.99));
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--pill-rgb), 0.5),
+    inset 0 0 14px rgba(var(--pill-rgb), 0.14),
+    0 10px 22px rgba(0, 0, 0, 0.7),
+    0 0 14px rgba(var(--pill-rgb), 0.3);
+}
+
+.perm-card-kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+  margin-bottom: 5px;
+}
+
+.perm-card-desc {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #e8f4ff;
+  margin-bottom: 9px;
+  max-height: 36px;
+  overflow: hidden;
+}
+
+.perm-card-desc strong {
+  color: var(--pill-accent);
+}
+
+.perm-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.perm-card-btn {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  padding: 5px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease;
+}
+
+.perm-card-btn:hover {
+  transform: translateY(-1px);
+}
+
+.perm-card-btn--approve {
+  color: #06140f;
+  background: #22e39a;
+  border: 1px solid #22e39a;
+  font-weight: 700;
+}
+
+.perm-card-btn--approve:hover {
+  background: #45f0b0;
+}
+
+.perm-card-btn--deny {
+  color: #ff8a91;
+  border: 1px solid rgba(255, 77, 87, 0.6);
+}
+
+.perm-card-btn--deny:hover {
+  background: rgba(255, 77, 87, 0.16);
+}

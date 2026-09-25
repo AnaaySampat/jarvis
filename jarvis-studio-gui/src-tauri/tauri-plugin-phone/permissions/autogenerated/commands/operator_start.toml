@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-operator-start"
+description = "Enables the operator_start command without any pre-configured scope."
+commands.allow = ["operator_start"]
+
+[[permission]]
+identifier = "deny-operator-start"
+description = "Denies the operator_start command without any pre-configured scope."
+commands.deny = ["operator_start"]

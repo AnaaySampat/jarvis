@@ -1,0 +1,8 @@
+node_modules/
+dist/
+src-tauri/target/
+vite-dev*.log
+vite-dev*.out.log
+vite-dev*.err.log
+jarvis-overlay*.png
+jarvis-home-screen*.png

@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Desktop-only permissions (the global Ctrl+Space push-to-talk shortcut). Scoped to desktop platforms so the Android build doesn't require the desktop-only global-shortcut plugin.",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": ["global-shortcut:default"]
+}

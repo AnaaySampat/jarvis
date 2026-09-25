@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">Lets JARVIS read the screen and tap, type, and scroll to carry out tasks you ask it to do in your apps.</string>
+</resources>

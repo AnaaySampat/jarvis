@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-jarvis-commands"
+description = "JARVIS backend coordination commands"
+commands.allow = ["get_ws_token"]

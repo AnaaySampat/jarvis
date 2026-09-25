@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-identity-info"
+description = "Enables the identity_info command without any pre-configured scope."
+commands.allow = ["identity_info"]
+
+[[permission]]
+identifier = "deny-identity-info"
+description = "Denies the identity_info command without any pre-configured scope."
+commands.deny = ["identity_info"]

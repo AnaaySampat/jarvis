@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Alarms and timers are set in the user's REAL Clock app via the public
+         android.provider.AlarmClock intents (PhonePlugin.clockAction), never as an
+         in-app AlarmManager alarm — so they show up where the user expects them,
+         are editable by hand, and survive a reboot. This is a normal permission
+         (auto-granted), but SET_ALARM/SET_TIMER with EXTRA_SKIP_UI need it declared
+         or the Clock app refuses the request. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <!-- Agenda items are mirrored into the user's real calendar via CalendarContract
+         (PhonePlugin.calendarAction), so they show up in Google Calendar and sync to
+         their other devices instead of living only inside JARVIS. Both are runtime
+         permissions, requested on first use; if the user declines, the code falls
+         back to an ACTION_INSERT picker that needs no permission at all. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- WakeWordService (see PhonePlugin.startWakeWord) — a foreground service is the
+         ONLY way Android lets an app keep using the microphone once it's no longer in
+         the foreground; without these, wake-word listening dies the instant the screen
+         locks or the app is backgrounded. FOREGROUND_SERVICE_MICROPHONE is REQUIRED
+         (not just recommended) on Android 14+ for a service that declares the
+         "microphone" foregroundServiceType, or startForeground() throws. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Instant beep + haptic buzz the moment "Hey Jarvis" is detected (see
+         WakeWordService.playWakeCue) — a normal permission, auto-granted, but still
+         requires this manifest declaration or Vibrator calls silently no-op. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application>
+        <!-- The JARVIS accessibility service. Enabled by the user in Settings ▸
+             Accessibility (it cannot be granted programmatically). The manifest
+             merger folds this into the app's final manifest. -->
+        <service
+            android:name="com.jarvis.phone.JarvisAccessibilityService"
+            android:exported="false"
+            android:label="JARVIS"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Keeps "Hey Jarvis" listening while backgrounded/screen-locked. Shows an
+             ongoing notification while active — required by Android, not optional. -->
+        <service
+            android:name="com.jarvis.phone.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Native task identity/checkpoints and an always-visible emergency STOP.
+             It never bypasses the keyguard or blindly repeats an uncertain action. -->
+        <service
+            android:name="com.jarvis.phone.AutonomySupervisorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-requested accessibility automation with persistent Pause and Stop controls" />
+        </service>
+
+        <receiver
+            android:name="com.jarvis.phone.AutonomyBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

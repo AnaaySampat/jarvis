@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-back"
+description = "Enables the back command without any pre-configured scope."
+commands.allow = ["back"]
+
+[[permission]]
+identifier = "deny-back"
+description = "Denies the back command without any pre-configured scope."
+commands.deny = ["back"]

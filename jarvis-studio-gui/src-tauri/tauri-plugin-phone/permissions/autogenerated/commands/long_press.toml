@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-long-press"
+description = "Enables the long_press command without any pre-configured scope."
+commands.allow = ["long_press"]
+
+[[permission]]
+identifier = "deny-long-press"
+description = "Denies the long_press command without any pre-configured scope."
+commands.deny = ["long_press"]

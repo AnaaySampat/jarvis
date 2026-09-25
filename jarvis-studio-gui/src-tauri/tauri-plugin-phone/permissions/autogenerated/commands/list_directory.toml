@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-list-directory"
+description = "Enables the list_directory command without any pre-configured scope."
+commands.allow = ["list_directory"]
+
+[[permission]]
+identifier = "deny-list-directory"
+description = "Denies the list_directory command without any pre-configured scope."
+commands.deny = ["list_directory"]

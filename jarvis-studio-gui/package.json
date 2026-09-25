@@ -1,0 +1,50 @@
+{
+  "name": "jarvis-studio-gui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "icons": "node setup-icons.js",
+    "tauri:build": "npm run icons && tauri build",
+    "android:build": "tauri android build --apk",
+    "android:build:debug": "tauri android build --debug --apk",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/orbitron": "^5.2.8",
+    "@fontsource/share-tech-mono": "^5.2.7",
+    "@tauri-apps/api": "~2.10.1",
+    "@tauri-apps/plugin-biometric": "^2.3.2",
+    "@tauri-apps/plugin-http": "^2.5.9",
+    "jsqr": "^1.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.4",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.62.1",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.9"
+  }
+}

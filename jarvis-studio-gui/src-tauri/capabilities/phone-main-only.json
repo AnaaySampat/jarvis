@@ -1,0 +1,6 @@
+{
+  "identifier": "phone-main-only",
+  "description": "Native on-phone device-control commands (tap/type/scroll/read-file/clock-action/etc.) — scoped to the main window only. overlay/browser-panel/control-overlay never invoke phone:* commands and don't need them; '*' covers Android's single WebView, which may report a window label other than 'main'.",
+  "windows": ["main", "*"],
+  "permissions": ["phone:default"]
+}

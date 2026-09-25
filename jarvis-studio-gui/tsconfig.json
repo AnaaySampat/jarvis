@@ -1,0 +1,21 @@
+{
+  "//": "Added for the Android fork's TypeScript brain (src/brain/). The rest of the",
+  "//2": "app is still .jsx; Vite transpiles both. `npm run typecheck` checks the brain.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src/brain"]
+}

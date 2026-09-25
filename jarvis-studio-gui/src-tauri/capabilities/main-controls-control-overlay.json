@@ -1,0 +1,29 @@
+{
+  "identifier": "main-controls-control-overlay",
+  "description": "Let the main HUD show and position the JARVIS-controlling overlay",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": [
+    "core:webview:allow-get-all-webviews",
+    {
+      "identifier": "core:window:allow-show",
+      "allow": [{ "windows": ["control-overlay"] }]
+    },
+    {
+      "identifier": "core:window:allow-hide",
+      "allow": [{ "windows": ["control-overlay"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-position",
+      "allow": [{ "windows": ["control-overlay"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-size",
+      "allow": [{ "windows": ["control-overlay"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-always-on-top",
+      "allow": [{ "windows": ["control-overlay"] }]
+    }
+  ]
+}

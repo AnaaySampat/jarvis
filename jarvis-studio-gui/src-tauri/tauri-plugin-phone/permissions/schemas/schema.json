@@ -1,0 +1,930 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionFile",
+  "description": "Permission file that can define a default permission, a set of permissions or a list of inlined permissions.",
+  "type": "object",
+  "properties": {
+    "default": {
+      "description": "The default permission set for the plugin",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultPermission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set": {
+      "description": "A list of permissions sets defined",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PermissionSet"
+      }
+    },
+    "permission": {
+      "description": "A list of inlined permissions",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Permission"
+      }
+    }
+  },
+  "definitions": {
+    "DefaultPermission": {
+      "description": "The default permission set of the plugin.\n\nWorks similarly to a permission with the \"default\" identifier.",
+      "type": "object",
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionSet": {
+      "description": "A set of direct permissions grouped together under a new name.",
+      "type": "object",
+      "required": [
+        "description",
+        "identifier",
+        "permissions"
+      ],
+      "properties": {
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does.",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionKind"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "Descriptions of explicit privileges of commands.\n\nIt can enable commands to be accessible in the frontend of the application.\n\nIf the scope is defined it can be used to fine grain control the access of individual or multiple commands.",
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "description": "Allowed or denied commands when using this permission.",
+          "default": {
+            "allow": [],
+            "deny": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commands"
+            }
+          ]
+        },
+        "scope": {
+          "description": "Allowed or denied scoped when using this permission.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Scopes"
+            }
+          ]
+        },
+        "platforms": {
+          "description": "Target platforms this permission applies. By default all platforms are affected by this permission.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Target"
+          }
+        }
+      }
+    },
+    "Commands": {
+      "description": "Allowed and denied commands inside a permission.\n\nIf two commands clash inside of `allow` and `deny`, it should be denied by default.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Allowed command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Denied command, which takes priority.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Scopes": {
+      "description": "An argument for fine grained behavior control of Tauri commands.\n\nIt can be of any serde serializable type and is used to allow or prevent certain actions inside a Tauri command. The configured scope is passed to the command and will be enforced by the command implementation.\n\n## Example\n\n```json { \"allow\": [{ \"path\": \"$HOME/**\" }], \"deny\": [{ \"path\": \"$HOME/secret.txt\" }] } ```",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Data that defines what is allowed by the scope.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        "deny": {
+          "description": "Data that defines what is denied by the scope. This should be prioritized by validation logic.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      }
+    },
+    "Value": {
+      "description": "All supported ACL values.",
+      "anyOf": [
+        {
+          "description": "Represents a null JSON value.",
+          "type": "null"
+        },
+        {
+          "description": "Represents a [`bool`].",
+          "type": "boolean"
+        },
+        {
+          "description": "Represents a valid ACL [`Number`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        {
+          "description": "Represents a [`String`].",
+          "type": "string"
+        },
+        {
+          "description": "Represents a list of other [`Value`]s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        {
+          "description": "Represents a map of [`String`] keys to [`Value`]s.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      ]
+    },
+    "Number": {
+      "description": "A valid ACL number.",
+      "anyOf": [
+        {
+          "description": "Represents an [`i64`].",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "Represents a [`f64`].",
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "Target": {
+      "description": "Platform target.",
+      "oneOf": [
+        {
+          "description": "MacOS.",
+          "type": "string",
+          "enum": [
+            "macOS"
+          ]
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "enum": [
+            "windows"
+          ]
+        },
+        {
+          "description": "Linux.",
+          "type": "string",
+          "enum": [
+            "linux"
+          ]
+        },
+        {
+          "description": "Android.",
+          "type": "string",
+          "enum": [
+            "android"
+          ]
+        },
+        {
+          "description": "iOS.",
+          "type": "string",
+          "enum": [
+            "iOS"
+          ]
+        }
+      ]
+    },
+    "PermissionKind": {
+      "type": "string",
+      "oneOf": [
+        {
+          "description": "Enables the back command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-back",
+          "markdownDescription": "Enables the back command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the back command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-back",
+          "markdownDescription": "Denies the back command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the calendar_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-calendar-action",
+          "markdownDescription": "Enables the calendar_action command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the calendar_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-calendar-action",
+          "markdownDescription": "Denies the calendar_action command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the capture_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-capture-screenshot",
+          "markdownDescription": "Enables the capture_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the capture_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-capture-screenshot",
+          "markdownDescription": "Denies the capture_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clock_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clock-action",
+          "markdownDescription": "Enables the clock_action command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clock_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clock-action",
+          "markdownDescription": "Denies the clock_action command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the close_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-close-app",
+          "markdownDescription": "Enables the close_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the close_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-close-app",
+          "markdownDescription": "Denies the close_app command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the config_secret_delete command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-config-secret-delete",
+          "markdownDescription": "Enables the config_secret_delete command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the config_secret_delete command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-config-secret-delete",
+          "markdownDescription": "Denies the config_secret_delete command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the config_secret_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-config-secret-get",
+          "markdownDescription": "Enables the config_secret_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the config_secret_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-config-secret-get",
+          "markdownDescription": "Denies the config_secret_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the config_secret_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-config-secret-set",
+          "markdownDescription": "Enables the config_secret_set command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the config_secret_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-config-secret-set",
+          "markdownDescription": "Denies the config_secret_set command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the double_tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-double-tap",
+          "markdownDescription": "Enables the double_tap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the double_tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-double-tap",
+          "markdownDescription": "Denies the double_tap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_device_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-device-stats",
+          "markdownDescription": "Enables the get_device_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_device_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-device-stats",
+          "markdownDescription": "Denies the get_device_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the hide_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-hide-stop-overlay",
+          "markdownDescription": "Enables the hide_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the hide_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-hide-stop-overlay",
+          "markdownDescription": "Denies the hide_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the home command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-home",
+          "markdownDescription": "Enables the home command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the home command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-home",
+          "markdownDescription": "Denies the home command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-info",
+          "markdownDescription": "Enables the identity_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-info",
+          "markdownDescription": "Denies the identity_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_sign_auth command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-sign-auth",
+          "markdownDescription": "Enables the identity_sign_auth command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_sign_auth command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-sign-auth",
+          "markdownDescription": "Denies the identity_sign_auth command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_sign_envelope command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-sign-envelope",
+          "markdownDescription": "Enables the identity_sign_envelope command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_sign_envelope command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-sign-envelope",
+          "markdownDescription": "Denies the identity_sign_envelope command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_sign_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-sign-pairing",
+          "markdownDescription": "Enables the identity_sign_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_sign_pairing command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-sign-pairing",
+          "markdownDescription": "Denies the identity_sign_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_verify_host_challenge command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-verify-host-challenge",
+          "markdownDescription": "Enables the identity_verify_host_challenge command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_verify_host_challenge command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-verify-host-challenge",
+          "markdownDescription": "Denies the identity_verify_host_challenge command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the identity_verify_host_envelope command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-identity-verify-host-envelope",
+          "markdownDescription": "Enables the identity_verify_host_envelope command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the identity_verify_host_envelope command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-identity-verify-host-envelope",
+          "markdownDescription": "Denies the identity_verify_host_envelope command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-enabled",
+          "markdownDescription": "Enables the is_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-enabled",
+          "markdownDescription": "Denies the is_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-directory",
+          "markdownDescription": "Enables the list_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-directory",
+          "markdownDescription": "Denies the list_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the long_press command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-long-press",
+          "markdownDescription": "Enables the long_press command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the long_press command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-long-press",
+          "markdownDescription": "Denies the long_press command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the observe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-observe",
+          "markdownDescription": "Enables the observe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the observe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-observe",
+          "markdownDescription": "Denies the observe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_accessibility_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-accessibility-settings",
+          "markdownDescription": "Enables the open_accessibility_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_accessibility_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-accessibility-settings",
+          "markdownDescription": "Denies the open_accessibility_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-app",
+          "markdownDescription": "Enables the open_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-app",
+          "markdownDescription": "Denies the open_app command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_system_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-system-settings",
+          "markdownDescription": "Enables the open_system_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_system_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-system-settings",
+          "markdownDescription": "Denies the open_system_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-url",
+          "markdownDescription": "Enables the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-url",
+          "markdownDescription": "Denies the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the operator_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-operator-start",
+          "markdownDescription": "Enables the operator_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the operator_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-operator-start",
+          "markdownDescription": "Denies the operator_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the operator_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-operator-status",
+          "markdownDescription": "Enables the operator_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the operator_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-operator-status",
+          "markdownDescription": "Denies the operator_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-folder",
+          "markdownDescription": "Enables the pick_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-folder",
+          "markdownDescription": "Denies the pick_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the poll_speaking command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-poll-speaking",
+          "markdownDescription": "Enables the poll_speaking command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the poll_speaking command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-poll-speaking",
+          "markdownDescription": "Denies the poll_speaking command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the poll_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-poll-stop-overlay",
+          "markdownDescription": "Enables the poll_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the poll_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-poll-stop-overlay",
+          "markdownDescription": "Denies the poll_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the poll_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-poll-wake-word",
+          "markdownDescription": "Enables the poll_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the poll_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-poll-wake-word",
+          "markdownDescription": "Denies the poll_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_clipboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-clipboard",
+          "markdownDescription": "Enables the read_clipboard command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_clipboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-clipboard",
+          "markdownDescription": "Denies the read_clipboard command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-file",
+          "markdownDescription": "Enables the read_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-file",
+          "markdownDescription": "Denies the read_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_overlay_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-overlay-permission",
+          "markdownDescription": "Enables the request_overlay_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_overlay_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-overlay-permission",
+          "markdownDescription": "Denies the request_overlay_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the scroll command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-scroll",
+          "markdownDescription": "Enables the scroll command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the scroll command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-scroll",
+          "markdownDescription": "Denies the scroll command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-text",
+          "markdownDescription": "Enables the set_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-text",
+          "markdownDescription": "Denies the set_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-volume",
+          "markdownDescription": "Enables the set_volume command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-volume",
+          "markdownDescription": "Denies the set_volume command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-stop-overlay",
+          "markdownDescription": "Enables the show_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_stop_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-stop-overlay",
+          "markdownDescription": "Denies the show_stop_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speak command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-speak",
+          "markdownDescription": "Enables the speak command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speak command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-speak",
+          "markdownDescription": "Denies the speak command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-wake-word",
+          "markdownDescription": "Enables the start_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-wake-word",
+          "markdownDescription": "Denies the start_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_speaking command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-speaking",
+          "markdownDescription": "Enables the stop_speaking command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_speaking command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-speaking",
+          "markdownDescription": "Denies the stop_speaking command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-wake-word",
+          "markdownDescription": "Enables the stop_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_wake_word command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-wake-word",
+          "markdownDescription": "Denies the stop_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the swipe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-swipe",
+          "markdownDescription": "Enables the swipe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the swipe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-swipe",
+          "markdownDescription": "Denies the swipe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tap",
+          "markdownDescription": "Enables the tap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tap",
+          "markdownDescription": "Denies the tap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tap_xy command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tap-xy",
+          "markdownDescription": "Enables the tap_xy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tap_xy command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tap-xy",
+          "markdownDescription": "Denies the tap_xy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_begin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-begin",
+          "markdownDescription": "Enables the task_begin command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_begin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-begin",
+          "markdownDescription": "Denies the task_begin command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-cancel",
+          "markdownDescription": "Enables the task_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-cancel",
+          "markdownDescription": "Denies the task_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_checkpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-checkpoint",
+          "markdownDescription": "Enables the task_checkpoint command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_checkpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-checkpoint",
+          "markdownDescription": "Denies the task_checkpoint command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_finish command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-finish",
+          "markdownDescription": "Enables the task_finish command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_finish command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-finish",
+          "markdownDescription": "Denies the task_finish command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-status",
+          "markdownDescription": "Enables the task_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-status",
+          "markdownDescription": "Denies the task_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the type_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-type-text",
+          "markdownDescription": "Enables the type_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the type_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-type-text",
+          "markdownDescription": "Denies the type_text command without any pre-configured scope."
+        },
+        {
+          "description": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`",
+          "type": "string",
+          "const": "default",
+          "markdownDescription": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "identifier": "main-controls-browser-panel",
+  "description": "Let the main HUD show and position the browser companion panel",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": [
+    "core:webview:allow-get-all-webviews",
+    {
+      "identifier": "core:window:allow-show",
+      "allow": [{ "windows": ["browser-panel"] }]
+    },
+    {
+      "identifier": "core:window:allow-hide",
+      "allow": [{ "windows": ["browser-panel"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-position",
+      "allow": [{ "windows": ["browser-panel"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-size",
+      "allow": [{ "windows": ["browser-panel"] }]
+    },
+    {
+      "identifier": "core:window:allow-set-always-on-top",
+      "allow": [{ "windows": ["browser-panel"] }]
+    }
+  ]
+}

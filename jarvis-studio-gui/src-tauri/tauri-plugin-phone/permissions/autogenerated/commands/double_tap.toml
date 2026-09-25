@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-double-tap"
+description = "Enables the double_tap command without any pre-configured scope."
+commands.allow = ["double_tap"]
+
+[[permission]]
+identifier = "deny-double-tap"
+description = "Denies the double_tap command without any pre-configured scope."
+commands.deny = ["double_tap"]

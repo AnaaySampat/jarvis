@@ -1,0 +1,215 @@
+/* layouts.css — positions every [data-slot] for each direction.
+   Stage is 1440×900. The core is centred; panels ring it. Every slot is
+   explicitly placed in every layout (unplaced absolute panels would pile at 0,0). */
+
+/* shared: panel widths can be overridden per layout */
+.hud [data-slot] {
+  /* base */
+}
+
+/* ════════════════════════ ① REACTOR CORE — rails + dock ════════════════════════ */
+.hud--reactor [data-slot="core"] {
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+}
+
+/* Side rails are vertical flex columns: collapsing a panel reflows the rest up,
+   freeing space for new panels. They scroll if the expanded content overflows. */
+.hud-rail {
+  position: absolute;
+  top: 40px;
+  bottom: 96px;
+  width: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 6;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 6px;
+}
+.hud-rail--left {
+  left: 44px;
+}
+/* Start the right rail below the window-fixed top-right control buttons so the
+   StatusPanel doesn't sit under them. */
+.hud-rail--right {
+  right: 44px;
+  top: 72px;
+}
+.hud-rail::-webkit-scrollbar {
+  width: 6px;
+}
+.hud-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hud-rail::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--ac) 32%, transparent);
+  border-radius: 5px;
+}
+.hud-rail--right .clock,
+.hud-rail--right .statp {
+  align-items: flex-end;
+}
+/* In a rail the panels flow (collapsing reflows the stack) instead of being
+   absolutely pinned to a slot. */
+.hud-rail .cbox {
+  position: relative;
+  width: 100%;
+  flex: 0 0 auto;
+}
+.hud-rail .clock,
+.hud-rail .statp {
+  position: relative;
+  flex: 0 0 auto;
+}
+/* the agenda/terminal panels can grow + scroll inside the rail */
+.hud-rail [data-slot="schedule"] .cbox-body,
+.hud-rail [data-slot="terminal"] .cbox-body {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* bottom dock spans the centre gap below the core; raised to clear the
+   "JUST A RATHER VERY INTELLIGENT SYSTEM" tagline pinned at bottom: 20px */
+.hud--reactor [data-slot="dock"] {
+  position: absolute;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+}
+
+/* ════════════════════════ ② COMMAND GRID — asymmetric ═══════════════════════ */
+.hud--command [data-slot="core"] {
+  left: 53%;
+  top: 49%;
+  transform: translate(-50%, -50%);
+}
+.hud--command [data-slot="clock"] {
+  top: 40px;
+  left: 54px;
+  align-items: flex-start;
+  width: 362px;
+}
+.hud--command [data-slot="status"] {
+  top: 58px;
+  right: 54px;
+  width: 322px;
+  align-items: flex-end;
+}
+
+/* left column — wide, bar-meter heavy */
+.hud--command [data-slot="sysstats"] {
+  top: 170px;
+  left: 50px;
+  width: 374px;
+}
+.hud--command [data-slot="power"] {
+  top: 472px;
+  left: 50px;
+  width: 374px;
+}
+.hud--command [data-slot="schedule"] {
+  top: 718px;
+  left: 50px;
+  width: 374px;
+}
+
+/* right column — narrower */
+.hud--command [data-slot="weather"] {
+  top: 170px;
+  right: 50px;
+  width: 302px;
+}
+.hud--command [data-slot="network"] {
+  top: 422px;
+  right: 50px;
+  width: 302px;
+}
+.hud--command [data-slot="ocr"] {
+  top: 674px;
+  right: 50px;
+  width: 302px;
+}
+
+.hud--command [data-slot="actions"] {
+  bottom: 106px;
+  left: 53%;
+  transform: translateX(-50%);
+  width: 482px;
+}
+.hud--command [data-slot="chatbtn"] {
+  bottom: 50px;
+  left: 53%;
+  transform: translateX(-50%);
+}
+
+/* ════════════════════════ ③ RADIAL ARRAY — orbiting ════════════════════════ */
+.hud--radial [data-slot="core"] {
+  left: 50%;
+  top: 49%;
+  transform: translate(-50%, -50%);
+}
+.hud--radial [data-slot="clock"] {
+  top: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+.hud--radial [data-slot="status"] {
+  bottom: 98px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 302px;
+  align-items: center;
+}
+.hud--radial [data-slot="chatbtn"] {
+  bottom: 38px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.hud--radial [data-slot="power"] {
+  top: 72px;
+  left: 38px;
+  width: 280px;
+} /* NW */
+.hud--radial [data-slot="ocr"] {
+  top: 72px;
+  right: 38px;
+  width: 274px;
+} /* NE */
+.hud--radial [data-slot="sysstats"] {
+  top: 320px;
+  left: 38px;
+  width: 280px;
+} /* W  */
+.hud--radial [data-slot="weather"] {
+  top: 320px;
+  right: 38px;
+  width: 280px;
+} /* E  */
+.hud--radial [data-slot="schedule"] {
+  bottom: 62px;
+  left: 38px;
+  width: 302px;
+} /* SW */
+.hud--radial [data-slot="network"] {
+  bottom: 62px;
+  right: 38px;
+  width: 280px;
+} /* SE */
+.hud--radial [data-slot="actions"] {
+  top: 50%;
+  left: 320px;
+  transform: translateY(-50%);
+  width: 152px;
+} /* mid-left gap */
+.hud--radial [data-slot="comms"] {
+  top: 50%;
+  right: 320px;
+  transform: translateY(-50%);
+  width: 158px;
+} /* mid-right gap */

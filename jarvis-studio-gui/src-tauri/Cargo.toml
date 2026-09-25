@@ -1,0 +1,58 @@
+[package]
+name = "jarvis-studio-gui"
+version = "0.1.0"
+description = "JARVIS — local AI voice assistant"
+edition = "2021"
+
+[lib]
+name = "jarvis_studio_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# Rust-side HTTP for the in-app brain's info-tools (weather/news/places/web search).
+# Routing through the Rust core (not the WebView's fetch) bypasses CORS and lets us
+# send the User-Agent that Nominatim/Overpass require — both of which a WebView fetch
+# cannot do. Supported on Android + desktop; the JS side is @tauri-apps/plugin-http.
+tauri-plugin-http = "2"
+
+# Phase 2: on-phone app control via Android's AccessibilityService (local plugin).
+# Android-only behaviour; the desktop impl returns "unavailable" so the build still
+# compiles + runs on Windows. See tauri-plugin-phone/INTEGRATION.md.
+tauri-plugin-phone = { path = "tauri-plugin-phone" }
+
+# CSPRNG for the pairing-token fallback (getrandom is already in the tree
+# transitively via Tauri; this just makes it a direct, callable dependency).
+getrandom = "0.2"
+
+# Desktop-only plugins. `desktop` is a Tauri build-script cfg, so Cargo cannot use it
+# for dependency resolution; use built-in target OS cfgs here and keep the Rust call
+# sites behind `#[cfg(desktop)]` in lib.rs.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+
+# Mobile-only: fingerprint/biometric gate for PC control (Android BiometricPrompt).
+# Registered under `#[cfg(mobile)]` in lib.rs; the JS side is @tauri-apps/plugin-biometric.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-biometric = "2"
+
+# Windows Job Object APIs — used to tie the spawned Python backend's lifetime to
+# this GUI process so it can't orphan (and lock the installer) on a crash/kill.
+# 0.59 is already in the tree via Tauri, so this adds no extra build.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

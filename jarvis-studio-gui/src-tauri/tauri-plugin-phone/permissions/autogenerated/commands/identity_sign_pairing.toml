@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-identity-sign-pairing"
+description = "Enables the identity_sign_pairing command without any pre-configured scope."
+commands.allow = ["identity_sign_pairing"]
+
+[[permission]]
+identifier = "deny-identity-sign-pairing"
+description = "Denies the identity_sign_pairing command without any pre-configured scope."
+commands.deny = ["identity_sign_pairing"]
