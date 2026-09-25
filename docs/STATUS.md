@@ -100,7 +100,7 @@ bearer token → device-key identity). The remaining items are Medium/Low design
 | ✅ | Debug + release APK build | `tauri android build [--debug] --apk --target aarch64`. Both built 2026-09-25; the release APK (33 MB vs 346 MB debug, debug-key signed, not debuggable) installed over the debug app on the SM-E156B, booted clean, wake word listening, accessibility service kept |
 | 🟡 | Release signing | `gen/android/keystore.properties` is wired up; without it the release APK falls back to the debug key |
 | ⬜ | A production keystore and a genuinely signed, distributable build | Needed before this goes to anyone else |
-| ⬜ | App icons and splash screen | Still the defaults |
+| 🟡 | App icon: the HUD's Iron Man helmet in a cyan ring, as an Android adaptive icon (2026-09-25; sources in `src-tauri/icon-src/`, regenerate with `npx tauri icon src-tauri/icon-src/icon.json`) | Built into both APKs; not yet seen on the home screen. Splash screen is still the default |
 
 ---
 

@@ -56,11 +56,23 @@ Known gaps and the things that still need a live on-device test are tracked in
 
 ---
 
+## Install
+
+The quickest way to try it: download **`jarvis-release.apk`** from the
+[latest release](https://github.com/AnaaySampat/jarvis/releases/latest), open it on your
+phone and allow installing from that source. It's for 64-bit ARM phones (every modern
+Android phone), Android 7.0 or newer. Then follow [First run](#5-first-run) below.
+
+The release also has a debug APK. It's much bigger and only useful if you want to inspect
+the app with developer tools.
+
+> Early builds are signed with a development key. A later build signed with the final
+> key may need you to uninstall this one first, which clears the app's data.
+
 ## Build the APK yourself
 
-There are no prebuilt downloads yet, so you build the APK from source. The steps below
-are for Windows (what the app is developed on); macOS/Linux work the same way with
-their own paths.
+The steps below are for Windows (what the app is developed on); macOS/Linux work the same
+way with their own paths.
 
 ### 1. Install the tools (once)
 
