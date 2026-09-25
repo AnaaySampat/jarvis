@@ -383,6 +383,8 @@ object NativeOperator {
         override suspend fun drag(fromX: Int, fromY: Int, toX: Int, toY: Int, generation: Long, expectedApp: String) =
             act { s, done -> s.dispatchSwipe(fromX, fromY, toX, toY, 300L, generation, expectedApp, done) }
         override suspend fun scroll(direction: String) = act { s, done -> s.scrollDir(direction, done) }
+        override suspend fun musicActive(): Boolean? =
+            (context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)?.isMusicActive
         override suspend fun back() = act { s, done -> s.goBack(done) }
         override suspend fun home() = act { s, done -> s.goHome(done) }
     }

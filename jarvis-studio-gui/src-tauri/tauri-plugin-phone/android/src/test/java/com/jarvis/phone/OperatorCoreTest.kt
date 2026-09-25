@@ -19,6 +19,8 @@ class OperatorCoreTest {
         /** Codes the next taps fail with, in order (then they succeed). */
         val tapFailures = ArrayDeque<String>()
         var shot: String? = null
+        var audio: Boolean? = null
+        override suspend fun musicActive() = audio
         private var observed = 0
         override suspend fun observe(): OpObservation = screens[minOf(observed++, screens.size - 1)]
         override suspend fun screenshot(): String? = shot
@@ -272,6 +274,31 @@ class OperatorCoreTest {
         assertTrue(OperatorLoop.VERIFICATION_RECEIPT_RE.matches(out.verificationReceipt))
     }
 
+    @Test fun aPlaybackGoalWithNothingPlayingIsNeverPassed() {
+        // Live 2026-09-25: the checker passed off Spotify's paused mini-player title.
+        val dev = FakeDevice(listOf(screen(node(0, "Back In Black")))).apply { audio = false }
+        val verifier = ScriptedModel(pass, pass)
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Playing."}""",
+            """{"do":"done","summary":"Playing."}""")
+        val out = run("open Spotify and play Back in Black by AC/DC", dev, m, verifier = verifier)
+        assertFalse(out.ok)
+        assertTrue(out.summary, out.summary.contains("nothing is playing"))
+        assertEquals(0, verifier.prompts.size) // ground truth decided it; no model call spent
+        assertTrue(m.prompts[1].contains("AUDIO: nothing is playing"))
+    }
+
+    @Test fun audioPlayingReachesTheCheckerAndTheExecutor() {
+        val dev = FakeDevice(listOf(screen(node(0, "Play")))).apply { audio = true }
+        val verifier = ScriptedModel(pass)
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Playing."}""")
+        assertTrue(run("play some jazz on Spotify", dev, m, verifier = verifier).ok)
+        assertTrue(verifier.prompts[0].contains("\"audio_playing_now\":true"))
+        assertTrue(m.prompts[1].contains("AUDIO: something IS playing"))
+        assertTrue(wantsPlayback("resume my podcast"))
+        assertFalse(wantsPlayback("open the Play Store"))
+        assertFalse(wantsPlayback("play a chess game"))
+    }
+
     @Test fun aStuckTaskStillFailsWhenTheCheckerSaysNo() {
         val dev = FakeDevice(listOf(screen(node(0, "Go"))))
         val out = run("press go", dev, ScriptedModel(*Array(4) { """{"do":"tap","target":0}""" }),
@@ -344,11 +371,28 @@ class OperatorCoreTest {
         assertTrue(out.summary, out.ok)
     }
 
+    @Test fun pixelCommandsAreRefusedOnAStepThatHadAScreenshot() {
+        // Live 2026-09-25: looking at a screenshot, the model sent tap_xy (500,940) meaning
+        // thousandths; as pixels it hit Settings' Samsung-account row.
+        val dev = FakeDevice(listOf(screen(node(0, "Settings")).copy(screenW = 1080, screenH = 2340))).apply { shot = "SHOT" }
+        val m = ScriptedModel(
+            """{"do":"tap_xy","x":500,"y":940,"label":"search bar"}""",
+            """{"do":"tap_point","x":500,"y":40,"label":"search bar"}""",
+            """{"do":"done","summary":"Searched."}""",
+        ).apply { vision = true }
+        val out = run("search settings", dev, m)
+        assertEquals(listOf("tapXY:540,93"), dev.actions)
+        assertTrue(out.steps[0], out.steps[0].contains("refused while a screenshot is attached"))
+    }
+
     @Test fun pixelTapsAreRefusedOnRiskyTargetsAndInSideEffectTasks() {
         val s = screen(node(0, "Pay now"), node(1, "Photo"))
         fun c(json: String) = parseCommand(json)!!
         assertEquals("R3", classifyAction("open photos", c("""{"do":"tap_xy","x":50,"y":40,"label":"banner"}"""), s).risk)
         assertEquals("R1", classifyAction("open photos", c("""{"do":"tap_xy","x":50,"y":140,"label":"photo"}"""), s).risk)
+        val galaxy = screen(node(0, "Sign in to your Galaxy"))
+        assertEquals("R3", classifyAction("search settings", c("""{"do":"tap_point","x":50,"y":20,"label":"search bar"}"""),
+            galaxy.copy(screenW = 1080, screenH = 2340)).risk) // lands on a sign-in card
         assertEquals("R2", classifyAction("message mom", c("""{"do":"tap_xy","x":50,"y":140,"label":"photo"}"""), s).risk)
         assertEquals(null, coordPoints(c("""{"do":"tap_xy","x":5000,"y":40}"""), s)) // off screen
         val dev = FakeDevice(listOf(s))
@@ -400,6 +444,7 @@ class OperatorCoreTest {
         assertEquals("R2", classifyGoalRisk("message Rahul that I'm running late"))
         assertEquals("R3", classifyGoalRisk("pay my phone bill"))
         assertEquals("R3", classifyGoalRisk("change my password"))
+        assertEquals("R3", classifyGoalRisk("sign in to my Samsung account"))
         assertEquals("R1", classifyGoalRisk("set a timer for 2 minutes"))
         assertEquals("R1", classifyGoalRisk("draft an email to my boss but don't send it"))
     }

@@ -244,6 +244,14 @@ R2 goal they remain R2 (allowed only on the up-front consent); in an R3 goal, R3
 residual risk as `tap_point`. Also new: `enter` (the keyboard's Enter/Search key) is R2
 in any goal that mentions messaging, drafts included, since Enter can send.
 
+**Found live the same evening, fixed:** a `tap_xy` given screenshot thousandths as pixels
+landed on Settings' "Sign in to your Galaxy" card and opened Samsung's account sign-in
+and the system credential picker (nothing was entered; the task ended honestly). Pixel
+commands are now refused on steps that carry a screenshot, and `sign in`/`log in` joined
+the R3 words, so a coordinate tap onto a sign-in control, or a sign-in goal, needs a
+human. Separately, the operator could see and press JARVIS's own floating STOP; its
+windows are now excluded from what the operator sees and can touch.
+
 **Mitigation integrity — found and fixed 2026-09-22 (in source, not device-tested):**
 
 A codebase-wide correctness pass found that two controls this document leans on as

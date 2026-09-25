@@ -313,12 +313,20 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   goal, with a label that passes the R2/R3 word checks and no risky element under any
   point touched — re-checked on a fresh observation right before acting, against the app
   rather than the exact generation (animated pages would fail every time). Unlabelled, or
-  in an R2 goal, it's R2. `enter` (the keyboard's Enter/Search key, `ACTION_IME_ENTER`) is
+  in an R2 goal, it's R2. **One coordinate system per step:** on a step that carries a
+  screenshot, pixel commands (`tap_xy`, `drag`) are refused — models give thousandths of
+  the image even to a pixel command (live: `tap_xy (500,940)` meant the Search bar and hit
+  Samsung's sign-in card). **JARVIS's own STOP overlay is invisible to the operator:** its
+  windows are dropped from the snapshot, blacked out of screenshots, and a coordinate
+  gesture on it is refused — the operator had pressed it and cancelled itself. `enter` (the keyboard's Enter/Search key, `ACTION_IME_ENTER`) is
   R2 in any goal that mentions messaging, since Enter can send.
 - **Truthful completion.** A `done` is only reported after the checker PASSes it, with a
   receipt the journal's compare-and-set accepts. The checker judges a **fresh** observation
   (plus a screenshot when it takes images, plus the facts noted during the task), and
-  ordinary UI state counts as evidence (a Pause control = playing). A `done` whose summary
+  ordinary UI state counts as evidence (a Pause control = playing). For a playback goal
+  the phone's own audio state (`AudioManager.isMusicActive`) is ground truth: nothing
+  playing rejects without a model call, and both executor and checker see it — the checker
+  once passed a paused Spotify mini-player off the song's title. A `done` whose summary
   narrates non-completion is sent back to work, not ended. A second rejection with nothing
   done in between ends the task as `unverified` ("I think X, but couldn't confirm it")
   instead of burning steps re-claiming. Before any give-up (cycle, no progress, step or

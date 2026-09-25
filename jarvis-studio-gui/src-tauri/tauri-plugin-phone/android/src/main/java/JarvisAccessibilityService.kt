@@ -206,6 +206,20 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** Where JARVIS's floating STOP sits on screen, or null when it isn't showing. A
+     *  coordinate gesture there would press it and cancel the task driving the gesture. */
+    fun stopOverlayRect(): Rect? {
+        val view = stopOverlayView ?: return null
+        if (view.width <= 0 || view.height <= 0) return null
+        val loc = IntArray(2).also(view::getLocationOnScreen)
+        return Rect(loc[0], loc[1], loc[0] + view.width, loc[1] + view.height)
+    }
+
+    private fun onStopOverlay(x: Int, y: Int): ActionReceipt? =
+        if (stopOverlayRect()?.contains(x, y) == true) {
+            ActionReceipt(false, "That spot is JARVIS's own STOP button, not part of the app — never tap it.", "policy_blocked", screenGeneration.get())
+        } else null
+
     fun hideStopOverlay() {
         val view = stopOverlayView ?: return
         stopOverlayView = null
@@ -234,6 +248,10 @@ class JarvisAccessibilityService : AccessibilityService() {
                 .sortedWith(compareByDescending<android.view.accessibility.AccessibilityWindowInfo> { it.isActive }
                     .thenByDescending { it.isFocused })
                 .mapNotNull { it.root }
+                // JARVIS's own floating STOP (an overlay window) is not part of the app being
+                // driven. Listed, it read as a "STOP" button: on "stop the stopwatch" the
+                // operator clicked it and cancelled its own task (2026-09-25 20:39).
+                .filter { it.packageName?.toString() != packageName || it.windowId == activeRoot?.windowId }
         } catch (_: Exception) {
             emptyList()
         }
@@ -454,6 +472,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val stale = validateScreen(expectedGeneration, expectedApp)
         if (stale != null) return done(stale)
         if (x < 0 || y < 0) return done(ActionReceipt(false, "Coordinates are invalid."))
+        onStopOverlay(x, y)?.let { return done(it) }
         dispatchTap(x, y, actionEpoch.get(), done)
     }
 
@@ -469,6 +488,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     ) {
         val stale = validateScreen(expectedGeneration, expectedApp)
         if (stale != null) return done(stale)
+        (onStopOverlay(startX, startY) ?: onStopOverlay(endX, endY))?.let { return done(it) }
         val path = Path().apply {
             moveTo(startX.toFloat(), startY.toFloat())
             lineTo(endX.toFloat(), endY.toFloat())
@@ -734,8 +754,21 @@ class JarvisAccessibilityService : AccessibilityService() {
                     try {
                         val stream = ByteArrayOutputStream()
                         val bounded = boundedScreenshotBitmap(bitmap)
-                        bounded.compress(Bitmap.CompressFormat.JPEG, SCREENSHOT_JPEG_QUALITY, stream)
+                        // Blank JARVIS's own STOP out of the picture: the model took the red
+                        // "STOP" circle for the app's Stop button and tapped it (2026-09-25).
+                        val masked = stopOverlayRect()?.let { r ->
+                            val sx = bounded.width.toFloat() / bitmap.width
+                            val sy = bounded.height.toFloat() / bitmap.height
+                            bounded.copy(Bitmap.Config.ARGB_8888, true).also { copy ->
+                                android.graphics.Canvas(copy).drawRect(
+                                    r.left * sx, r.top * sy, r.right * sx, r.bottom * sy,
+                                    android.graphics.Paint().apply { color = Color.BLACK },
+                                )
+                            }
+                        } ?: bounded
+                        masked.compress(Bitmap.CompressFormat.JPEG, SCREENSHOT_JPEG_QUALITY, stream)
                         callback(Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP))
+                        if (masked !== bounded) masked.recycle()
                         if (bounded !== bitmap) bounded.recycle()
                     } finally {
                         bitmap.recycle()
