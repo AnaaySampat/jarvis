@@ -275,7 +275,9 @@ class JarvisAccessibilityService : AccessibilityService() {
                     enabled = node.isEnabled,
                     focused = node.isFocused,
                     clickable = node.isClickable,
-                    editable = node.isEditable,
+                    // Some apps' text fields accept SET_TEXT without flagging isEditable.
+                    editable = node.isEditable ||
+                        node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT },
                     scrollable = node.isScrollable,
                     checkable = node.isCheckable,
                     checked = node.isChecked,

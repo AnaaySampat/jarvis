@@ -59,6 +59,10 @@ Settings. Read your provider's privacy terms, because a phone task can send them
 - **You can stop a task any time**, from the floating STOP button over every app or the
   PAUSE/STOP buttons in the task's notification. A stuck action is cut off by a watchdog
   rather than hanging forever.
+- **Tapping by position is limited.** When an app hides a control from accessibility,
+  JARVIS may tap a spot it sees in the screenshot, but only in a harmless task, only on
+  something it names, and never over a known risky button. Anything that sends, pays or
+  deletes still goes through the rules above.
 - **Links the AI opens are limited to `http`/`https`.** Deep links like `upi:` or
   `intent:` are refused in native code.
 - **Controlling your PC needs your fingerprint** (or screen lock) every time you send it
@@ -94,6 +98,8 @@ These are open, documented below in detail, and worth knowing before you install
   button limit this; they don't eliminate it.
 - **Anyone nearby can say "Hey Jarvis".** There is no voice matching. Turn the wake word
   off in Settings if that matters where you are.
+- **Some apps hide their buttons from accessibility.** JARVIS can then tap by position
+  in harmless tasks, and could mis-tap a control it can't read.
 - **Risk detection reads button labels in English.** An icon-only or non-English "Send"
   or "Pay" button can be treated as low-risk.
 - **The approval for risky phone actions is shown by the app's UI, not by Android.**
@@ -214,6 +220,19 @@ consequences worth knowing:
   the WebView. The single-action bridge commands (`tap`, `tap_xy`, `set_text`, …) still
   exist and still accept calls from JS, though the brain no longer uses them — removing
   them would take arbitrary on-screen actuation away from a compromised WebView entirely.
+
+**Changed 2026-09-25 — `tap_point`, a coordinate tap without approval (owner's decision).**
+Some apps hide parts of their UI from accessibility (Spotify's Search page exposes only
+its bottom tabs), so the operator could see the search bar in the screenshot but had no
+element to tap, and `tap_xy` needs approval that nobody can give mid-task. `tap_point`
+takes a spot from the screenshot (thousandths of its width/height) and runs **without
+approval only when** the task's goal is low-risk (R0/R1), the model names the target, the
+name passes the same R2/R3 word checks as a tap, and no known R2/R3 element lies under the
+point — re-checked on a fresh observation right before the tap. The exact
+screen-generation check is replaced by a same-app check for it, because animated pages
+would otherwise fail every time. **Residual risk, accepted:** in an app that hides its
+controls, a mis-tap during a harmless task could land on a control JARVIS can't read.
+`tap_xy` and `drag` still require approval. (`OperatorCore.kt` `classifyPoint`.)
 
 **Mitigation integrity — found and fixed 2026-09-22 (in source, not device-tested):**
 

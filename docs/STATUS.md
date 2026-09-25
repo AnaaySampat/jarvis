@@ -65,6 +65,9 @@ useBrain's model-discovery effect (the rule can't see the setState is after an `
 | ✅ | Native operator, end to end | 2026-09-23, SM-E156B: "find the Android version, then count the alarms" → verified success in 54s ("Android 16, 4 alarms, all off"), with a route failover and a stale-observation retry along the way |
 | ✅ | A task that outlives the ~60s WebView freeze | 2026-09-23 15:35–15:38: a 3m22s two-app task finished verified while the WebView's JS was frozen for 119s (heartbeat gap 15:37:15→15:39:14); native steps kept landing throughout |
 | ✅ | `open_app` by label/package | Was silently broken until the manifest `<queries>` block was added |
+| ✅ | Spotify search + play by voice (2026-09-25, SM-E156B, release build) | 19:29–19:30: "open Spotify and play Back in Black by AC/DC" opened Spotify, reached the real search box, typed the query and started the song (the demo GIF). The log shows the search box was reached with an element tap (`tap[7]`) after the screenshot-on-sparse-screen change, and `set_text` then succeeded. **Not claimed:** that `tap_point` was used — it never fired in this run. Known gap: after playback started the operator kept tapping play/pause and ended "nothing is changing" (`incomplete`) instead of recognising success |
+| 🟡 | `tap_point`: tap a spot from the screenshot when an app hides its UI from accessibility (2026-09-25) | Spotify's Search page exposes only its four bottom tabs, which explains the two earlier failures (tapping the "Search" tab label, typing into tab labels). Screenshot now sent whenever < 10 labelled elements; `tap_point` in thousandths of the screenshot, allowed without approval only in low-risk tasks (SECURITY.md). JVM-tested; **not yet exercised live** |
+| 🟡 | Typing into search boxes whose placeholder is a separate node (2026-09-25) | `fieldFor()` redirects typing aimed at a label to the editable field enclosing it; a node counts as editable if it accepts `ACTION_SET_TEXT`. JVM-tested. (It did not cause the Spotify failures — see `tap_point` — and whether it fired in the successful run isn't logged) |
 | ✅ | Cross-app STOP overlay | Works even without the a11y service, via a `TYPE_APPLICATION_OVERLAY` fallback |
 | — | Replay cache for known goals | **Removed** with the native move (2026-09-23). It had never promoted a workflow on-device, so there was nothing to port |
 | ✅ | Planner / executor / verifier roles | Live 2026-09-23: plan, steps, and an independent PASS with a durable receipt. JVM-tested in `OperatorCoreTest.kt` |
@@ -416,6 +419,9 @@ turn answered on its first route.
 0b. **Watch one long phone task after the 09-25 routing fixes** — the verified runs were
    12–33s. A multi-minute task would exercise the transient ladder and the native 400
    failover, neither of which fired live yet.
+0c. **Recognise success when the goal is visibly met.** In the Spotify demo the song started, but the operator
+   kept tapping play/pause (pausing it) and ended `incomplete`. It should check the goal against the screen
+   ("Back In Black" now playing) and finish with `done` — then exercise `tap_point` live.
 1b. **Re-test the rest of the 2026-09-22 fixes on a device.** Still unexercised: the remote
    STOP button, a long spoken reply, and adding then deleting a calendar-mirrored agenda
    item.

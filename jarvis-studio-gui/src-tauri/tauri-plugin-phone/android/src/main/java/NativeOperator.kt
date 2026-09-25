@@ -268,13 +268,26 @@ object NativeOperator {
     private class AccessibilityDevice(private val context: Context) : OperatorDevice {
         private fun svc() = JarvisAccessibilityService.instance
 
+        /** The whole display (status and nav bars included) — the area a screenshot covers. */
+        private fun screenSize(): Pair<Int, Int> {
+            // DisplayManager, not WindowManager: this is an app context, not a visual one.
+            val dm = context.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+            val d = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return 0 to 0
+            val m = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION") d.getRealMetrics(m)
+            return m.widthPixels to m.heightPixels
+        }
+
         override suspend fun observe(): OpObservation {
             val s = svc() ?: return OpObservation("", emptyList(), ready = false)
             val snap = s.snapshot()
+            val (screenW, screenH) = screenSize()
             return OpObservation(
                 app = snap.app,
                 generation = snap.generation,
                 windowId = snap.windowId,
+                screenW = screenW,
+                screenH = screenH,
                 nodes = snap.nodes.map { n ->
                     OpNode(
                         index = n.index,

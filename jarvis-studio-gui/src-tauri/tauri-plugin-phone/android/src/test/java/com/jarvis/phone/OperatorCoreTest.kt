@@ -295,6 +295,61 @@ class OperatorCoreTest {
         assertTrue(out.summary.contains("already entered"))
     }
 
+    @Test fun typingAtAPlaceholderGoesIntoTheFieldAroundIt() {
+        // Spotify's search box: a text-less EditText with its placeholder as a separate node inside it.
+        val field = OpNode(0, "", "EditText", clickable = true, editable = true, selector = "f", windowId = 3,
+            bounds = OpBounds(135, 81, 900, 135))
+        val hint = OpNode(1, "What do you want to listen to?", "TextView", selector = "h", windowId = 3,
+            bounds = OpBounds(172, 117, 621, 62))
+        val outside = OpNode(2, "Play what you love", "TextView", selector = "o", windowId = 3,
+            bounds = OpBounds(310, 1182, 461, 67))
+        val s = screen(field, hint, outside)
+        assertEquals(0, fieldFor(hint, s).index)
+        assertEquals(2, fieldFor(outside, s).index) // not inside a field: left alone (and still refused)
+        val dev = FakeDevice(listOf(s, screen(field.copy(text = "back in black"), hint, outside, gen = 8)))
+        run("search back in black", dev, ScriptedModel("""{"do":"set_text","target":1,"text":"back in black"}"""))
+        assertEquals("setText:0:back in black", dev.actions.first())
+    }
+
+    // ── tap_point: apps that hide their UI from accessibility (Spotify's Search page) ──
+
+    private fun spotifySearch(gen: Long = 7) = OpObservation(
+        "com.spotify.music",
+        listOf(
+            OpNode(0, "", "View", clickable = true, selector = "t1", windowId = 3, bounds = OpBounds(0, 2163, 270, 135)),
+            OpNode(1, "Search, Tab 2 of 4", "View", selector = "t2", windowId = 3, bounds = OpBounds(270, 2163, 270, 135)),
+            OpNode(2, "Pay now", "Button", clickable = true, selector = "pay", windowId = 3, bounds = OpBounds(0, 1500, 1080, 150)),
+        ),
+        generation = gen, windowId = 3, screenW = 1080, screenH = 2340,
+    )
+
+    private fun point(x: Int, y: Int, label: String) =
+        org.json.JSONObject("""{"do":"tap_point","x":$x,"y":$y,"label":"$label"}""")
+
+    @Test fun tapPointConvertsThousandthsToScreenPixels() {
+        assertEquals(540 to 234, pointPx(point(500, 100, "search bar"), spotifySearch()))
+        assertEquals(null, pointPx(point(1200, 100, "x"), spotifySearch()))
+        assertEquals(null, pointPx(point(500, 100, "x"), OpObservation("a", emptyList()))) // screen size unknown
+    }
+
+    @Test fun tapPointIsLowRiskOnlyForANamedHarmlessTargetInAHarmlessTask() {
+        val s = spotifySearch()
+        val play = "open Spotify and play Back in Black by AC/DC"
+        assertEquals("R1", classifyAction(play, point(500, 50, "search bar"), s).risk)
+        assertEquals("R2", classifyAction(play, point(500, 50, ""), s).risk)            // unnamed
+        assertEquals("R2", classifyAction(play, point(500, 50, "Send button"), s).risk) // risky label
+        assertEquals("R3", classifyAction(play, point(500, 50, "Buy premium"), s).risk)
+        assertEquals("R3", classifyAction(play, point(500, 673, "banner"), s).risk)     // lands on "Pay now"
+        assertEquals("R2", classifyAction("message mom on whatsapp", point(500, 50, "search bar"), s).risk)
+    }
+
+    @Test fun tapPointTapsTheConvertedSpotWithoutApproval() {
+        val dev = FakeDevice(listOf(spotifySearch(), spotifySearch(8), spotifySearch(9)))
+        run("open Spotify and play Back in Black by AC/DC", dev,
+            ScriptedModel("""{"do":"tap_point","x":500,"y":50,"label":"search bar"}"""))
+        assertEquals("tapXY:540,117", dev.actions.first())
+    }
+
     @Test fun catchesACycle() {
         val a = screen(node(0, "A"), node(1, "B"))
         val b = screen(node(0, "A"), node(1, "B"), gen = 8)

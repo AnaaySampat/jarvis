@@ -1,7 +1,9 @@
 # JARVIS for Android
 
 <p align="center">
-  <img src="docs/images/hud.png" alt="The JARVIS HUD on a phone: the Reactor Core idle and waiting for &quot;Hey Jarvis&quot;, a clock, and the Skills, Memory, Capabilities, Device and Conversation panels over battery, disk and network gauges" width="300">
+  <img src="docs/images/demo.gif" alt="Demo: after &quot;Hey Jarvis, open Spotify and play Back in Black by AC/DC&quot;, JARVIS opens Spotify on its own, goes to search, types the song and starts it playing" width="300">
+  <br>
+  <sub>One voice command, no taps: JARVIS opens Spotify, searches and plays the song. Slow parts sped up; the Spotify home screen is blurred.</sub>
 </p>
 
 A voice assistant that runs on your phone. It chats, does real tasks over the internet
@@ -26,6 +28,8 @@ the app**, so the phone needs no server and no Python.
 ---
 
 ## What it can do today
+
+<img src="docs/images/hud.png" align="right" width="220" alt="The JARVIS HUD on a phone: the Reactor Core idle and waiting for &quot;Hey Jarvis&quot;, a clock, and the Skills, Memory, Capabilities, Device and Conversation panels over battery, disk and network gauges">
 
 - **Chat + tools** — LLM chat with weather, news, web search, places/directions,
   reminders, alarms/timers, calendar, QR codes, image generation, clipboard and file

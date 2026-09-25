@@ -32,7 +32,17 @@ import org.json.JSONObject
 
 // ── Data the loop works on (Android-free mirrors of the accessibility snapshot) ──
 
-data class OpBounds(val x: Int, val y: Int, val w: Int, val h: Int)
+data class OpBounds(val x: Int, val y: Int, val w: Int, val h: Int) {
+    fun contains(o: OpBounds) = w > 0 && h > 0 && o.x >= x && o.y >= y && o.x + o.w <= x + w && o.y + o.h <= y + h
+    fun contains(px: Int, py: Int) = px >= x && py >= y && px < x + w && py < y + h
+}
+
+/** The field to type into when the model aims at [node]. Search boxes (Spotify's, 2026-09-25)
+ *  often draw their placeholder as a separate text node inside a text-less EditText, and the
+ *  model aims at the words; type into the editable field that encloses them instead. */
+internal fun fieldFor(node: OpNode, obs: OpObservation): OpNode =
+    if (node.editable) node
+    else obs.nodes.firstOrNull { it.editable && !it.password && it.index != node.index && it.bounds.contains(node.bounds) } ?: node
 
 data class OpNode(
     val index: Int,
@@ -60,6 +70,9 @@ data class OpObservation(
     val ready: Boolean = true,
     val generation: Long = -1L,
     val windowId: Int = -1,
+    /** Full display size in pixels — what a screenshot covers. 0 when unknown. */
+    val screenW: Int = 0,
+    val screenH: Int = 0,
 )
 
 data class OpResult(val ok: Boolean, val summary: String, val code: String = if (ok) "ok" else "action_failed")
@@ -181,6 +194,8 @@ class OperatorLoop(
         private val VERIFY_RETRY_MS = longArrayOf(400L, 1_200L)
         val VERIFICATION_RECEIPT_RE = Regex("^aura\\.verify\\.v1:(model|deterministic):[a-f0-9]{64}$")
         private val LAUNCH_ACTIONS = setOf("open_app", "launch", "open")
+        /** Fewer labelled elements than this → the app is likely hiding its UI; send vision. */
+        const val SPARSE_LABELLED = 10
         private val RETRYABLE_ON_STALE = setOf("tap", "click", "long_press", "double_tap", "set_text", "fill", "focus")
     }
 
@@ -265,7 +280,10 @@ class OperatorLoop(
             // A screenshot every step burns tokens and rate limit for little gain — send
             // vision only on the first look, after a failed action, or when stuck.
             var images = emptyList<String>()
-            if (model.wantsImages && (step == 0 || lastFailed || noProgress > 0)) {
+            // ...and when the element list is nearly empty: some apps (Spotify's Search page)
+            // hide their controls from accessibility, and the screenshot is all there is.
+            val sparse = cur.nodes.count { it.text.isNotEmpty() || it.description.isNotEmpty() } < SPARSE_LABELLED
+            if (model.wantsImages && (step == 0 || lastFailed || noProgress > 0 || sparse)) {
                 val shot = device.screenshot()
                 if (!shot.isNullOrEmpty()) {
                     images = listOf(shot)
@@ -527,6 +545,20 @@ class OperatorLoop(
                     else -> device.tap(targetOf(obs, node))
                 }
             }
+            "tap_point" -> {
+                val p = pointPx(cmd, obs) ?: return OpResult(
+                    false,
+                    "tap_point needs x and y from 0 to 1000 (thousandths of the screenshot), and a known screen size.",
+                )
+                // The spot came from a screenshot, so on an animated page (Spotify's video tiles)
+                // an exact screen-generation check would fail every time. Check the app instead,
+                // and re-check what is under the point on a fresh look right before tapping.
+                val fresh = device.observe()
+                if (fresh.ready && classifyAction(opts.goal, cmd, fresh).risk in setOf("R2", "R3")) {
+                    return OpResult(false, "Something risky is under that spot now — not tapping it.", "policy_blocked")
+                }
+                device.tapXY(p.first, p.second, -1L, obs.app)
+            }
             "tap_xy", "click_xy" -> {
                 val x = cmd.optDouble("x", Double.NaN)
                 val y = cmd.optDouble("y", Double.NaN)
@@ -546,13 +578,13 @@ class OperatorLoop(
             "set_text", "fill" -> {
                 val idx = asIndex(firstValue(cmd, "target", "index")) ?: return OpResult(false, "No field given to set.")
                 val node = target(idx) ?: return OpResult(false, "There's no field $idx on screen.")
-                device.setText(targetOf(obs, node), cmd.optString("text"))
+                device.setText(targetOf(obs, fieldFor(node, obs)), cmd.optString("text"))
             }
             "focus" -> {
                 // `type` needs an already-focused field; focusing IS a tap on the field.
                 val idx = asIndex(firstValue(cmd, "target", "index", "element"))
                     ?: return OpResult(false, "No field given to focus.")
-                val node = target(idx) ?: return OpResult(false, "There's no element $idx on screen.")
+                val node = target(idx)?.let { fieldFor(it, obs) } ?: return OpResult(false, "There's no element $idx on screen.")
                 if (!node.editable) return OpResult(false, "Element $idx isn't a text field — tap it instead.")
                 device.tap(targetOf(obs, node))
             }
@@ -736,6 +768,9 @@ internal const val SYSTEM_PROMPT =
         "  {\"do\":\"open_app\",\"name\":\"<app>\"}      launch an app by name\n" +
         "  {\"do\":\"tap\",\"target\":<index>}          tap the element with that index\n" +
         "  {\"do\":\"tap_xy\",\"x\":<px>,\"y\":<px>}       tap raw coordinates (only if no element fits)\n" +
+        "  {\"do\":\"tap_point\",\"x\":<0-1000>,\"y\":<0-1000>,\"label\":\"<what it is>\"}  tap something " +
+        "you can SEE in the screenshot but that is NOT in the element list; x,y are thousandths of " +
+        "the screenshot's width and height, label names it honestly\n" +
         "  {\"do\":\"long_press\",\"target\":<index>}    hold to open a context menu / drag handle\n" +
         "  {\"do\":\"double_tap\",\"target\":<index>}    double-tap (zoom-to-fit, like-on-image, …)\n" +
         "  {\"do\":\"drag\",\"from_x\":<px>,\"from_y\":<px>,\"to_x\":<px>,\"to_y\":<px>}  " +
@@ -760,6 +795,9 @@ internal const val SYSTEM_PROMPT =
         "tap_xy and drag are raw screen coordinates: they need the user's approval, which " +
         "nobody can give mid-task, so emitting one ENDS the task. Use them only as a last " +
         "resort, and NEVER to scroll — use scroll (again, if the first one didn't move the list).\n" +
+        "Some apps hide their controls from accessibility, so the element list can be missing " +
+        "things the screenshot shows (a search bar, a button). Then use tap_point — it is allowed " +
+        "in low-risk tasks, refused on anything that sends, pays, buys or deletes.\n" +
         "BE FAST — every step is a slow round-trip to the model, so waste none:\n" +
         "- Reach an app with open_app (by name) — never tap through the home screen or app drawer to find it.\n" +
         "- If the screen is JARVIS itself (the assistant you are), it is never the target: open_app first.\n" +
@@ -948,6 +986,41 @@ fun classifyGoalRisk(goal: String): String = when {
 
 internal data class PolicyDecision(val risk: String, val reason: String)
 
+/** Screen pixels for a tap_point, whose x/y are thousandths of the screenshot. */
+internal fun pointPx(cmd: JSONObject, obs: OpObservation): Pair<Int, Int>? {
+    val nx = cmd.optDouble("x", Double.NaN)
+    val ny = cmd.optDouble("y", Double.NaN)
+    if (nx.isNaN() || ny.isNaN() || nx !in 0.0..1000.0 || ny !in 0.0..1000.0) return null
+    if (obs.screenW <= 0 || obs.screenH <= 0) return null
+    val x = (nx / 1000.0 * obs.screenW).toInt().coerceIn(0, obs.screenW - 1)
+    val y = (ny / 1000.0 * obs.screenH).toInt().coerceIn(0, obs.screenH - 1)
+    return x to y
+}
+
+/** A spot picked from the screenshot, for apps that hide their UI from accessibility
+ *  (Spotify's Search page, 2026-09-25). Unlike tap_xy it runs without approval, but only in
+ *  a low-risk task, only with a named target that passes the same word checks as a tap, and
+ *  never when a known risky element is under the point. Residual risk, accepted by the user:
+ *  a mis-tap on a control the app hides from accessibility. */
+private fun classifyPoint(goalRisk: String, cmd: JSONObject, obs: OpObservation): PolicyDecision {
+    val label = cmd.optString("label").trim().take(120)
+    val base = "tap_point ${label.ifEmpty { "an unnamed spot" }}"
+    if (goalRisk == "R3") return PolicyDecision("R3", "critical ungrounded tap: $base")
+    if (goalRisk == "R2" || label.isEmpty()) return PolicyDecision("R2", "ungrounded coordinate action: $base")
+    if (R3_RE.containsMatchIn(label)) return PolicyDecision("R3", "critical action: $base")
+    if (R2_RE.containsMatchIn(label) || R2_FINAL_COMMIT_RE.containsMatchIn(label)) {
+        return PolicyDecision("R2", "external side effect: $base")
+    }
+    val p = pointPx(cmd, obs) ?: return PolicyDecision("R2", "ungrounded coordinate action: $base")
+    val under = obs.nodes.filter { it.bounds.contains(p.first, p.second) }
+        .joinToString(" ") { "${it.text} ${it.description} ${it.id}" }
+    if (R3_RE.containsMatchIn(under)) return PolicyDecision("R3", "critical action under the point: $base")
+    if (R2_RE.containsMatchIn(under) || R2_FINAL_COMMIT_RE.containsMatchIn(under)) {
+        return PolicyDecision("R2", "external side effect under the point: $base")
+    }
+    return PolicyDecision("R1", base)
+}
+
 internal fun classifyAction(goal: String, cmd: JSONObject, obs: OpObservation): PolicyDecision {
     val idx = asIndex(firstValue(cmd, "target", "index", "element"))
     val node = idx?.let { i -> obs.nodes.firstOrNull { it.index == i } }
@@ -960,6 +1033,7 @@ internal fun classifyAction(goal: String, cmd: JSONObject, obs: OpObservation): 
     val critical = "$target ${if (action in setOf("type", "set_text", "fill")) goal else ""}"
     val base = "$action ${target.ifEmpty { "the selected control" }}".trim()
     val tapLike = action in setOf("tap", "click", "long_press", "double_tap")
+    if (action == "tap_point") return classifyPoint(goalRisk, cmd, obs)
     return when {
         // Raw geometry has no stable semantic target and can conceal a commit after
         // the screen shifts: always needs exact approval, never downgraded below R3.
@@ -983,7 +1057,7 @@ internal fun classifyAction(goal: String, cmd: JSONObject, obs: OpObservation): 
 // ── Guards ──
 
 private val ACTUATION_DOS = setOf(
-    "open_app", "launch", "open", "focus", "tap", "click", "tap_xy", "click_xy", "long_press",
+    "open_app", "launch", "open", "focus", "tap", "click", "tap_xy", "click_xy", "tap_point", "long_press",
     "double_tap", "drag", "set_text", "fill", "type", "scroll", "back", "home",
 )
 
@@ -1002,6 +1076,7 @@ internal fun actionSig(cmd: JSONObject, obs: OpObservation?): String {
     if (action == "drag") {
         return "drag:${cmd.opt("from_x")},${cmd.opt("from_y")}->${cmd.opt("to_x")},${cmd.opt("to_y")}"
     }
+    if (action == "tap_point") return "tap_point:${cmd.opt("x")},${cmd.opt("y")}"
     val idx = asIndex(firstValue(cmd, "target", "index", "element"))
     if (idx != null && obs != null) {
         val n = obs.nodes.firstOrNull { it.index == idx }
@@ -1095,6 +1170,7 @@ internal fun waitMs(cmd: JSONObject): Long {
 private fun describeTarget(cmd: JSONObject): String {
     val action = cmd.optString("do").lowercase()
     if (action == "drag") return " (${cmd.opt("from_x")},${cmd.opt("from_y")})→(${cmd.opt("to_x")},${cmd.opt("to_y")})"
+    if (action == "tap_point") return " \"${cmd.optString("label").take(32)}\" (${cmd.opt("x")},${cmd.opt("y")})"
     firstValue(cmd, "target", "index")?.let { return "[$it]" }
     cmd.optString("name").takeIf { it.isNotEmpty() }?.let { return " $it" }
     cmd.optString("text").takeIf { it.isNotEmpty() }?.let { return " \"${it.take(24)}\"" }
