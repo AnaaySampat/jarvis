@@ -1,5 +1,9 @@
 # JARVIS for Android
 
+<p align="center">
+  <img src="docs/images/hud.png" alt="The JARVIS HUD on a phone: the Reactor Core idle and waiting for &quot;Hey Jarvis&quot;, a clock, and the Skills, Memory, Capabilities, Device and Conversation panels over battery, disk and network gauges" width="300">
+</p>
+
 A voice assistant that runs on your phone. It chats, does real tasks over the internet
 (weather, news, search, places, reminders), **drives other apps on the phone by itself**,
 and can **remote-control your Windows PC**.
