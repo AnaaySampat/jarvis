@@ -165,6 +165,15 @@ on the day ladder and one burst of operator steps benched every route. OpenRoute
 "temporarily rate-limited upstream" (its shared `:free` pool, not the user's quota) is
 treated as a minute window too, in both `errorClass.ts` and `RoutePacer.kt`.
 
+### Slow routes lose their turn (2026-09-26)
+
+Latency matters as much as quota: every phone command waits for a chat turn before its
+task starts, and one gemma-4-31b turn took 16.6s where the next route answers in ~2s.
+`ask.ts` logs each chat call (`[route] … answered (class) in Nms`) and `fastFirst()` moves a
+route whose recent average is over 8s behind the rest (remembered 10 minutes; quality order
+kept among the others; it still answers if they all fail). The native ladder does the same
+through hedging — a route that wins a hedge race is asked first from then on.
+
 ### Gemini request details that cost a day each
 
 - **Turning thinking off is generation-specific** (measured on the device, 2026-09-25):
@@ -345,7 +354,27 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   list can't carry the step (sparse, failure, stuck, `look`, coordinate tap, or controls
   with no label even inside them); a button's child label is shown on it (`"Stop" (inside)`)
   and step lines name what was tapped. The ladder hedges a call that hasn't answered in 5s
-  (10s with an image) with the next ready route and takes the first answer.
+  (10s with an image) with the next ready route and takes the first answer; the winner of
+  a hedge is asked first from then on (per process), so a route that is slow tonight stops
+  costing a hedge on every call.
+- **Reading the screen (2026-09-26).** The list is built to be self-sufficient: a clickable
+  row with 1–3 labelled descendants carries them joined (`"Dark mode · Calendar style"
+  (inside)`) and those plain children aren't listed again; a bare control takes the
+  nearest sibling label (`RadioButton "Dark" (beside)` — Samsung's theme picker); both use
+  the hierarchy `path`, not bounds (a floating search bar is drawn over rows it doesn't
+  own). The keyboard window, JARVIS's own windows, the header line and pixel bounds on
+  plain text are left out. `open_app` from the operator lands on the app's main screen
+  (`CLEAR_TOP`), never on the page an earlier task left it on.
+- **Doing exactly the goal.** The prompt (kept tight — it is paid on every step) says a
+  goal to open/find/search/show/check is done when the thing is on screen, never toggle or
+  select beyond it, and to use an app's search rather than browse. The checker judges the
+  outcome, not the route taken, and fails an unrequested change (live, "search for dark
+  mode" once ended by switching the phone's theme).
+- **Forgiving replies.** Models drift from the schema; the parser takes `{"action":…}`, a
+  verb as the key (`{"note":"…"}`, `{"tap":5}`), `{"done","summary":…}` (not even JSON),
+  and a second object in the same reply as the chained follow-up. `enter` aimed at a
+  non-field presses Enter in the focused field; a stale action gets up to three fresh
+  re-observations.
 - **Settling.** A tap whose screen never goes quiet (a running timer, a progress bar) is
   reported done with a note, not as failed — the failure made the operator tap again,
   which on a toggle undoes it. `open_app` waits for the new app's first screen to settle

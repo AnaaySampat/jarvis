@@ -245,6 +245,10 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         val roots = try {
             windows
+                // The keyboard is not part of the app: its ~40 key nodes cost tokens every step,
+                // and the operator aimed `enter` at the keyboard's own Enter key (Play Store,
+                // 2026-09-26). Text goes in through set_text / enter, never key taps.
+                .filter { it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
                 .sortedWith(compareByDescending<android.view.accessibility.AccessibilityWindowInfo> { it.isActive }
                     .thenByDescending { it.isFocused })
                 .mapNotNull { it.root }

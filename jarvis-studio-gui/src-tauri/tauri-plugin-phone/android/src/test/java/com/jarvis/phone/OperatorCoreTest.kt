@@ -218,7 +218,7 @@ class OperatorCoreTest {
         assertTrue(out.summary, out.ok)
         assertEquals(listOf("tapFailed:0:stale_observation", "tap:2"), dev.actions)
         assertEquals(9L, dev.targets.single().generation)
-        assertTrue(out.steps.any { it.contains("re-observed once") })
+        assertTrue(out.steps.any { it.contains("re-observed") })
     }
 
     @Test fun aStaleTapIsNotRetriedWhenTheControlIsGone() {
@@ -361,6 +361,25 @@ class OperatorCoreTest {
         assertFalse(opensSearch(node(0, "Research papers"), home))
     }
 
+    @Test fun aSearchTabThatOpensASearchBarButtonIsFollowedThrough() {
+        // Play Store: the "Search" tab opens a page whose "Search apps & games" bar is a button.
+        val home = screen(node(0, "Games"), node(1, "Search", selector = "tab"))
+        val searchPage = screen(node(0, "Search apps & games", selector = "bar"), node(1, "Search", selector = "tab"), gen = 8)
+        val field = screen(node(0, "", role = "EditText", editable = true, focused = true, selector = "q"), gen = 9)
+        val dev = FakeDevice(listOf(home, home, searchPage, searchPage, searchPage, searchPage, field, field, field))
+        val m = ScriptedModel("""{"do":"set_text","target":1,"text":"Duolingo"}""", """{"do":"done","summary":"Searched."}""")
+        val out = run("search the play store for duolingo", dev, m)
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("tap:1", "tap:0", "setText:0:Duolingo"), dev.actions)
+    }
+
+    @Test fun enterAimedAtANonFieldPressesEnterInTheFocusedField() {
+        val field = node(0, "duolingo", role = "EditText", editable = true, focused = true)
+        val dev = FakeDevice(listOf(screen(field, node(61, "Enter"))))
+        run("search", dev, ScriptedModel("""{"do":"enter","target":61}""", """{"do":"fail","summary":"x"}"""))
+        assertEquals(listOf("enter:0"), dev.actions)
+    }
+
     @Test fun theStepLogNamesWhatWasTappedAndTyped() {
         val start = OpNode(10, "", "View", clickable = true, selector = "b", windowId = 3, bounds = OpBounds(0, 0, 300, 300))
         val word = OpNode(11, "Start", "TextView", selector = "w", windowId = 3, bounds = OpBounds(50, 50, 100, 50))
@@ -370,6 +389,76 @@ class OperatorCoreTest {
         val out = run("start it", dev, m)
         assertTrue(out.steps[0], out.steps[0].startsWith("tap[10] \"Start\" — ok"))
         assertTrue(out.steps[1], out.steps[1].contains("← \"lap one\""))
+    }
+
+    @Test fun aRowCarriesItsTitleAndSubtitleAndTheyArentListedTwice() {
+        // Samsung Settings search results: the same title under different apps.
+        val row = OpNode(3, "", "LinearLayout", clickable = true, bounds = OpBounds(0, 300, 1080, 200))
+        val title = OpNode(4, "Dark mode", "TextView", bounds = OpBounds(40, 320, 400, 60))
+        val crumb = OpNode(5, "Calendar style", "TextView", bounds = OpBounds(40, 390, 400, 50))
+        val sw = OpNode(6, "", "Switch", clickable = true, checked = false, bounds = OpBounds(900, 340, 120, 80))
+        val r = renderObs(screen(row, title, crumb, sw))
+        assertTrue(r, r.contains("[3] LinearLayout \"Dark mode · Calendar style\" (inside)"))
+        assertFalse(r, r.lines().any { it.startsWith("[4]") || it.startsWith("[5]") })
+        assertTrue(r, r.lines().any { it.startsWith("[6]") }) // controls are never folded away
+        assertFalse(r, r.contains("generation="))
+    }
+
+    @Test fun aFloatingBarDrawnOverARowDoesntBorrowItsLabel() {
+        // Samsung Settings: the search bar floats over the "Display" row. The hierarchy says
+        // "Display" is not its child, whatever the bounds say.
+        val bar = OpNode(31, "", "LinearLayout", clickable = true, bounds = OpBounds(0, 2100, 1080, 150), path = "0.2")
+        val search = OpNode(32, "Search", "TextView", bounds = OpBounds(100, 2140, 200, 60), path = "0.2.0")
+        val display = OpNode(20, "Display", "TextView", bounds = OpBounds(100, 2150, 300, 60), path = "0.1.7.0")
+        assertEquals("Search", innerLabel(bar, screen(bar, search, display)))
+    }
+
+    @Test fun aBareRadioTakesTheLabelBesideIt() {
+        // Samsung Display settings: "Light"/"Dark" texts with bare RadioButtons under them.
+        val light = OpNode(1, "Light", "TextView", bounds = OpBounds(150, 600, 200, 60), path = "0.4.0.1")
+        val lightRadio = OpNode(2, "", "RadioButton", checked = false, bounds = OpBounds(200, 680, 80, 80), path = "0.4.0.2")
+        val dark = OpNode(3, "Dark", "TextView", bounds = OpBounds(700, 600, 200, 60), path = "0.4.1.1")
+        val darkRadio = OpNode(4, "", "RadioButton", checked = true, bounds = OpBounds(750, 680, 80, 80), path = "0.4.1.2")
+        val s = screen(light, lightRadio, dark, darkRadio)
+        val r = renderObs(s)
+        assertTrue(r, r.lines().first { it.startsWith("[4]") }.contains("\"Dark\" (beside)") && r.contains("checked"))
+        assertTrue(r, r.lines().first { it.startsWith("[2]") }.contains("\"Light\" (beside)"))
+        assertEquals("Dark", controlLabel(darkRadio, s))
+    }
+
+    @Test fun parseCommandForgivesCommonSchemaDrift() {
+        assertEquals("tap", parseCommand("""{"action":"tap","target":3}""")!!.getString("do"))
+        assertEquals("done", parseCommand("""{"done":"summary","summary":"Opened it."}""")!!.getString("do"))
+        val bare = parseCommand("""{"done","summary":"Back In Black is already playing."}""")!!
+        assertEquals("done", bare.getString("do"))
+        assertEquals("Back In Black is already playing.", bare.getString("summary"))
+        assertEquals(null, parseCommand("""{"target":2}"""))
+        val note = parseCommand("""{"note":"Apia, Pago Pago"}""")!!
+        assertEquals("note", note.getString("do")); assertEquals("Apia, Pago Pago", note.getString("text"))
+        assertEquals(5, parseCommand("""{"tap":5}""")!!.getInt("target"))
+        assertEquals("Clock", parseCommand("""{"open_app":"Clock"}""")!!.getString("name"))
+    }
+
+    @Test fun twoObjectsInOneReplyBecomeACommandAndItsFollowUp() {
+        // Live: {"note":"Apia, Pago Pago"} {"do":"done",…} — thrown away three times as unclear.
+        val dev = FakeDevice(listOf(screen(node(0, "World clock"))))
+        val m = ScriptedModel("""{"do":"tap","target":0}""",
+            """{"note":"Apia, Pago Pago"} {"do":"done","summary":"The cities are Apia and Pago Pago."}""")
+        val out = run("list the world clock cities", dev, m)
+        assertTrue(out.summary, out.ok)
+        assertEquals(2, m.prompts.size)
+        assertEquals(listOf("Apia, Pago Pago"), out.findings)
+    }
+
+    @Test fun aStaleTapIsRetriedUpToThreeTimes() {
+        val first = screen(node(0, "Go", selector = "go"))
+        val fresh = screen(node(0, "Go", selector = "go"), gen = 9)
+        val dev = FakeDevice(listOf(first, fresh, fresh, fresh, fresh)).apply {
+            repeat(3) { tapFailures += "stale_observation" }
+        }
+        val out = run("press go", dev, ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Pressed."}"""))
+        assertTrue(out.summary, out.ok)
+        assertEquals(4, dev.actions.size) // 3 stale + the one that landed
     }
 
     @Test fun renderDropsTheIdsPackagePrefix() {

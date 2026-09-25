@@ -157,7 +157,7 @@ export async function chatOverLadder(
   const userText = [...convo].reverse().find((m) => m.role === "user")?.content ?? "";
   // The class also picks the smart-routing tier for a pinned model's fallbacks.
   const requestedClass = opts?.disableThinking ? "dumb" : taskModelClass(userText);
-  const allRoutes = routesFor(cfg, requestedClass, tools.length > 0);
+  const allRoutes = fastFirst(routesFor(cfg, requestedClass, tools.length > 0));
   let lastError: unknown = null;
   const skipModels = new Set<string>();
 
@@ -185,14 +185,23 @@ export async function chatOverLadder(
   throw exhausted(cfg, allRoutes[0]?.model);
 
   async function tryRoutes(routes: quota.Route[]): Promise<LLMReply | null> {
-    for (const route of routes) {
-      if (skipModels.has(route.model)) continue;
+    for (const [i, first] of routes.entries()) {
+      if (skipModels.has(first.model)) continue;
+      // A different model to hedge with if `first` is slow (see chatHedged).
+      const backup = routes
+        .slice(i + 1)
+        .find((r) => r.model !== first.model && !skipModels.has(r.model) && quota.usable(r));
+      let route = first;
       try {
-        const reply = await providerFor(cfg, route.provider).chat(convo, tools, {
-          ...opts,
-          model: route.model,
-          keyIndex: route.keyIndex,
-        });
+        const answered = await chatHedged(first, backup);
+        const reply = answered.reply;
+        route = answered.route;
+        // A chat turn's latency was invisible: a phone command sometimes sat 27–34s before
+        // its task started (2026-09-26), with no log saying which route took that long.
+        console.info(
+          `[route] ${route.provider}/${route.model} answered (${requestedClass}) in ${answered.ms}ms` +
+            (route === first ? "" : ` — ${first.provider}/${first.model} was slow`),
+        );
         // The preferred route silently failed and we're answering on a different
         // one — say so now rather than only when everything fails, so a
         // misconfigured primary can't hide behind a fallback that happens to work
@@ -213,7 +222,9 @@ export async function chatOverLadder(
           // quota had already benched it — say that instead of printing "null".
           const why = lastError
             ? String((lastError as Error)?.message ?? lastError)
-            : `${head.provider}/${head.model} is benched`;
+            : route !== first
+              ? `${first.provider}/${first.model} was slow`
+              : `${head.provider}/${head.model} is benched`;
           onFallback?.(
             `Switched to ${route.provider}/${route.model} for this reply: ` + why.slice(0, 150),
           );
@@ -239,6 +250,77 @@ export async function chatOverLadder(
     }
     return null;
   }
+
+  /**
+   * Ask `first`; if it hasn't answered within HEDGE_AFTER_MS, also ask `backup` (another
+   * model) and take whichever answers first, cancelling the other. A slow route used to
+   * hold every phone command for its whole latency — gemma-4-31b took 16.6s and 25.7s on
+   * chat turns (2026-09-26) while the next route answers in ~2s. Only answers count: if the
+   * first to settle failed, the other is awaited; if both fail, `first`'s error is thrown
+   * so the caller benches the route it meant to use.
+   */
+  async function chatHedged(
+    first: quota.Route,
+    backup: quota.Route | undefined,
+  ): Promise<{ reply: LLMReply; route: quota.Route; ms: number }> {
+    type Settled = { ok: true; reply: LLMReply } | { ok: false; err: unknown };
+    const started = Date.now();
+    const ask = (route: quota.Route, signal: AbortSignal): Promise<Settled> =>
+      providerFor(cfg, route.provider)
+        .chat(convo, tools, { ...opts, model: route.model, keyIndex: route.keyIndex, signal })
+        .then(
+          (reply): Settled => ({ ok: true, reply }),
+          (err: unknown): Settled => ({ ok: false, err }),
+        );
+    const ctlA = linkedAbort(opts?.signal);
+    const a = ask(first, ctlA.signal);
+    const early = backup
+      ? await Promise.race([a, new Promise<null>((r) => setTimeout(() => r(null), HEDGE_AFTER_MS))])
+      : await a;
+    if (early) {
+      if (!early.ok) throw early.err;
+      noteLatency(first, Date.now() - started);
+      return { reply: early.reply, route: first, ms: Date.now() - started };
+    }
+    const hedge = backup!;
+    const hedgeStart = Date.now();
+    console.info(
+      `[route] ${first.provider}/${first.model} slow (>${HEDGE_AFTER_MS}ms) — also asking ${hedge.provider}/${hedge.model}`,
+    );
+    const ctlB = linkedAbort(opts?.signal);
+    const b = ask(hedge, ctlB.signal);
+    const winner = await Promise.race([
+      a.then((s) => ({ s, route: first })),
+      b.then((s) => ({ s, route: hedge })),
+    ]);
+    const loserCtl = winner.route === first ? ctlB : ctlA;
+    if (winner.s.ok) {
+      loserCtl.abort();
+      // The loser gets no latency sample of its own; the slow first route earns "slow".
+      if (winner.route === hedge) noteLatency(first, Math.max(Date.now() - started, SLOW_ROUTE_MS + 1));
+      noteLatency(winner.route, Date.now() - (winner.route === first ? started : hedgeStart));
+      return { reply: winner.s.reply, route: winner.route, ms: Date.now() - started };
+    }
+    const other = await (winner.route === first ? b : a);
+    if (other.ok) {
+      const route = winner.route === first ? hedge : first;
+      noteLatency(route, Date.now() - (route === first ? started : hedgeStart));
+      return { reply: other.reply, route, ms: Date.now() - started };
+    }
+    throw winner.route === first ? winner.s.err : other.err;
+  }
+}
+
+/** When a chat call hasn't answered by then, a second model is asked in parallel. Typical
+ *  turns answer in 1.5–2.5s (measured 2026-09-26). */
+const HEDGE_AFTER_MS = 6_000;
+
+/** An AbortController that also aborts when `parent` does. */
+function linkedAbort(parent?: AbortSignal): AbortController {
+  const ctl = new AbortController();
+  if (parent?.aborted) ctl.abort();
+  else parent?.addEventListener("abort", () => ctl.abort(), { once: true });
+  return ctl;
 }
 
 /** A 400 saying this MODEL can't do tool/function calling. Marking is permanent, so
@@ -254,6 +336,35 @@ export function rejectsTools(err: unknown): boolean {
 
 /** Longest a turn will wait for a briefly-benched route before calling it spent. */
 const SHORT_WAIT_MS = 15_000;
+
+/** Answer latency per provider/model, recent turns only. Every phone command waits for a
+ *  chat turn before its task can start, and on 2026-09-26 gemma-4-31b took 16.6s for one
+ *  while the next route answers in ~2s — so a route slow lately is tried after the others
+ *  (quality order kept among the rest; it still answers if they all fail). Remembered an hour. */
+const recentLatency = new Map<string, { ms: number; at: number }>();
+const SLOW_ROUTE_MS = 8_000;
+const LATENCY_MEMORY_MS = 60 * 60_000;
+const latencyKey = (r: quota.Route) => `${r.provider}/${r.model}`;
+
+export function noteLatency(route: quota.Route, ms: number, now = Date.now()): void {
+  const prev = recentLatency.get(latencyKey(route));
+  const fresh = prev && now - prev.at < LATENCY_MEMORY_MS;
+  recentLatency.set(latencyKey(route), { ms: fresh ? (prev.ms + ms) / 2 : ms, at: now });
+}
+
+function slowLately(route: quota.Route, now: number): boolean {
+  const e = recentLatency.get(latencyKey(route));
+  return !!e && now - e.at < LATENCY_MEMORY_MS && e.ms > SLOW_ROUTE_MS;
+}
+
+/** The ladder with routes that were slow lately moved behind the rest (stable otherwise). */
+export function fastFirst<T extends quota.Route>(routes: T[], now = Date.now()): T[] {
+  return [...routes].sort((a, b) => Number(slowLately(a, now)) - Number(slowLately(b, now)));
+}
+
+export function resetLatency(): void {
+  recentLatency.clear();
+}
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

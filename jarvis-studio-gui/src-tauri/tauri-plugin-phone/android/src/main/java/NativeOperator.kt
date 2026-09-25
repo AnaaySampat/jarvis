@@ -318,6 +318,7 @@ object NativeOperator {
                         selected = n.selected,
                         password = n.password,
                         bounds = OpBounds(n.bounds.left, n.bounds.top, n.bounds.width(), n.bounds.height()),
+                        path = n.path,
                     )
                 },
             )
@@ -342,7 +343,8 @@ object NativeOperator {
             // each) on every 150ms poll.
             fun foreground() = svc()?.rootInActiveWindow?.packageName?.toString().orEmpty()
             val before = foreground()
-            if (!withContext(Dispatchers.IO) { launchApp(context, name) }) {
+            // fresh: a task starts on the app's main screen, not wherever the last task left it.
+            if (!withContext(Dispatchers.IO) { launchApp(context, name, fresh = true) }) {
                 return OpResult(false, "Couldn't find an app called $name.")
             }
             // An accepted launch intent is not a launched app. Wait (briefly) for the
@@ -422,6 +424,10 @@ object NativeOperator {
         private val shouldStop: suspend () -> Boolean,
     ) : OperatorModelClient {
         companion object {
+            /** The route that last beat the ladder's first choice in a hedge ("provider/model#key"),
+             *  kept across tasks for this process; null = the brain's order. */
+            @Volatile private var fastRoute: String? = null
+
             /** Wait for a route only when one returns within this long — a full
              *  per-minute window, since that's what a TPM/RPM bucket can take to refill. */
             private const val MAX_SINGLE_WAIT_MS = 65_000L
@@ -457,7 +463,9 @@ object NativeOperator {
                 var waited = 0L
                 var last = ""
                 while (true) {
-                    val ready = routes.indices.firstOrNull { pacer.readyIn(it, estTokens) == 0L }
+                    // A route that just beat the ladder's first choice in a hedge goes first.
+                    val order = routes.indices.sortedBy { if (routeId(routes[it]) == fastRoute) 0 else 1 }
+                    val ready = order.firstOrNull { pacer.readyIn(it, estTokens) == 0L }
                     if (ready == null) {
                         val (soonest, wait) = routes.indices
                             .map { it to pacer.readyIn(it, estTokens) }
@@ -512,6 +520,8 @@ object NativeOperator {
                 )
             }
 
+        private fun routeId(r: RouteSpec) = "${r.provider}/${r.model}#${r.keyIndex}"
+
         /** The in-flight connection of one request, so a hedge's loser can be cut off. */
         private class Call {
             @Volatile var conn: HttpURLConnection? = null
@@ -549,6 +559,12 @@ object NativeOperator {
                 b.onAwait { alt to it }
             }
             if (done.second.isSuccess) {
+                // The race winner goes first from now on — this task and the next ones: on
+                // 2026-09-26 gemini-3.5-flash-lite took 5–13s on every call while
+                // 2.5-flash-lite answered the hedge in ~1.4s, call after call. A promoted route
+                // that turns slow gets hedged in turn and loses its seat to the next winner.
+                fastRoute = routeId(routes[done.first])
+                Log.i(TAG, "hedge won by ${routeId(routes[done.first])}")
                 (if (done.first == first) callB else callA).conn?.disconnect()
                 return listOf(done)
             }
@@ -576,10 +592,13 @@ object NativeOperator {
             val sameModel = routes.indices.filter { routes[it].model == r.model }
             val forMs = pacer.noteFailure(i, e.status, e.detail, e.retryAfterMs, sameModel)
             val shown = if (forMs >= RoutePacer.GONE) "for this task" else "${forMs / 1000}s"
+            // Which quota ran out (tokens vs requests per minute) decides whether shorter
+            // prompts or fewer calls would help; Gemini names it in the body.
+            val quota = Regex("\"quotaId\":\\s*\"([^\"]+)\"").find(e.detail)?.groupValues?.get(1).orEmpty()
             Log.w(
                 TAG,
                 "route ${r.provider}/${r.model}#${r.keyIndex} benched $shown: ${e.status} " +
-                    "window=${RoutePacer.limitWindow(e.detail)} retryAfter=${e.retryAfterMs} " +
+                    "window=${RoutePacer.limitWindow(e.detail)} retryAfter=${e.retryAfterMs} quota=$quota " +
                     e.detail.replace(Regex("\\s+"), " ").take(240),
             )
             onBench(
@@ -738,18 +757,25 @@ internal object LauncherApps {
  *  and…"), or null when none or two different apps are named. The longest label wins
  *  when one contains another ("YouTube Music" over "YouTube"). JARVIS itself never counts. */
 internal fun appNamedInGoal(context: Context, goal: String): String? {
+    // "on my phone, check Settings…" names the DEVICE, not Samsung's Phone app — counted as
+    // an app, it made two matches and cost the task its no-model-call open (2026-09-26).
+    val said = goal.replace(Regex("(?i)\\b(my|the|this|your)\\s+(phone|device|mobile)\\b"), " ")
     val named = LauncherApps.all(context)
         .filter { it.packageName != context.packageName }
         .map { it.label }
         .filter { it.length >= 3 }
         .distinct()
-        .filter { Regex("(?<![\\p{L}\\p{N}])${Regex.escape(it)}(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(goal) }
+        .filter { Regex("(?<![\\p{L}\\p{N}])${Regex.escape(it)}(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(said) }
     val outermost = named.filter { a -> named.none { b -> b != a && b.contains(a, ignoreCase = true) } }
     return outermost.singleOrNull()
 }
 
 /** Resolve a user-facing app name (or package) to its launcher activity and start it. */
-internal fun launchApp(context: Context, name: String): Boolean {
+/** [fresh]: return to the app's main screen (CLEAR_TOP on its launcher activity) instead of
+ *  resuming the page it was last on — Settings reopened on "Storage" left by the previous
+ *  task, and the operator looped "home → open Settings" trying to get out (2026-09-26). The
+ *  app keeps running (music keeps playing); only the screens above its main one close. */
+internal fun launchApp(context: Context, name: String, fresh: Boolean = false): Boolean {
     val target = name.trim().lowercase()
     if (target.isEmpty()) return false
     fun find(apps: List<LauncherApps.App>) =
@@ -762,6 +788,7 @@ internal fun launchApp(context: Context, name: String): Boolean {
                 addCategory(Intent.CATEGORY_LAUNCHER)
                 setClassName(app.packageName, app.className)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                if (fresh) addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             },
         )
         true
