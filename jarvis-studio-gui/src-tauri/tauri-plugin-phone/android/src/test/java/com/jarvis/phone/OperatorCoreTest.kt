@@ -18,9 +18,10 @@ class OperatorCoreTest {
         val targets = mutableListOf<OpTarget>()
         /** Codes the next taps fail with, in order (then they succeed). */
         val tapFailures = ArrayDeque<String>()
+        var shot: String? = null
         private var observed = 0
         override suspend fun observe(): OpObservation = screens[minOf(observed++, screens.size - 1)]
-        override suspend fun screenshot(): String? = null
+        override suspend fun screenshot(): String? = shot
         override suspend fun openApp(name: String) = rec("openApp:$name")
         override suspend fun tap(target: OpTarget): OpResult {
             tapFailures.removeFirstOrNull()?.let { code ->
@@ -33,6 +34,7 @@ class OperatorCoreTest {
         override suspend fun doubleTap(target: OpTarget) = rec("doubleTap:${target.index}", target)
         override suspend fun setText(target: OpTarget, text: String) = rec("setText:${target.index}:$text", target)
         override suspend fun typeText(target: OpTarget, text: String) = rec("type:$text", target)
+        override suspend fun pressEnter(target: OpTarget) = rec("enter:${target.index}", target)
         override suspend fun tapXY(x: Int, y: Int, generation: Long, expectedApp: String) = rec("tapXY:$x,$y")
         override suspend fun drag(fromX: Int, fromY: Int, toX: Int, toY: Int, generation: Long, expectedApp: String) =
             rec("drag:$fromX,$fromY->$toX,$toY")
@@ -47,14 +49,15 @@ class OperatorCoreTest {
     }
 
     private class ScriptedModel(vararg replies: String) : OperatorModelClient {
-        override val wantsImages = false
+        var vision = false
+        override val wantsImages get() = vision
         private val queue = ArrayDeque(replies.toList())
         val prompts = mutableListOf<String>()
-        val timeouts = mutableListOf<Long>()
+        val imageCounts = mutableListOf<Int>()
         var error: Exception? = null
         override suspend fun next(system: String, user: String, images: List<String>, timeoutMs: Long): String {
             prompts += user
-            timeouts += timeoutMs
+            imageCounts += images.size
             error?.let { throw it }
             return queue.removeFirstOrNull() ?: throw ModelException("script exhausted")
         }
@@ -222,20 +225,146 @@ class OperatorCoreTest {
         assertEquals(listOf("tapFailed:0:stale_observation"), dev.actions)
     }
 
-    @Test fun thePlanGetsAShortOptionalCeiling() {
-        val m = ScriptedModel("1. Tap Go", """{"do":"fail","summary":"x"}""")
-        run("press go", FakeDevice(listOf(screen(node(0, "Go")))), m, plan = true)
-        assertEquals(OperatorLoop.PLAN_TIMEOUT_MS, m.timeouts[0])
-        assertEquals(OperatorLoop.MODEL_TIMEOUT_MS, m.timeouts[1])
+    @Test fun thePlanRidesOnTheFirstCommandWithoutAnExtraModelCall() {
+        val dev = FakeDevice(listOf(screen(node(0, "Go"))))
+        val m = ScriptedModel("""{"do":"tap","target":0,"plan":["Tap Go","Check it went"]}""", """{"do":"done","summary":"Went."}""")
+        val out = run("press go", dev, m, plan = true)
+        assertTrue(out.summary, out.ok)
+        assertEquals(2, m.prompts.size) // no separate planning call
+        assertTrue(m.prompts[0].contains("FIRST STEP"))
+        assertFalse(m.prompts[1].contains("FIRST STEP"))
+        assertTrue(m.prompts[1].contains("1. Tap Go") && m.prompts[1].contains("2. Check it went"))
+        assertEquals(listOf("tap:0"), dev.actions)
+    }
+
+    // ── Completion checking ──
+
+    @Test fun aSecondRejectionWithNothingDoneInBetweenEndsHonestly() {
+        val dev = FakeDevice(listOf(screen(node(0, "Go"))))
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Pressed."}""", """{"do":"done","summary":"Pressed."}""")
+        val out = run("press go", dev, m,
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"no sign of it"}""", """{"verdict":"fail","reason":"still no sign"}"""))
+        assertFalse(out.ok)
+        assertEquals("unverified", out.error)
+        assertTrue(out.summary, out.summary.contains("Pressed.") && out.summary.contains("still no sign"))
+        assertEquals(3, m.prompts.size) // stopped, instead of burning steps re-claiming
+    }
+
+    @Test fun anUnfinishedSoundingDoneGoesBackToWorkInsteadOfEnding() {
+        val dev = FakeDevice(listOf(screen(node(0, "Go"))))
+        val verifier = ScriptedModel(pass)
+        val out = run("press go", dev,
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"I will wait for it to load"}""",
+                """{"do":"tap","target":0}""", """{"do":"done"}"""),
+            verifier = verifier)
+        assertTrue(out.summary, out.ok)
+        assertEquals(1, verifier.prompts.size) // the unfinished claim never reached the checker
+    }
+
+    @Test fun aStuckTaskWhoseGoalIsAlreadyMetSucceeds() {
+        // The Spotify case: the song is playing, the operator doesn't see it and keeps
+        // tapping — the screen never changes. Before giving up, the checker looks.
+        val dev = FakeDevice(listOf(screen(node(0, "Pause", role = "ImageButton"))))
+        val out = run("play the song", dev, ScriptedModel(*Array(4) { """{"do":"tap","target":0}""" }),
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"The song is playing."}"""))
+        assertTrue(out.summary, out.ok)
+        assertEquals("The song is playing.", out.summary)
+        assertTrue(OperatorLoop.VERIFICATION_RECEIPT_RE.matches(out.verificationReceipt))
+    }
+
+    @Test fun aStuckTaskStillFailsWhenTheCheckerSaysNo() {
+        val dev = FakeDevice(listOf(screen(node(0, "Go"))))
+        val out = run("press go", dev, ScriptedModel(*Array(4) { """{"do":"tap","target":0}""" }),
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"nope"}"""))
+        assertFalse(out.ok)
+        assertEquals("incomplete", out.error)
+        assertEquals("", out.verificationReceipt)
+    }
+
+    @Test fun theCheckerSeesAFreshScreenAScreenshotAndTheNotedFacts() {
+        val before = screen(node(0, "Loading"))
+        val after = screen(node(0, "Android version 16"), gen = 9)
+        val dev = FakeDevice(listOf(before, before, after)).apply { shot = "SHOT" }
+        val verifier = ScriptedModel(pass).apply { vision = true }
+        val out = run("find the android version", dev,
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"note","text":"build 16.0"}""", """{"do":"done","summary":"Android 16."}"""),
+            verifier = verifier)
+        assertTrue(out.summary, out.ok)
+        assertTrue(verifier.prompts[0].contains("Android version 16"))
+        assertTrue(verifier.prompts[0].contains("build 16.0"))
+        assertEquals(listOf(1), verifier.imageCounts)
+    }
+
+    @Test fun parseVerdictAcceptsHowModelsActuallyAnswer() {
+        assertEquals(true, parseVerdict("""{"verdict":"PASS"}""")?.pass)
+        assertEquals(true, parseVerdict("```json\n{\"result\":\"passed\",\"summary\":\"Timer running.\"}\n```")?.pass)
+        assertEquals("Timer running.", parseVerdict("""{"result":"passed","summary":"Timer running."}""")?.text)
+        assertEquals(true, parseVerdict("""{"pass":true}""")?.pass)
+        assertEquals(false, parseVerdict("""{"success":false,"reason":"x"}""")?.pass)
+        assertEquals("no timer", parseVerdict("""{"verdict":"Fail","reason":"no timer"}""")?.text)
+        assertEquals(true, parseVerdict("PASS.")?.pass)
+        assertEquals(null, parseVerdict("sure, looks fine"))
+        assertEquals(null, parseVerdict("""{"verdict":"maybe"}"""))
+    }
+
+    // ── Vision ──
+
+    @Test fun lookAttachesAScreenshotToTheNextStepOnly() {
+        val screens = (0..5).map { g -> screen(*(0 until 12).map { node(it, "Row $it $g") }.toTypedArray(), gen = g.toLong()) }
+        val dev = FakeDevice(screens).apply { shot = "SHOT" }
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"look"}""", """{"do":"tap","target":1}""",
+            """{"do":"done","summary":"ok"}""").apply { vision = true }
+        run("tap rows", dev, m)
+        // first look · none · after `look` · none again
+        assertEquals(listOf(1, 0, 1, 0), m.imageCounts)
+        assertTrue(m.prompts[1].contains("SCREENSHOT: none"))
+        assertTrue(m.prompts[2].contains("SCREENSHOT: attached"))
     }
 
     // ── Policy ──
 
-    @Test fun rawCoordinatesNeedApproval() {
+    @Test fun unlabelledCoordinatesNeedApproval() {
         val dev = FakeDevice(listOf(screen(node(0, "Go"))))
         val out = run("open the menu", dev, ScriptedModel("""{"do":"tap_xy","x":5,"y":5}"""))
         assertTrue(out.needsApproval)
         assertTrue(dev.actions.isEmpty())
+    }
+
+    @Test fun labelledPixelTapsAndDragsRunInALowRiskTask() {
+        val dev = FakeDevice(listOf(screen(node(0, "Keypad"), node(1, "Brightness"))))
+        val out = run(
+            "set a 5 minute timer", dev,
+            ScriptedModel(
+                """{"do":"tap_xy","x":150,"y":40,"label":"key 5"}""",
+                """{"do":"drag","from_x":10,"from_y":150,"to_x":180,"to_y":150,"label":"brightness slider"}""",
+                """{"do":"done","summary":"Set."}""",
+            ),
+        )
+        assertEquals(listOf("tapXY:150,40", "drag:10,150->180,150"), dev.actions)
+        assertTrue(out.summary, out.ok)
+    }
+
+    @Test fun pixelTapsAreRefusedOnRiskyTargetsAndInSideEffectTasks() {
+        val s = screen(node(0, "Pay now"), node(1, "Photo"))
+        fun c(json: String) = parseCommand(json)!!
+        assertEquals("R3", classifyAction("open photos", c("""{"do":"tap_xy","x":50,"y":40,"label":"banner"}"""), s).risk)
+        assertEquals("R1", classifyAction("open photos", c("""{"do":"tap_xy","x":50,"y":140,"label":"photo"}"""), s).risk)
+        assertEquals("R2", classifyAction("message mom", c("""{"do":"tap_xy","x":50,"y":140,"label":"photo"}"""), s).risk)
+        assertEquals(null, coordPoints(c("""{"do":"tap_xy","x":5000,"y":40}"""), s)) // off screen
+        val dev = FakeDevice(listOf(s))
+        val out = run("message mom hi", dev, ScriptedModel("""{"do":"tap_xy","x":50,"y":140,"label":"photo"}"""))
+        assertTrue(out.needsApproval)
+        assertTrue(dev.actions.isEmpty())
+    }
+
+    @Test fun enterSubmitsTheFieldAndNeedsConsentWhereItCouldSend() {
+        val field = node(0, "", role = "EditText", editable = true, focused = true)
+        val dev = FakeDevice(listOf(screen(field), screen(field.copy(text = "alarms"), gen = 8)))
+        val out = run("search settings for alarms", dev,
+            ScriptedModel("""{"do":"set_text","target":0,"text":"alarms"}""", """{"do":"enter","target":0}""", """{"do":"done","summary":"Searched."}"""))
+        assertEquals(listOf("setText:0:alarms", "enter:0"), dev.actions)
+        assertTrue(out.summary, out.ok)
+        assertEquals("R2", classifyAction("draft a message to mom, don't send it", parseCommand("""{"do":"enter"}""")!!, screen(field)).risk)
     }
 
     @Test fun anExternalCommitPausesWithoutUpFrontConsent() {
@@ -355,7 +484,7 @@ class OperatorCoreTest {
         val b = screen(node(0, "A"), node(1, "B"), gen = 8)
         val dev = FakeDevice(listOf(a, b, a, b, a, b, a, b, a))
         val m = ScriptedModel(*Array(8) { if (it % 2 == 0) """{"do":"tap","target":0}""" else """{"do":"tap","target":1}""" })
-        val out = run("toggle", dev, m)
+        val out = run("toggle", dev, m, verifier = ScriptedModel("""{"verdict":"fail","reason":"nothing toggled"}"""))
         assertTrue(out.summary.contains("going in circles"))
     }
 
@@ -399,12 +528,10 @@ class OperatorCoreTest {
         assertTrue(m.prompts[1].contains("no one to ask"))
     }
 
-    @Test fun plansOnceAndShowsThePlanOnEveryStep() {
-        val dev = FakeDevice(listOf(screen(node(0, "Go"))))
-        val m = ScriptedModel("1. Tap Go\n2. Confirm", """{"do":"tap","target":0}""", """{"do":"done","summary":"Went."}""")
-        run("press go", dev, m, plan = true)
-        assertTrue(m.prompts[1].contains("PLAN") && m.prompts[1].contains("1. Tap Go"))
-        assertTrue(m.prompts[2].contains("1. Tap Go"))
+    @Test fun planFromAcceptsAListOrLines() {
+        assertEquals("1. Open Clock\n2. Start", planFrom(org.json.JSONObject("""{"do":"x","plan":["Open Clock","Start"]}""")))
+        assertEquals("1. Open Clock\n2. Start", planFrom(org.json.JSONObject("{\"do\":\"x\",\"plan\":\"1. Open Clock\\n2) Start\"}")))
+        assertEquals("", planFrom(org.json.JSONObject("""{"do":"x"}""")))
     }
 
     @Test fun focusRefusesANonField_andTypeNeedsAFocusedField() {

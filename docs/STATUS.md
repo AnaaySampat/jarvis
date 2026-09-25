@@ -68,6 +68,8 @@ useBrain's model-discovery effect (the rule can't see the setState is after an `
 | ✅ | Spotify search + play by voice (2026-09-25, SM-E156B, release build) | 19:29–19:30: "open Spotify and play Back in Black by AC/DC" opened Spotify, reached the real search box, typed the query and started the song (the demo GIF). The log shows the search box was reached with an element tap (`tap[7]`) after the screenshot-on-sparse-screen change, and `set_text` then succeeded. **Not claimed:** that `tap_point` was used — it never fired in this run. Known gap: after playback started the operator kept tapping play/pause and ended "nothing is changing" (`incomplete`) instead of recognising success |
 | 🟡 | `tap_point`: tap a spot from the screenshot when an app hides its UI from accessibility (2026-09-25) | Spotify's Search page exposes only its four bottom tabs, which explains the two earlier failures (tapping the "Search" tab label, typing into tab labels). Screenshot now sent whenever < 10 labelled elements; `tap_point` in thousandths of the screenshot, allowed without approval only in low-risk tasks (SECURITY.md). JVM-tested; **not yet exercised live** |
 | 🟡 | Typing into search boxes whose placeholder is a separate node (2026-09-25) | `fieldFor()` redirects typing aimed at a label to the editable field enclosing it; a node counts as editable if it accepts `ACTION_SET_TEXT`. JVM-tested. (It did not cause the Spotify failures — see `tap_point` — and whether it fired in the successful run isn't logged) |
+| 🟡 | Autopilot pass (2026-09-25 evening): coordinate taps, done-check, speed | `tap_xy`/`drag` now run under `tap_point`'s low-risk rule instead of ending the task; `enter` (IME Search/Go); `look` for an on-demand screenshot; plan folded into the first command (one model call fewer); `open_app` waits for the first screen to settle. Done-check: fresh observation + screenshot + noted facts, tolerant verdict parsing, unfinished-sounding `done` sent back to work, second rejection ends as `unverified`, and a checker look before every give-up (the Spotify play/pause case). A tap on a never-quiet screen now reports ok instead of `quiescence_timeout` (the failure that made it re-tap toggles). 60 JVM tests pass; APK built and installed. **Not yet run live**: the phone's accessibility service was found OFF (see the exit-crash row) |
+| ✅ | Swiping JARVIS out of Recents no longer crashes the app (2026-09-25) | Root cause of the accessibility service switching itself off: activity destroyed → tao `std::process::exit` → onnxruntime's C++ static destructors ran under the wake-word threads → SIGABRT/SIGSEGV → `am_crash: Native crash` → Android disabled JARVIS's accessibility service ~1s later (logcat 19:51:02–04). Fix: `_exit(0)` on `RunEvent::Exit` on mobile (`lib.rs`). Reproduced with `am stack remove` before the fix (native crash), clean `am_proc_died` with no crash after, wake-word service restarted by itself |
 | ✅ | Cross-app STOP overlay | Works even without the a11y service, via a `TYPE_APPLICATION_OVERLAY` fallback |
 | — | Replay cache for known goals | **Removed** with the native move (2026-09-23). It had never promoted a workflow on-device, so there was nothing to port |
 | ✅ | Planner / executor / verifier roles | Live 2026-09-23: plan, steps, and an independent PASS with a durable receipt. JVM-tested in `OperatorCoreTest.kt` |
@@ -419,9 +421,11 @@ turn answered on its first route.
 0b. **Watch one long phone task after the 09-25 routing fixes** — the verified runs were
    12–33s. A multi-minute task would exercise the transient ladder and the native 400
    failover, neither of which fired live yet.
-0c. **Recognise success when the goal is visibly met.** In the Spotify demo the song started, but the operator
-   kept tapping play/pause (pausing it) and ended `incomplete`. It should check the goal against the screen
-   ("Back In Black" now playing) and finish with `done` — then exercise `tap_point` live.
+0c. **Live-run the 2026-09-25 autopilot pass.** Re-enable JARVIS in Accessibility first (it
+   was switched off by the exit crash, now fixed). Then: the Spotify play task (should end
+   verified, not toggle play/pause), a Clock stopwatch start (live screen), a Settings search
+   with `enter`, and one `tap_point`/`tap_xy` on an app that hides its UI. Watch logcat
+   `JarvisOperator` for `plan:` on step 1, `done rejected`, and `goal is already met`.
 1b. **Re-test the rest of the 2026-09-22 fixes on a device.** Still unexercised: the remote
    STOP button, a long spoken reply, and adding then deleting a calendar-mirrored agenda
    item.

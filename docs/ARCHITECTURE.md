@@ -290,20 +290,46 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
 
 ### What the loop enforces
 
-- **Roles.** One up-front plan (20 s ceiling, optional — never failed over), an executor
-  step per command (90 s ceiling; one carried a screenshot past 31 s), and an independent
-  completion checker.
+- **Roles.** An executor step per command (90 s ceiling; one carried a screenshot past
+  31 s) and an independent completion checker. The plan (2–5 checkable steps) rides on
+  the **first** command's `"plan"` field — it used to be its own model call before the
+  first step.
+- **Vision.** A screenshot goes with a step only when it earns its latency: the first look
+  at each app (never at JARVIS itself), after a failed action, when stuck, after a
+  coordinate tap, on a sparse element list (< 10 labelled — the app is hiding its UI), or
+  when the model asks with `{"do":"look"}`. The prompt says whether one is attached; when
+  the ladder falls through to an OpenAI-format route (no image in that body), native
+  appends a note saying it wasn't sent.
 - **Guards.** Adaptive step and wall-clock budget (only a *progressing* task earns more),
   cycle detector, no-progress detector, duplicate-message guard, and a STOP check before
   every action (the journal's cancel flag + the overlay's STOP counter).
 - **Policy (R0–R3).** Consent for an external side effect (R2: send, share, post, call) is
   taken **up front** — `operator_start` answers `needsConsent` and the brain asks while
   JARVIS is still on screen. Mid-task approval is impossible (JARVIS's UI is behind the
-  driven app), so any R3 step, and any R2 step without that consent — including raw
-  `tap_xy`/`drag` — suspends the task honestly. There is no mid-task "ask the user" either.
-- **Truthful completion.** A `done` is only reported after the checker PASSes it against
-  the current screen, with a receipt the journal's compare-and-set accepts. Running out of
-  quota *after acting* says what was last done, so the user checks instead of resending.
+  driven app), so any R3 step, and any R2 step without that consent, suspends the task
+  honestly. There is no mid-task "ask the user" either.
+- **Coordinates.** `tap_point` (thousandths of the screenshot), `tap_xy` and `drag` (pixels,
+  as element bounds are printed) share one policy, `classifyPoint`: R1 only in a low-risk
+  goal, with a label that passes the R2/R3 word checks and no risky element under any
+  point touched — re-checked on a fresh observation right before acting, against the app
+  rather than the exact generation (animated pages would fail every time). Unlabelled, or
+  in an R2 goal, it's R2. `enter` (the keyboard's Enter/Search key, `ACTION_IME_ENTER`) is
+  R2 in any goal that mentions messaging, since Enter can send.
+- **Truthful completion.** A `done` is only reported after the checker PASSes it, with a
+  receipt the journal's compare-and-set accepts. The checker judges a **fresh** observation
+  (plus a screenshot when it takes images, plus the facts noted during the task), and
+  ordinary UI state counts as evidence (a Pause control = playing). A `done` whose summary
+  narrates non-completion is sent back to work, not ended. A second rejection with nothing
+  done in between ends the task as `unverified` ("I think X, but couldn't confirm it")
+  instead of burning steps re-claiming. Before any give-up (cycle, no progress, step or
+  time budget) the checker looks once: a goal already met on screen succeeds — the
+  2026-09-25 Spotify run had the song playing while the operator toggled play/pause into
+  "nothing is changing". Running out of quota *after acting* says what was last done, so
+  the user checks instead of resending.
+- **Settling.** A tap whose screen never goes quiet (a running timer, a progress bar) is
+  reported done with a note, not as failed — the failure made the operator tap again,
+  which on a toggle undoes it. `open_app` waits for the new app's first screen to settle
+  (≤ 2.5 s) so the first look isn't a splash screen.
 - **Stale observations.** Every action is bound to the observation's generation, and a
   live screen moves it on during a model call. On `stale_observation` the loop re-observes
   **once** and retries only if the same control (its native selector) is still there at
@@ -517,6 +543,14 @@ shape; facts saved before it existed are undated and just don't appear on the ti
 tray, global hotkey, spawning the Python sidecar) behind `#[cfg(desktop)]`. Mobile builds
 compile those blocks out entirely. Add desktop-only capabilities the same way — not with
 a runtime `IS_MOBILE` branch.
+
+**The one mobile-only Rust block: exit.** When the activity is destroyed (swiped out of
+Recents), tao exits the process. A normal `exit()` runs C++ static destructors, and
+onnxruntime's tore down under the live wake-word threads — a native crash, which made
+Android switch JARVIS's accessibility service off. `RunEvent::Exit` therefore ends a
+mobile process with `_exit(0)`. Don't swap it for `prevent_exit()`: tao starts a fresh
+app instance on every activity `onCreate`, so a process that outlives its activity would
+run two Tauri apps.
 
 **Config: per platform.** `tauri.conf.json` declares four desktop windows (`main`,
 `overlay`, `browser-panel`, `control-overlay`); on Android Tauri built WebViews for them

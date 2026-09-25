@@ -400,6 +400,21 @@ pub fn run() {
                         }
                     }
                 }
+                // Swiping JARVIS out of Recents destroys the activity, and tao then calls
+                // `std::process::exit`, whose C++ static destructors tear down onnxruntime
+                // while the wake-word service's ONNX threads still run: SIGABRT "pthread_mutex_lock
+                // called on a destroyed mutex" (tombstone 2026-09-25 19:51). Android treats that
+                // native crash as the accessibility service crashing and switches it OFF, so every
+                // phone task fails until the user re-enables it. The process is ending either way;
+                // end it without running the destructors.
+                #[cfg(mobile)]
+                {
+                    extern "C" {
+                        fn _exit(status: i32) -> !;
+                    }
+                    // SAFETY: _exit only terminates the process; no Rust state is touched after it.
+                    unsafe { _exit(0) }
+                }
             }
         });
 }

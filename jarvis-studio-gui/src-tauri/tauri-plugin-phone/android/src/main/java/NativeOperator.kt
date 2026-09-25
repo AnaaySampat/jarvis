@@ -37,6 +37,8 @@ object NativeOperator {
     private const val ACTION_TIMEOUT_MS = 15_000L
     private const val SCREENSHOT_TIMEOUT_MS = 5_000L
     private const val LAUNCH_SETTLE_MS = 4_000L
+    private const val LAUNCH_QUIET_MS = 400L
+    private const val LAUNCH_QUIET_MAX_MS = 2_500L
     private val ACTIVE_STATES = setOf("planning", "policy_check", "executing", "verifying")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -339,6 +341,12 @@ object NativeOperator {
                 if (now.isNotEmpty() && now != before) break
                 delay(150)
             }
+            // ...and let its first screen finish drawing: observing a splash screen costs a
+            // whole model round-trip that only says "wait".
+            val settleBy = SystemClock.elapsedRealtime() + LAUNCH_QUIET_MAX_MS
+            while (SystemClock.elapsedRealtime() < settleBy && (svc()?.quietForMs() ?: Long.MAX_VALUE) < LAUNCH_QUIET_MS) {
+                delay(100)
+            }
             return OpResult(true, "Opened $name.")
         }
 
@@ -369,6 +377,7 @@ object NativeOperator {
             act { s, done -> s.setTextIndex(receipt(target), text, done) }
         override suspend fun typeText(target: OpTarget, text: String) =
             act { s, done -> s.typeFocused(receipt(target), text, done) }
+        override suspend fun pressEnter(target: OpTarget) = act { s, done -> s.imeEnter(receipt(target), done) }
         override suspend fun tapXY(x: Int, y: Int, generation: Long, expectedApp: String) =
             act { s, done -> s.tapXY(x, y, generation, expectedApp, done) }
         override suspend fun drag(fromX: Int, fromY: Int, toX: Int, toY: Int, generation: Long, expectedApp: String) =
@@ -402,6 +411,8 @@ object NativeOperator {
             private const val MAX_TOTAL_WAIT_MS = 90_000L
             /** Rough output allowance added to the prompt estimate (maxOutputTokens). */
             private const val OUTPUT_TOKENS = 800
+            private const val NO_IMAGE_NOTE = "\n\n(NOTE: the screenshot could NOT be sent on this route — work " +
+                "from the element list only, ignore any mention of an attached screenshot, and don't use tap_point.)"
         }
 
         override val wantsImages = routes.firstOrNull()?.format == "gemini"
@@ -509,7 +520,14 @@ object NativeOperator {
         }
 
         private fun post(i: Int, r: RouteSpec, system: String, user: String, images: List<String>, timeoutMs: Long): String {
-            val body = if (r.format == "gemini") geminiBody(r.model, system, user, images) else openAiBody(r, system, user)
+            // The screenshot only travels in the Gemini body. When the ladder falls through
+            // to an OpenAI-format route, say so — the prompt promised one, and a model told
+            // "attached" invents tap_point coordinates for an image it never got.
+            val body = if (r.format == "gemini") {
+                geminiBody(r.model, system, user, images)
+            } else {
+                openAiBody(r, system, if (images.isEmpty()) user else user + NO_IMAGE_NOTE)
+            }
             val conn = try {
                 (URL(r.url).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"

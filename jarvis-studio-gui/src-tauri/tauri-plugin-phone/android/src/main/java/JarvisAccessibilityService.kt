@@ -151,6 +151,9 @@ class JarvisAccessibilityService : AccessibilityService() {
         screenGeneration.incrementAndGet()
     }
 
+    /** How long the accessibility event stream has been quiet. */
+    fun quietForMs(): Long = SystemClock.elapsedRealtime() - lastEventAtMs
+
     /** Invalidates callbacks from every gesture already in flight. */
     fun cancelAllActions() {
         actionEpoch.incrementAndGet()
@@ -429,6 +432,24 @@ class JarvisAccessibilityService : AccessibilityService() {
         awaitQuiescence(actionEpoch.get(), done)
     }
 
+    /** The keyboard's Enter/Search/Go key on a text field (ACTION_IME_ENTER, Android 11+). */
+    fun imeEnter(receipt: TargetReceipt, done: (ActionReceipt) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return done(ActionReceipt(false, "This Android version can't press the keyboard's Enter key.", "unsupported", screenGeneration.get()))
+        }
+        val (resolved, error) = resolve(receipt)
+        if (resolved == null) return done(error!!)
+        if (!resolved.node.editable || resolved.node.password) {
+            return done(ActionReceipt(false, "Target is not a non-password text field.", "policy_blocked", screenGeneration.get()))
+        }
+        val node = resolved.node.handle
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        if (!node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+            return done(ActionReceipt(false, "That field has no keyboard Enter action — tap the search/submit button instead.", "action_failed", screenGeneration.get()))
+        }
+        awaitQuiescence(actionEpoch.get(), done)
+    }
+
     fun tapXY(x: Int, y: Int, expectedGeneration: Long, expectedApp: String, done: (ActionReceipt) -> Unit) {
         val stale = validateScreen(expectedGeneration, expectedApp)
         if (stale != null) return done(stale)
@@ -621,7 +642,11 @@ class JarvisAccessibilityService : AccessibilityService() {
                 return
             }
             if (now - started >= QUIESCENCE_TIMEOUT_MS) {
-                done(ActionReceipt(false, "The UI did not settle after the action.", "quiescence_timeout", screenGeneration.get()))
+                // The action itself was accepted (click performed / gesture completed); only
+                // the screen keeps moving — a running timer, a playing track's progress bar.
+                // Reporting that as a FAILED tap made the operator tap again, which on a
+                // toggle undoes it: play → pause (Spotify, 2026-09-25).
+                done(ActionReceipt(true, "Action completed; the screen is still changing (live content).", "ok", screenGeneration.get()))
                 return
             }
             handler.postDelayed(::poll, 50L)

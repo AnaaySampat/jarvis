@@ -232,7 +232,17 @@ point — re-checked on a fresh observation right before the tap. The exact
 screen-generation check is replaced by a same-app check for it, because animated pages
 would otherwise fail every time. **Residual risk, accepted:** in an app that hides its
 controls, a mis-tap during a harmless task could land on a control JARVIS can't read.
-`tap_xy` and `drag` still require approval. (`OperatorCore.kt` `classifyPoint`.)
+(`OperatorCore.kt` `classifyPoint`.)
+
+**Changed 2026-09-25 (later) — `tap_xy` and `drag` follow the same rule (owner's decision).** The
+owner asked for reliable coordinate tapping; `tap_xy` (pixels inside an element's bounds —
+one key of a keypad drawn as a single view, a spot on a seek bar) and `drag` (a slider)
+used to end every task, because they needed approval nobody could give mid-task. They now
+go through `classifyPoint` exactly like `tap_point` — label required, low-risk goal only,
+every point the gesture touches checked for R2/R3 elements on a fresh observation. In an
+R2 goal they remain R2 (allowed only on the up-front consent); in an R3 goal, R3. Same
+residual risk as `tap_point`. Also new: `enter` (the keyboard's Enter/Search key) is R2
+in any goal that mentions messaging, drafts included, since Enter can send.
 
 **Mitigation integrity — found and fixed 2026-09-22 (in source, not device-tested):**
 
