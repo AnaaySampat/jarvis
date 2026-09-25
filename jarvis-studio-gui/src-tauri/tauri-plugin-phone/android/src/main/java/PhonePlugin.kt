@@ -395,6 +395,8 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         createReminderChannel()
         requestNotificationPermission()
         AutonomyRecoveryWorker.enqueue(activity)
+        // ~3s of loadLabel calls, paid now in the background instead of by the first task.
+        Thread({ LauncherApps.all(activity.applicationContext) }, "launcher-apps-warmup").start()
     }
 
     /** Android 13+ drops notify() SILENTLY without this runtime grant — declaring it in

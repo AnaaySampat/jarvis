@@ -17,8 +17,10 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -38,7 +40,9 @@ object NativeOperator {
     private const val SCREENSHOT_TIMEOUT_MS = 5_000L
     private const val LAUNCH_SETTLE_MS = 4_000L
     private const val LAUNCH_QUIET_MS = 400L
-    private const val LAUNCH_QUIET_MAX_MS = 2_500L
+    /** A live app (a running stopwatch) never goes quiet; the loop's own splash re-look
+     *  (LAUNCH_SPARSE_RETRIES) covers slow first screens, so don't wait long here. */
+    private const val LAUNCH_QUIET_MAX_MS = 1_200L
     private val ACTIVE_STATES = setOf("planning", "policy_check", "executing", "verifying")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -282,8 +286,14 @@ object NativeOperator {
 
         override suspend fun observe(): OpObservation {
             val s = svc() ?: return OpObservation("", emptyList(), ready = false)
-            val snap = s.snapshot()
             val (screenW, screenH) = screenSize()
+            // JARVIS's own screen is never acted on (only left, with open_app), and its
+            // WebView is the biggest tree on the phone: walking it cost 0.9–3s per task
+            // start, and its ~5k chars slowed the first model call too.
+            if (s.rootInActiveWindow?.packageName?.toString() == context.packageName) {
+                return OpObservation(context.packageName, emptyList(), screenW = screenW, screenH = screenH)
+            }
+            val snap = s.snapshot()
             return OpObservation(
                 app = snap.app,
                 generation = snap.generation,
@@ -328,8 +338,11 @@ object NativeOperator {
             if (s?.isDeviceLocked() == true) {
                 return OpResult(false, "The phone is locked; task suspended until unlock.", "device_locked")
             }
-            val before = s?.snapshot()?.app.orEmpty()
-            if (!withContext(Dispatchers.Main) { launchApp(context, name) }) {
+            // The foreground package only — a full snapshot() here walked the whole tree (~1–2s
+            // each) on every 150ms poll.
+            fun foreground() = svc()?.rootInActiveWindow?.packageName?.toString().orEmpty()
+            val before = foreground()
+            if (!withContext(Dispatchers.IO) { launchApp(context, name) }) {
                 return OpResult(false, "Couldn't find an app called $name.")
             }
             // An accepted launch intent is not a launched app. Wait (briefly) for the
@@ -337,7 +350,7 @@ object NativeOperator {
             // the operator re-opened WhatsApp because it observed the launcher instead.
             val until = SystemClock.elapsedRealtime() + LAUNCH_SETTLE_MS
             while (SystemClock.elapsedRealtime() < until) {
-                val now = svc()?.snapshot()?.app.orEmpty()
+                val now = foreground()
                 if (now.isNotEmpty() && now != before) break
                 delay(150)
             }
@@ -383,6 +396,9 @@ object NativeOperator {
         override suspend fun drag(fromX: Int, fromY: Int, toX: Int, toY: Int, generation: Long, expectedApp: String) =
             act { s, done -> s.dispatchSwipe(fromX, fromY, toX, toY, 300L, generation, expectedApp, done) }
         override suspend fun scroll(direction: String) = act { s, done -> s.scrollDir(direction, done) }
+        override suspend fun appNamedIn(goal: String): String? = withContext(Dispatchers.IO) {
+            appNamedInGoal(context, goal)
+        }
         override suspend fun musicActive(): Boolean? =
             (context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)?.isMusicActive
         override suspend fun back() = act { s, done -> s.goBack(done) }
@@ -413,12 +429,18 @@ object NativeOperator {
             private const val MAX_TOTAL_WAIT_MS = 90_000L
             /** Rough output allowance added to the prompt estimate (maxOutputTokens). */
             private const val OUTPUT_TOKENS = 800
+            /** Hedge a call that hasn't answered by then: typical text steps take 1.3–2.5s,
+             *  steps carrying a screenshot 3.5–8s (measured 2026-09-25). */
+            private const val HEDGE_TEXT_MS = 5_000L
+            private const val HEDGE_IMAGE_MS = 10_000L
             private const val NO_IMAGE_NOTE = "\n\n(NOTE: the screenshot could NOT be sent on this route — work " +
                 "from the element list only, ignore any mention of an attached screenshot, and don't use tap_point.)"
         }
 
         override val wantsImages = routes.firstOrNull()?.format == "gemini"
         private val pacer = RoutePacer(routes.size) { SystemClock.elapsedRealtime() }
+        /** Hedged requests outlive the call that lost the race until they're cut off. */
+        private val hedgeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         private class HttpFail(
             val status: Int,
@@ -459,10 +481,9 @@ object NativeOperator {
                         waited += wait + 250
                         continue
                     }
-                    val r = routes[ready]
-                    try {
-                        return@withContext post(ready, r, system, user, images, timeoutMs)
-                    } catch (e: HttpFail) {
+                    fun fail(i: Int, e: Throwable?) {
+                        val r = routes[i]
+                        if (e !is HttpFail) throw e ?: ModelException("${r.provider} failed")
                         // Optional work on a shortened clock: a timeout says nothing about
                         // the route, so neither bench it nor spend more routes on it.
                         if (e.timedOut && timeoutMs < OperatorLoop.MODEL_TIMEOUT_MS) {
@@ -471,9 +492,18 @@ object NativeOperator {
                         if (!retryable(e.status)) {
                             throw ModelException("${r.provider} ${e.status}: ${e.detail.take(160)}")
                         }
-                        bench(ready, r, e)
+                        bench(i, r, e)
                         last = "${r.provider}/${r.model} ${if (e.status == 0) "unreachable" else e.status}"
                     }
+                    val outcomes = hedged(ready, system, user, images, timeoutMs, estTokens)
+                    outcomes.firstNotNullOfOrNull { it.second.getOrNull() }?.let { answer ->
+                        // A route that failed before the answer arrived still failed.
+                        outcomes.forEach { (i, o) ->
+                            (o.exceptionOrNull() as? HttpFail)?.takeIf { retryable(it.status) }?.let { bench(i, routes[i], it) }
+                        }
+                        return@withContext answer
+                    }
+                    outcomes.forEach { (i, o) -> fail(i, o.exceptionOrNull()) }
                 }
                 throw ModelException(
                     "I've used up the free quota on every model I can reach" + if (last.isNotEmpty()) " ($last)." else ".",
@@ -481,6 +511,49 @@ object NativeOperator {
                     transient = true,
                 )
             }
+
+        /** The in-flight connection of one request, so a hedge's loser can be cut off. */
+        private class Call {
+            @Volatile var conn: HttpURLConnection? = null
+        }
+
+        /**
+         * Ask route [first]; if it hasn't answered within the hedge delay, also ask the next
+         * ready route (preferring a different model) and take whichever answers first; the
+         * loser is disconnected. Free-tier latency has a long tail — 2026-09-25 saw 20.9s and
+         * 17.5s from a route that usually answers in ~2s — and a second request only goes
+         * out on that tail. Returns outcomes in arrival order, ending at the first success.
+         */
+        private suspend fun hedged(
+            first: Int,
+            system: String,
+            user: String,
+            images: List<String>,
+            timeoutMs: Long,
+            estTokens: Int,
+        ): List<Pair<Int, Result<String>>> {
+            val callA = Call()
+            val a = hedgeScope.async { runCatching { post(first, routes[first], system, user, images, timeoutMs, callA) } }
+            val delayMs = if (images.isEmpty()) HEDGE_TEXT_MS else HEDGE_IMAGE_MS
+            // Optional work on a shortened clock is never worth a second request.
+            val early = if (timeoutMs < OperatorLoop.MODEL_TIMEOUT_MS) a.await() else withTimeoutOrNull(delayMs) { a.await() }
+            if (early != null) return listOf(first to early)
+            val alt = routes.indices.filter { it != first && pacer.readyIn(it, estTokens) == 0L }
+                .let { ready -> ready.firstOrNull { routes[it].model != routes[first].model } ?: ready.firstOrNull() }
+                ?: return listOf(first to a.await())
+            Log.i(TAG, "${routes[first].provider}/${routes[first].model} slow (>${delayMs}ms) — also asking ${routes[alt].provider}/${routes[alt].model}")
+            val callB = Call()
+            val b = hedgeScope.async { runCatching { post(alt, routes[alt], system, user, images, timeoutMs, callB) } }
+            val done = select<Pair<Int, Result<String>>> {
+                a.onAwait { first to it }
+                b.onAwait { alt to it }
+            }
+            if (done.second.isSuccess) {
+                (if (done.first == first) callB else callA).conn?.disconnect()
+                return listOf(done)
+            }
+            return listOf(done, if (done.first == first) alt to b.await() else first to a.await())
+        }
 
         /** False if STOP arrived during the wait. */
         private suspend fun sleepUnlessStopped(ms: Long): Boolean {
@@ -521,7 +594,15 @@ object NativeOperator {
             )
         }
 
-        private fun post(i: Int, r: RouteSpec, system: String, user: String, images: List<String>, timeoutMs: Long): String {
+        private fun post(
+            i: Int,
+            r: RouteSpec,
+            system: String,
+            user: String,
+            images: List<String>,
+            timeoutMs: Long,
+            call: Call? = null,
+        ): String {
             // The screenshot only travels in the Gemini body. When the ladder falls through
             // to an OpenAI-format route, say so — the prompt promised one, and a model told
             // "attached" invents tap_point coordinates for an image it never got.
@@ -538,7 +619,7 @@ object NativeOperator {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
                     r.headers.forEach { (k, v) -> setRequestProperty(k, v) }
-                }
+                }.also { call?.conn = it }
             } catch (e: IOException) {
                 throw HttpFail(0, "connection failed: ${e.message}", null)
             }
@@ -633,28 +714,63 @@ internal fun thinkingOff(model: String): JSONObject? = when {
     else -> null
 }
 
+/** Launcher label → activity, built once per process and rebuilt when a lookup misses (an
+ *  app installed since). `loadLabel` costs ~20–40 ms an app, so a scan of every app took
+ *  ~3s on the M15 — and a task used to pay it twice (the goal's app name, then open_app). */
+internal object LauncherApps {
+    class App(val label: String, val packageName: String, val className: String)
+
+    @Volatile private var cache: List<App>? = null
+
+    @Synchronized
+    fun all(context: Context, refresh: Boolean = false): List<App> {
+        if (!refresh) cache?.let { return it }
+        val pm = context.packageManager
+        val launcher = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+        return pm.queryIntentActivities(launcher, 0).mapNotNull { r ->
+            val info = r.activityInfo ?: return@mapNotNull null
+            App(r.loadLabel(pm).toString().trim(), info.packageName, info.name)
+        }.also { cache = it }
+    }
+}
+
+/** The single launchable app whose label the goal names as a whole word ("open Spotify
+ *  and…"), or null when none or two different apps are named. The longest label wins
+ *  when one contains another ("YouTube Music" over "YouTube"). JARVIS itself never counts. */
+internal fun appNamedInGoal(context: Context, goal: String): String? {
+    val named = LauncherApps.all(context)
+        .filter { it.packageName != context.packageName }
+        .map { it.label }
+        .filter { it.length >= 3 }
+        .distinct()
+        .filter { Regex("(?<![\\p{L}\\p{N}])${Regex.escape(it)}(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(goal) }
+    val outermost = named.filter { a -> named.none { b -> b != a && b.contains(a, ignoreCase = true) } }
+    return outermost.singleOrNull()
+}
+
 /** Resolve a user-facing app name (or package) to its launcher activity and start it. */
 internal fun launchApp(context: Context, name: String): Boolean {
-    val pm = context.packageManager
     val target = name.trim().lowercase()
     if (target.isEmpty()) return false
-    val launcher = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-    val apps = pm.queryIntentActivities(launcher, 0)
-    val match = apps.firstOrNull { it.loadLabel(pm).toString().lowercase().contains(target) }
-        ?: apps.firstOrNull {
-            val pkg = it.activityInfo?.packageName.orEmpty().lowercase()
-            val cls = it.activityInfo?.name.orEmpty().lowercase()
-            pkg.contains(target) || cls.contains(target)
-        }
-    val info = match?.activityInfo ?: return false
-    context.startActivity(
-        Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            setClassName(info.packageName, info.name)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        },
-    )
-    return true
+    fun find(apps: List<LauncherApps.App>) =
+        apps.firstOrNull { it.label.lowercase().contains(target) }
+            ?: apps.firstOrNull { it.packageName.lowercase().contains(target) || it.className.lowercase().contains(target) }
+    val cached = find(LauncherApps.all(context))
+    fun start(app: LauncherApps.App): Boolean = try {
+        context.startActivity(
+            Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setClassName(app.packageName, app.className)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            },
+        )
+        true
+    } catch (_: android.content.ActivityNotFoundException) {
+        false // uninstalled since the cache was built
+    }
+    if (cached != null && start(cached)) return true
+    val fresh = find(LauncherApps.all(context, refresh = true)) ?: return false
+    return start(fresh)
 }
 
 /** The one terminal-transition path for the journal, shared by the task_finish

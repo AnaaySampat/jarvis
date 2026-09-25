@@ -21,6 +21,8 @@ class OperatorCoreTest {
         var shot: String? = null
         var audio: Boolean? = null
         override suspend fun musicActive() = audio
+        var namedApp: String? = null
+        override suspend fun appNamedIn(goal: String) = namedApp
         private var observed = 0
         override suspend fun observe(): OpObservation = screens[minOf(observed++, screens.size - 1)]
         override suspend fun screenshot(): String? = shot
@@ -239,6 +241,150 @@ class OperatorCoreTest {
         assertEquals(listOf("tap:0"), dev.actions)
     }
 
+    // ── Speed: steps that need no model call ──
+
+    @Test fun theAppTheGoalNamesOpensWithoutAModelCall() {
+        val self = screen(app = "com.jarvis.app")
+        val clock = screen(*(0 until 12).map { node(it, "Tab $it") }.toTypedArray(), app = "com.clock")
+        val dev = FakeDevice(listOf(self, clock, clock)).apply { namedApp = "Clock" }
+        val m = ScriptedModel("""{"do":"tap","target":3,"plan":["Open Stopwatch","Start"]}""", """{"do":"done","summary":"Started."}""")
+        val out = runBlocking {
+            OperatorLoop(dev, m, FakeJournal(),
+                OperatorOptions(taskId = "t", goal = "open the Clock app and start the stopwatch", sleep = {}, selfPackage = "com.jarvis.app"),
+                ScriptedModel(pass)).run()
+        }
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("openApp:Clock", "tap:3"), dev.actions)
+        assertEquals(2, m.prompts.size) // no call spent deciding open_app on JARVIS's own screen
+        assertTrue(m.prompts[0].contains("FIRST STEP")) // the plan is asked on the app's screen instead
+    }
+
+    @Test fun aChainedFollowUpRunsWithoutAModelCall() {
+        val field = node(4, "", role = "EditText", editable = true, selector = "search")
+        val before = screen(node(0, "Settings"), field)
+        val after = screen(node(0, "Settings"), node(1, "Suggestion"), field.copy(index = 2, text = "alarms", focused = true), gen = 8)
+        val dev = FakeDevice(listOf(before, after, after))
+        val m = ScriptedModel(
+            """{"do":"set_text","target":4,"text":"alarms","then":{"do":"enter","target":4}}""",
+            """{"do":"done","summary":"Searched."}""",
+        )
+        val out = run("search settings for alarms", dev, m)
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("setText:4:alarms", "enter:2"), dev.actions) // re-aimed by selector: 4 → 2
+        assertEquals(2, m.prompts.size)
+    }
+
+    @Test fun aChainedFollowUpIsDroppedWhenItsControlIsGone() {
+        val before = screen(node(0, "Next", selector = "next"), node(1, "", role = "EditText", editable = true, selector = "name"))
+        val after = screen(node(0, "Other page", selector = "other"), gen = 8)
+        val dev = FakeDevice(listOf(before, after, after))
+        val m = ScriptedModel("""{"do":"tap","target":0,"then":{"do":"set_text","target":1,"text":"Bob"}}""", """{"do":"fail","summary":"x"}""")
+        val out = run("press next then type the name", dev, m)
+        assertEquals(listOf("tap:0"), dev.actions)
+        assertTrue(out.steps.any { it.contains("chained set_text skipped") })
+    }
+
+    @Test fun aChainedEnterFallsBackToTheFocusedFieldWhenTypingChangedItsIdentity() {
+        // Spotify's search box has no resource id, so its selector includes its text.
+        val before = screen(node(5, "Search", role = "EditText", editable = true, selector = "box-empty"))
+        val after = screen(node(5, "back in black", role = "EditText", editable = true, focused = true, selector = "box-typed"),
+            node(6, "Back In Black · AC/DC"), gen = 8)
+        val dev = FakeDevice(listOf(before, after, after))
+        val m = ScriptedModel("""{"do":"set_text","target":5,"text":"back in black","then":{"do":"enter","target":5}}""",
+            """{"do":"done","summary":"Searched."}""")
+        run("search back in black", dev, m)
+        assertEquals(listOf("setText:5:back in black", "enter:5"), dev.actions)
+    }
+
+    @Test fun tapsAndCoordinatesAreNeverChained() {
+        // A tap changes state; the same control can then mean something else (Stop → Resume).
+        for (then in listOf("""{"do":"tap","target":1}""", """{"do":"tap_point","x":5,"y":5,"label":"x"}""")) {
+            val dev = FakeDevice(listOf(screen(node(0, "Stop"), node(1, "Lap")), screen(node(0, "Resume"), node(1, "Reset"), gen = 8)))
+            val m = ScriptedModel("""{"do":"tap","target":0,"then":$then}""", """{"do":"fail","summary":"x"}""")
+            run("stop and reset", dev, m)
+            assertEquals(listOf("tap:0"), dev.actions)
+            assertEquals(2, m.prompts.size)
+        }
+    }
+
+    @Test fun aSplashScreenAfterALaunchIsLookedAtAgainNotAskedAbout() {
+        val splash = screen(node(0, "Spotify"), app = "com.spotify")
+        val home = screen(*(0 until 12).map { node(it, "Row $it") }.toTypedArray(), app = "com.spotify", gen = 9)
+        val dev = FakeDevice(listOf(screen(node(0, "Home"), app = "launcher"), splash, splash, home))
+        val sleeps = mutableListOf<Long>()
+        val m = ScriptedModel("""{"do":"open_app","name":"Spotify"}""", """{"do":"fail","summary":"x"}""")
+        runBlocking {
+            OperatorLoop(dev, m, FakeJournal(),
+                OperatorOptions(taskId = "t", goal = "open spotify", plan = false, sleep = { sleeps += it }), ScriptedModel(pass)).run()
+        }
+        assertEquals(listOf(OperatorLoop.LAUNCH_SPARSE_WAIT_MS, OperatorLoop.LAUNCH_SPARSE_WAIT_MS), sleeps)
+        assertTrue(m.prompts[1].contains("Row 11")) // the model saw the loaded screen, not the splash
+    }
+
+    @Test fun unlabelledControlsGetAScreenshotOnFirstLookAndAfterBeingTapped() {
+        // Samsung Clock: Start is a bare #stopwatch_startButton; its state is only in pixels.
+        val screens = (0..5).map { g ->
+            screen(node(0, "", selector = "start"), *(1..11).map { node(it, "Row $it $g") }.toTypedArray(), app = "com.clock", gen = g.toLong())
+        }
+        val dev = FakeDevice(screens).apply { shot = "SHOT" }
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"tap","target":1}""", """{"do":"done","summary":"ok"}""")
+            .apply { vision = true }
+        run("start the stopwatch", dev, m)
+        // first look at an app with a hidden control · right after tapping it · after a labelled tap: none
+        assertEquals(listOf(1, 1, 0), m.imageCounts)
+        assertEquals(1, unlabelledControls(screens[0]).size)
+    }
+
+    @Test fun aButtonWhoseWordsAreInAChildViewIsListedWithThem() {
+        // Samsung Clock: a bare clickable #stopwatch_startButton, and its "Stop" text as a child.
+        val button = OpNode(10, "", "View", id = "x:id/stopwatch_startButton", clickable = true, bounds = OpBounds(696, 1774, 276, 276))
+        val word = OpNode(11, "Stop", "TextView", bounds = OpBounds(782, 1880, 105, 64))
+        val icon = OpNode(12, "", "ImageButton", clickable = true, bounds = OpBounds(0, 0, 100, 100))
+        val s = screen(button, word, icon)
+        val r = renderObs(s)
+        assertTrue(r, r.lines().first { it.startsWith("[10]") }.contains("\"Stop\" (inside)"))
+        assertTrue(r.lines().first { it.startsWith("[12]") }.contains("(no text)"))
+        assertEquals(listOf(12), unlabelledControls(s).map { it.index })
+    }
+
+    @Test fun setTextOnASearchButtonOpensTheFieldAndTypes() {
+        // Samsung Settings: "Search" is a button that opens a separate search page.
+        val home = screen(node(0, "Connections"), node(1, "Search"))
+        val searchPage = screen(node(0, "", role = "EditText", editable = true, focused = true, selector = "q"), app = "com.search", gen = 9)
+        val dev = FakeDevice(listOf(home, home, searchPage, searchPage))
+        val m = ScriptedModel("""{"do":"set_text","target":1,"text":"dark mode","then":{"do":"enter"}}""", """{"do":"done","summary":"Searched."}""")
+        val out = run("search settings for dark mode", dev, m)
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("tap:1", "setText:0:dark mode", "enter:0"), dev.actions)
+        assertTrue(opensSearch(node(0, "", desc = "Search settings"), home))
+        assertFalse(opensSearch(node(0, "Send"), home))
+        assertFalse(opensSearch(node(0, "Research papers"), home))
+    }
+
+    @Test fun theStepLogNamesWhatWasTappedAndTyped() {
+        val start = OpNode(10, "", "View", clickable = true, selector = "b", windowId = 3, bounds = OpBounds(0, 0, 300, 300))
+        val word = OpNode(11, "Start", "TextView", selector = "w", windowId = 3, bounds = OpBounds(50, 50, 100, 50))
+        val field = node(12, "", role = "EditText", editable = true)
+        val dev = FakeDevice(listOf(screen(start, word, field), screen(start, word.copy(text = "Stop"), field, gen = 8)))
+        val m = ScriptedModel("""{"do":"tap","target":10}""", """{"do":"set_text","target":12,"text":"lap one"}""", """{"do":"fail","summary":"x"}""")
+        val out = run("start it", dev, m)
+        assertTrue(out.steps[0], out.steps[0].startsWith("tap[10] \"Start\" — ok"))
+        assertTrue(out.steps[1], out.steps[1].contains("← \"lap one\""))
+    }
+
+    @Test fun renderDropsTheIdsPackagePrefix() {
+        val r = renderObs(screen(OpNode(0, "", "Button", id = "com.sec.android.app.clockpackage:id/stopwatch_startButton", clickable = true)))
+        assertTrue(r, r.contains("#stopwatch_startButton") && !r.contains("clockpackage"))
+    }
+
+    @Test fun theCheckerSkipsTheScreenshotWhenTheListIsRich() {
+        val rich = screen(*(0 until 12).map { node(it, "Row $it") }.toTypedArray())
+        val dev = FakeDevice(listOf(rich)).apply { shot = "SHOT" }
+        val verifier = ScriptedModel(pass).apply { vision = true }
+        assertTrue(run("tap row", dev, ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"ok"}"""), verifier = verifier).ok)
+        assertEquals(listOf(0), verifier.imageCounts)
+    }
+
     // ── Completion checking ──
 
     @Test fun aSecondRejectionWithNothingDoneInBetweenEndsHonestly() {
@@ -284,7 +430,7 @@ class OperatorCoreTest {
         assertFalse(out.ok)
         assertTrue(out.summary, out.summary.contains("nothing is playing"))
         assertEquals(0, verifier.prompts.size) // ground truth decided it; no model call spent
-        assertTrue(m.prompts[1].contains("AUDIO: nothing is playing"))
+        assertTrue(m.prompts[1].contains("AUDIO: nothing audible yet"))
     }
 
     @Test fun audioPlayingReachesTheCheckerAndTheExecutor() {
@@ -342,8 +488,8 @@ class OperatorCoreTest {
         val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"look"}""", """{"do":"tap","target":1}""",
             """{"do":"done","summary":"ok"}""").apply { vision = true }
         run("tap rows", dev, m)
-        // first look · none · after `look` · none again
-        assertEquals(listOf(1, 0, 1, 0), m.imageCounts)
+        // a rich list needs no picture · none · after `look` · none again
+        assertEquals(listOf(0, 0, 1, 0), m.imageCounts)
         assertTrue(m.prompts[1].contains("SCREENSHOT: none"))
         assertTrue(m.prompts[2].contains("SCREENSHOT: attached"))
     }

@@ -106,6 +106,9 @@ interface OperatorDevice {
     /** Whether any app is playing audio right now, or null when unknown. Ground truth a
      *  screen can't give: Spotify's paused mini-player still shows the song's title. */
     suspend fun musicActive(): Boolean? = null
+    /** The one installed app the goal names outright ("open Spotify and …"), or null when
+     *  none or several do — so a task can open it without a model call. */
+    suspend fun appNamedIn(goal: String): String? = null
 }
 
 /** A model failure. [rateLimited] means every route is spent (quota), which the user
@@ -197,6 +200,18 @@ class OperatorLoop(
         val VERIFICATION_RECEIPT_RE = Regex("^aura\\.verify\\.v1:(model|deterministic):[a-f0-9]{64}$")
         private val LAUNCH_ACTIONS = setOf("open_app", "launch", "open")
         private val COORD_ACTIONS = setOf("tap_point", "tap_xy", "click_xy", "drag")
+        /** What may ride as a chained "then": text entry into a field and its submit, and
+         *  a done (still checked). Never a tap: a tap changes state, and the same control
+         *  can then mean something else — live, "tap Stop then tap Reset" pressed Samsung
+         *  Clock's Lap/Reset button after it had become Resume/Reset, re-aimed correctly by
+         *  selector at a control whose meaning had changed. */
+        private val CHAINABLE = setOf("set_text", "fill", "type", "enter", "submit", "done", "finished", "complete")
+        const val SEARCH_FIELD_POLLS = 4
+        const val SEARCH_FIELD_WAIT_MS = 300L
+        const val AUDIO_GRACE_POLLS = 3
+        const val AUDIO_GRACE_MS = 500L
+        const val LAUNCH_SPARSE_RETRIES = 3
+        const val LAUNCH_SPARSE_WAIT_MS = 600L
         /** Fewer labelled elements than this → the app is likely hiding its UI; send vision. */
         const val SPARSE_LABELLED = 10
         private val RETRYABLE_ON_STALE = setOf("tap", "click", "long_press", "double_tap", "set_text", "fill", "focus")
@@ -235,8 +250,13 @@ class OperatorLoop(
         var doneRejected = false
         var lookRequested = false
         var lastWasCoordinate = false
-        val appsSeen = mutableSetOf<String>()
         val playbackGoal = wantsPlayback(opts.goal)
+        val appsSeen = mutableSetOf<String>()
+        var lastTapUnlabelled = false
+        // A chained follow-up ("then") waiting to run on the next screen, and the
+        // observation its target index refers to.
+        var queued: JSONObject? = null
+        var queuedFrom: OpObservation? = null
         fun progressing() = !lastFailed && noProgress == 0
         fun emit(line: String, ok: Boolean = true) = opts.onStep(line, ok)
 
@@ -304,16 +324,43 @@ class OperatorLoop(
             }
             obs = cur
 
-            // A screenshot every step costs latency — send vision on the first look at
-            // each app, after a failed action, when stuck, when asked for (`look`), after
-            // a coordinate tap (its effect may be visible only in pixels), and when the
-            // element list is nearly empty: some apps (Spotify's Search page) hide
-            // their controls from accessibility, and the screenshot is all there is.
-            // Never of JARVIS itself — the only move there is open_app.
+            // Commands that need no model round-trip: the app the goal names, opened
+            // straight from JARVIS's own screen (that first call only ever said open_app),
+            // and a chained follow-up, re-aimed at the same control on the fresh screen.
+            val chained = queued?.let { q ->
+                queued = null
+                // A text field without a resource id is identified partly by its text, so
+                // typing into it changes its selector (Spotify's search box, live); Enter and
+                // type act on the focused field anyway, so fall back to that.
+                (remapOnto(q, queuedFrom ?: cur, cur) ?: q.takeIf {
+                    it.optString("do").lowercase() in setOf("enter", "submit", "type") &&
+                        cur.nodes.any { n -> n.focused && n.editable }
+                }?.let { JSONObject(it.toString()).apply { remove("target"); remove("index"); remove("element") } }).also {
+                    if (it == null) {
+                        steps += "(chained ${q.optString("do")} skipped — the screen changed; decide afresh)"
+                        emit(steps.last(), false)
+                    }
+                }
+            }
+            val preset: JSONObject? = chained ?: if (step == 0 && cur.app == opts.selfPackage) {
+                device.appNamedIn(opts.goal)?.let { JSONObject().put("do", "open_app").put("name", it) }
+            } else null
+
+            // A screenshot roughly triples a step's model latency (6.9s vs ~2s measured
+            // 2026-09-25), so vision goes out only when the element list can't carry the
+            // step: it is nearly empty (Spotify's Search page hides its controls), the last
+            // action failed, the screen is stuck, the model asked (`look`), or a coordinate
+            // tap needs checking. Never of JARVIS itself — the only move there is open_app.
+            // ...and when the screen has controls the app never labelled (Samsung Clock's
+            // Start/Lap are bare `#stopwatch_startButton`s whose meaning AND state — Start,
+            // Stop, Resume — are only in the pixels): on the first look at that app, and
+            // right after tapping one, so the model sees what the tap did.
             var images = emptyList<String>()
-            val sparse = cur.nodes.count { it.text.isNotEmpty() || it.description.isNotEmpty() } < SPARSE_LABELLED
-            if (model.wantsImages && cur.app != opts.selfPackage &&
-                (cur.app !in appsSeen || lastFailed || noProgress > 0 || sparse || lookRequested || lastWasCoordinate)
+            val sparse = labelledCount(cur) < SPARSE_LABELLED
+            val hidden = unlabelledControls(cur).isNotEmpty()
+            if (preset == null && model.wantsImages && cur.app != opts.selfPackage &&
+                (lastFailed || noProgress > 0 || sparse || lookRequested || lastWasCoordinate ||
+                    (hidden && (cur.app !in appsSeen || lastTapUnlabelled)))
             ) {
                 val shot = device.screenshot()
                 if (!shot.isNullOrEmpty()) {
@@ -326,7 +373,11 @@ class OperatorLoop(
             shotThisStep = images.isNotEmpty()
 
             var raw = ""
-            val cmd: JSONObject? = try {
+            val cmd: JSONObject? = if (preset != null) {
+                emit(if (chained != null) "running the chained ${preset.optString("do")} (no model call)"
+                    else "the goal names ${preset.optString("name")} — opening it (no model call)")
+                preset
+            } else try {
                 val prompt = stepPrompt(
                     opts.goal, steps, cur, plan, findings,
                     askPlan = askPlan,
@@ -356,11 +407,13 @@ class OperatorLoop(
             }
             badReplies = 0
             val action = cmd.optString("do").lowercase()
+            // One level only: a follow-up's own "then" is ignored.
+            val follow = if (preset == null) cmd.optJSONObject("then") else null
 
             // The plan rides on the first command instead of costing its own model call.
             // Without one the step model re-derives the strategy every step and redoes
             // work that already succeeded.
-            if (askPlan) {
+            if (askPlan && preset == null) {
                 askPlan = false
                 plan = planFrom(cmd)
                 if (plan.isNotEmpty()) emit("plan: ${plan.replace(Regex("\\s*\\n\\s*"), " → ").take(120)}")
@@ -525,7 +578,7 @@ class OperatorLoop(
                 OpResult(false, "The action crashed: ${e.message}", "action_crashed")
             }
             val execMs = now - execT0
-            val label = "$action${describeTarget(cmd)} — ${if (result.ok) "ok" else "failed: ${result.summary}"}" +
+            val label = "$action${describeTarget(cmd, cur)} — ${if (result.ok) "ok" else "failed: ${result.summary}"}" +
                 if (retried) " (re-observed once)" else ""
             steps += label
             emit(
@@ -548,6 +601,9 @@ class OperatorLoop(
             }
             lastFailed = !result.ok
             lastWasCoordinate = result.ok && action in COORD_ACTIONS
+            lastTapUnlabelled = result.ok && asIndex(firstValue(cmd, "target", "index", "element"))
+                ?.let { i -> cur.nodes.firstOrNull { it.index == i } }
+                ?.let { it.text.isEmpty() && it.description.isEmpty() && innerLabel(it, cur).isEmpty() } == true
             if (isActuationCmd(action) && result.ok) {
                 doneRejected = false
                 sigHistory += sig
@@ -562,16 +618,33 @@ class OperatorLoop(
                 obs = null
                 continue
             }
+            if (follow != null && follow.optString("do").lowercase() in CHAINABLE) {
+                queued = follow
+                queuedFrom = cur
+            }
 
             // ── No-progress guard: a successful actuation should change the screen ──
             if (isActuationCmd(action)) {
                 val appBefore = cur.app
-                obs = try {
+                suspend fun look(): OpObservation? = try {
                     device.observe()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
                     null
+                }
+                obs = look()
+                // A just-launched app often shows a splash with almost nothing on it; asking
+                // the model about it only buys a `wait` (Spotify, 2026-09-25: ~8s). Look
+                // again briefly instead — an app that stays sparse costs < 2s once.
+                if (action in LAUNCH_ACTIONS) {
+                    var tries = 0
+                    while (obs != null && obs.app != appBefore && labelledCount(obs) < SPARSE_LABELLED &&
+                        tries++ < LAUNCH_SPARSE_RETRIES
+                    ) {
+                        opts.sleep(LAUNCH_SPARSE_WAIT_MS)
+                        obs = look()
+                    }
                 }
                 // An accepted launch intent is not a launched app.
                 if (action in LAUNCH_ACTIONS && obs != null && obs.app == appBefore) {
@@ -672,7 +745,26 @@ class OperatorLoop(
             "set_text", "fill" -> {
                 val idx = asIndex(firstValue(cmd, "target", "index")) ?: return OpResult(false, "No field given to set.")
                 val node = target(idx) ?: return OpResult(false, "There's no field $idx on screen.")
-                device.setText(targetOf(obs, fieldFor(node, obs)), cmd.optString("text"))
+                val field = fieldFor(node, obs)
+                if (!field.editable && opensSearch(field, obs)) {
+                    // Settings/Spotify/YouTube draw "Search" as a button that OPENS the field.
+                    // Aimed at it, set_text used to fail and cost a round-trip or two; do what
+                    // a person does — tap it, wait for the field, and type there.
+                    val opened = device.tap(targetOf(obs, field))
+                    if (!opened.ok) return opened
+                    var input: OpNode? = null
+                    var fresh = obs
+                    for (attempt in 0 until SEARCH_FIELD_POLLS) {
+                        fresh = device.observe()
+                        input = fresh.nodes.firstOrNull { it.editable && !it.password && it.focused }
+                            ?: fresh.nodes.firstOrNull { it.editable && !it.password }
+                        if (input != null) break
+                        opts.sleep(SEARCH_FIELD_WAIT_MS)
+                    }
+                    input ?: return OpResult(false, "Opened search, but no text field appeared.", "no_field")
+                    return device.setText(targetOf(fresh, input), cmd.optString("text"))
+                }
+                device.setText(targetOf(obs, field), cmd.optString("text"))
             }
             "focus" -> {
                 // `type` needs an already-focused field; focusing IS a tap on the field.
@@ -702,17 +794,10 @@ class OperatorLoop(
      *  decision is unchanged. Null means "don't retry" — the original failure stands. */
     private suspend fun retryOnFreshObservation(cmd: JSONObject, obs: OpObservation, risk: String): OpResult? {
         if (cmd.optString("do").lowercase() !in RETRYABLE_ON_STALE) return null
-        val idx = asIndex(firstValue(cmd, "target", "index", "element")) ?: return null
-        val selector = obs.nodes.firstOrNull { it.index == idx }?.selector?.ifEmpty { null } ?: return null
+        asIndex(firstValue(cmd, "target", "index", "element")) ?: return null
         val fresh = device.observe()
         if (!fresh.ready) return null
-        val same = fresh.nodes.filter { it.selector == selector }
-        if (same.size != 1) return null
-        val moved = JSONObject(cmd.toString()).apply {
-            remove("index")
-            remove("element")
-            put("target", same[0].index)
-        }
+        val moved = remapOnto(cmd, obs, fresh) ?: return null
         if (classifyAction(opts.goal, moved, fresh).risk != risk) return null
         return execute(moved, fresh)
     }
@@ -750,7 +835,10 @@ class OperatorLoop(
         } catch (_: Exception) {
             fallback
         } ?: return Verification("I lost my view of the screen", "", unavailable = true)
-        val shot = if (verifier.wantsImages) {
+        // Pixels only where the element list can't speak for the screen (an app hiding its
+        // UI): an image roughly doubles the checker's latency, and a rich list already
+        // carries every label and toggle state.
+        val shot = if (verifier.wantsImages && labelledCount(obs) < SPARSE_LABELLED) {
             try {
                 device.screenshot()?.takeIf { it.isNotEmpty() }
             } catch (e: CancellationException) {
@@ -759,12 +847,19 @@ class OperatorLoop(
                 null
             }
         } else null
-        val audio = try {
+        suspend fun audioNow() = try {
             device.musicActive()
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
             null
+        }
+        var audio = audioNow()
+        // A track tapped a moment ago may still be buffering (a chained done checks at once).
+        var waits = 0
+        while (audio == false && wantsPlayback(opts.goal) && waits++ < AUDIO_GRACE_POLLS) {
+            opts.sleep(AUDIO_GRACE_MS)
+            audio = audioNow()
         }
         // Ground truth beats pixels: on 2026-09-25 the checker PASSed "play Back in Black"
         // off Spotify's mini-player title while the song sat paused (▶ icon). A playback
@@ -905,7 +1000,8 @@ internal const val SYSTEM_PROMPT =
         "one continuous drag in PIXELS from element bounds, only on a step with no screenshot " +
         "(move a slider, reorder an item) — NOT two taps, never to scroll\n" +
         "  {\"do\":\"type\",\"text\":\"<text>\"}           type into the focused field\n" +
-        "  {\"do\":\"set_text\",\"target\":<index>,\"text\":\"<text>\"}  set an editable field\n" +
+        "  {\"do\":\"set_text\",\"target\":<index>,\"text\":\"<text>\"}  set an editable field — aimed at a " +
+        "Search button, it opens the search field and types there in one step\n" +
         "  {\"do\":\"enter\",\"target\":<index>}         press the keyboard's Enter/Search/Go key in that " +
         "field — submits a search in one step, no need to hunt for a search button\n" +
         "  {\"do\":\"look\"}                          get a screenshot with the next step, when the " +
@@ -937,9 +1033,14 @@ internal const val SYSTEM_PROMPT =
         "BE FAST — every step is a slow round-trip to the model, so waste none:\n" +
         "- Reach an app with open_app (by name) — never tap through the home screen or app drawer to find it.\n" +
         "- If the screen is JARVIS itself (the assistant you are), it is never the target: open_app first.\n" +
-        "- JARVIS's own emergency STOP floats over other apps (a round button, blacked out in " +
-        "screenshots). It is never the app's Stop — pressing it ends YOUR task.\n" +
+        "- JARVIS's own emergency STOP floats near the top-right edge (painted out of screenshots). " +
+        "It is never the app's Stop — pressing it ends YOUR task; use the app's own button from the list.\n" +
         "- Fill a field with set_text in ONE step, not tap-then-type in two; then enter to submit a search.\n" +
+        "- CHAIN to save a round-trip: add \"then\" with ONE follow-up — only set_text/type/enter " +
+        "into a field, or done. Fill and submit: {\"do\":\"set_text\",\"target\":4,\"text\":\"alarms\"," +
+        "\"then\":{\"do\":\"enter\",\"target\":4}}. Finish when one last tap surely completes the goal: " +
+        "{\"do\":\"tap\",\"target\":9,\"then\":{\"do\":\"done\",\"summary\":\"Timer started.\"}} (a chained " +
+        "done is still checked). Never chain a tap: after a tap, look at the new screen first.\n" +
         "- Scroll ONLY when what you need is genuinely not in the list; scroll once, then act — never scroll just to look around.\n" +
         "- Act on a visible target immediately; emit wait only when the screen is mid-transition (a spinner, an animation).\n" +
         "- Don't redo a step that already worked. BEFORE every command, check the screen against " +
@@ -1068,7 +1169,8 @@ internal fun stepPrompt(
     val shotLine = when (screenshot) {
         true -> "SCREENSHOT: attached — it shows this same screen. tap_point anything it shows that the list " +
             "lacks (x,y in THOUSANDTHS of the screenshot; tap_xy/drag are refused this step).\n"
-        false -> "SCREENSHOT: none this step — emit {\"do\":\"look\"} if the list doesn't show what you need.\n"
+        false -> "SCREENSHOT: none this step — the list carries every labelled control (a button's words are " +
+            "shown \"(inside)\" it). Emit {\"do\":\"look\"} ONLY if a control the goal needs is truly missing.\n"
         null -> "SCREENSHOT: not available on this model — use element indices, or tap_xy inside an element's bounds.\n"
     }
     val planAsk = if (askPlan) {
@@ -1084,7 +1186,8 @@ internal fun stepPrompt(
         when (audio) {
             true -> "AUDIO: something IS playing right now (the phone's audio system says so) — if it's what " +
                 "the goal asked for, emit done; tapping play/pause again would stop it.\n"
-            false -> "AUDIO: nothing is playing right now.\n"
+            false -> "AUDIO: nothing audible yet. A track pressed a moment ago can take a second or two to " +
+                "start — if the last step pressed play, don't press play/pause again; check once more.\n"
             null -> ""
         } +
         "Reply with the single next command as ONE JSON object only."
@@ -1128,10 +1231,18 @@ internal fun renderObs(obs: OpObservation): String {
         ).joinToString(",")
         // Icon-only controls (a Send FAB, a back arrow) carry no visible text.
         val label = n.text.ifEmpty { n.description }
-        val text = if (label.isNotEmpty()) {
-            "\"$label\"" + if (n.text.isEmpty() && n.description.isNotEmpty()) " (desc)" else ""
-        } else "(no text)"
-        val id = if (n.id.isNotEmpty()) " #${n.id}" else ""
+        // A clickable container whose words sit in a child view (Samsung Clock's Start/Stop
+        // button, a Settings row) gets that child's label: listed bare, beside a loose
+        // "Stop" text, the model couldn't tell Start from Lap and toggled the wrong one.
+        val inner = if (label.isEmpty() && n.clickable) innerLabel(n, obs) else ""
+        val text = when {
+            label.isNotEmpty() -> "\"$label\"" + if (n.text.isEmpty() && n.description.isNotEmpty()) " (desc)" else ""
+            inner.isNotEmpty() -> "\"$inner\" (inside)"
+            else -> "(no text)"
+        }
+        // "com.sec.android.app.clockpackage:id/stopwatch_startButton" → "stopwatch_startButton":
+        // the package prefix repeats on every node and tells the model nothing.
+        val id = if (n.id.isNotEmpty()) " #${n.id.substringAfter(":id/")}" else ""
         val b = n.bounds
         "[${n.index}] ${n.role}$id $text${if (flags.isNotEmpty()) " ($flags)" else ""} @${b.x},${b.y} ${b.w}x${b.h}"
     }
@@ -1370,6 +1481,44 @@ private val INCOMPLETE_MARKERS = listOf(
 /** A "done" summary that narrates NON-completion. Anchored to first-person intent and
  *  explicit blank/loading idioms — bare negations ("so it no longer rings") are fine.
  *  A MISSING summary is not a confession: the checker judges the screen either way. */
+internal fun labelledCount(obs: OpObservation) = obs.nodes.count { it.text.isNotEmpty() || it.description.isNotEmpty() }
+
+/** A control that opens a search field (its label or id says search), and nothing riskier. */
+internal fun opensSearch(n: OpNode, obs: OpObservation): Boolean {
+    val words = "${n.text} ${n.description} ${n.id.substringAfter(":id/")} ${if (n.clickable) innerLabel(n, obs) else ""}"
+    return Regex("(?i)(^|[^a-z])(search|find)([^a-z]|$)").containsMatchIn(words.replace('_', ' ')) &&
+        !R2_RE.containsMatchIn(words) && !R3_RE.containsMatchIn(words)
+}
+
+/** The first label drawn inside [n]'s bounds, or "". */
+internal fun innerLabel(n: OpNode, obs: OpObservation): String =
+    obs.nodes.firstOrNull { o ->
+        o.index != n.index && (o.text.isNotEmpty() || o.description.isNotEmpty()) && n.bounds.contains(o.bounds)
+    }?.let { it.text.ifEmpty { it.description } }?.take(60) ?: ""
+
+/** Clickable controls with no label of their own and no labelled element inside them —
+ *  icon buttons the app never described. A Settings row is fine (its title is a child);
+ *  Samsung Clock's Start/Lap are not. */
+internal fun unlabelledControls(obs: OpObservation): List<OpNode> = obs.nodes.filter { n ->
+    n.clickable && n.text.isEmpty() && n.description.isEmpty() && n.bounds.w > 0 && n.bounds.h > 0 &&
+        innerLabel(n, obs).isEmpty()
+}
+
+/** A chained command re-aimed at the same control (its native selector) on a fresh
+ *  observation; untargeted commands pass through. Null when the control is gone or
+ *  ambiguous — the screen changed, so the model decides afresh. */
+internal fun remapOnto(cmd: JSONObject, from: OpObservation, to: OpObservation): JSONObject? {
+    val idx = asIndex(firstValue(cmd, "target", "index", "element")) ?: return cmd
+    val selector = from.nodes.firstOrNull { it.index == idx }?.selector?.ifEmpty { null } ?: return null
+    val same = to.nodes.filter { it.selector == selector }
+    if (same.size != 1) return null
+    return JSONObject(cmd.toString()).apply {
+        remove("index")
+        remove("element")
+        put("target", same[0].index)
+    }
+}
+
 /** A goal whose outcome is audio playing ("play Back in Black", "resume my podcast") —
  *  not a game, and not the Play Store. */
 internal fun wantsPlayback(goal: String): Boolean =
@@ -1414,13 +1563,22 @@ internal fun waitMs(cmd: JSONObject): Long {
     return raw.toLong().coerceIn(OperatorLoop.MIN_WAIT_MS, OperatorLoop.MAX_WAIT_MS)
 }
 
-private fun describeTarget(cmd: JSONObject): String {
+/** How a step reads in the log the model sees next turn. An index alone ("tap[10]") is
+ *  useless once the screen changes — [10] read "Start" before the tap and "Stop" after,
+ *  and the model, not knowing it had pressed Start, pressed it again — so the target's
+ *  label (and any typed text) goes with it. */
+private fun describeTarget(cmd: JSONObject, obs: OpObservation? = null): String {
     val action = cmd.optString("do").lowercase()
     if (action == "drag") return " (${cmd.opt("from_x")},${cmd.opt("from_y")})→(${cmd.opt("to_x")},${cmd.opt("to_y")})"
     if (action in setOf("tap_point", "tap_xy", "click_xy")) {
         return " \"${cmd.optString("label").take(32)}\" (${cmd.opt("x")},${cmd.opt("y")})"
     }
-    firstValue(cmd, "target", "index")?.let { return "[$it]" }
+    firstValue(cmd, "target", "index")?.let { t ->
+        val node = asIndex(t)?.let { i -> obs?.nodes?.firstOrNull { it.index == i } }
+        val label = node?.let { n -> n.text.ifEmpty { n.description }.ifEmpty { if (n.clickable) innerLabel(n, obs!!) else "" } }.orEmpty()
+        val typed = cmd.optString("text").takeIf { it.isNotEmpty() }?.let { " ← \"${it.take(24)}\"" }.orEmpty()
+        return "[$t]" + (if (label.isNotEmpty()) " \"${label.take(30)}\"" else "") + typed
+    }
     cmd.optString("name").takeIf { it.isNotEmpty() }?.let { return " $it" }
     cmd.optString("text").takeIf { it.isNotEmpty() }?.let { return " \"${it.take(24)}\"" }
     cmd.optString("direction").takeIf { it.isNotEmpty() }?.let { return " $it" }

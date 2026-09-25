@@ -334,6 +334,18 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   2026-09-25 Spotify run had the song playing while the operator toggled play/pause into
   "nothing is changing". Running out of quota *after acting* says what was last done, so
   the user checks instead of resending.
+- **Speed (2026-09-25 night).** Every model round-trip costs 2–8s, so the loop avoids them:
+  JARVIS's own screen is never walked (an empty observation — its WebView took 0.9–3s);
+  when the goal names exactly one installed app, it is opened with no model call
+  (`appNamedIn`, labels cached per process in `LauncherApps` and warmed at plugin load —
+  `loadLabel` over every app was ~3s, paid twice); a splash screen after a launch is
+  re-looked at (3×600ms) instead of asked about; a chained `"then"` (text entry, Enter, or
+  `done` — never a tap: the same control can change meaning, Stop→Resume) runs without a
+  call; `set_text` on a Search button opens the field and types. Screenshots only when the
+  list can't carry the step (sparse, failure, stuck, `look`, coordinate tap, or controls
+  with no label even inside them); a button's child label is shown on it (`"Stop" (inside)`)
+  and step lines name what was tapped. The ladder hedges a call that hasn't answered in 5s
+  (10s with an image) with the next ready route and takes the first answer.
 - **Settling.** A tap whose screen never goes quiet (a running timer, a progress bar) is
   reported done with a note, not as failed — the failure made the operator tap again,
   which on a toggle undoes it. `open_app` waits for the new app's first screen to settle

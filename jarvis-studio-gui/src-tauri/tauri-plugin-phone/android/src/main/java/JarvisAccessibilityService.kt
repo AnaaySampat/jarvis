@@ -754,15 +754,20 @@ class JarvisAccessibilityService : AccessibilityService() {
                     try {
                         val stream = ByteArrayOutputStream()
                         val bounded = boundedScreenshotBitmap(bitmap)
-                        // Blank JARVIS's own STOP out of the picture: the model took the red
-                        // "STOP" circle for the app's Stop button and tapped it (2026-09-25).
+                        // Paint JARVIS's own STOP out of the picture: the model took the red
+                        // "STOP" circle for the app's Stop button and tapped it — and then took
+                        // a black box there for one too. Fill it with the background beside it.
                         val masked = stopOverlayRect()?.let { r ->
                             val sx = bounded.width.toFloat() / bitmap.width
                             val sy = bounded.height.toFloat() / bitmap.height
                             bounded.copy(Bitmap.Config.ARGB_8888, true).also { copy ->
+                                val bg = copy.getPixel(
+                                    ((r.left * sx).toInt() - 4).coerceIn(0, copy.width - 1),
+                                    (r.centerY() * sy).toInt().coerceIn(0, copy.height - 1),
+                                )
                                 android.graphics.Canvas(copy).drawRect(
                                     r.left * sx, r.top * sy, r.right * sx, r.bottom * sy,
-                                    android.graphics.Paint().apply { color = Color.BLACK },
+                                    android.graphics.Paint().apply { color = bg },
                                 )
                             }
                         } ?: bounded
