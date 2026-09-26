@@ -112,6 +112,35 @@ describe("chatOverLadder with a pooled model the key can't call", () => {
   });
 });
 
+describe("chatOverLadder after a model's 400", () => {
+  beforeEach(() => {
+    quota.setStorage(fakeKV());
+    quota.reset();
+    setCatalogStorage(fakeKV());
+    resetLatency();
+    chat.mockReset();
+  });
+
+  it("asks the next model instead of ending the turn, and doesn't bench the first", async () => {
+    // Live 2026-09-26: Groq's 400 tool_use_failed ended chat turns with "I hit an error".
+    const groq: BrainConfig = { tier: "groq", model: "openai/gpt-oss-120b", keys: { groq: ["g1"] } };
+    chat.mockImplementation(async (_convo: unknown, _tools: unknown, o: { model: string }) => {
+      if (o.model === "openai/gpt-oss-120b") {
+        throw new ProviderError("Groq 400", {
+          status: 400,
+          detail: '{"error":{"message":"Failed to call a function.","code":"tool_use_failed"}}',
+        });
+      }
+      return { text: "hello", toolCalls: [] };
+    });
+    await expect(chatOverLadder([{ role: "user", content: "hi" }], [], groq)).resolves.toEqual({
+      text: "hello",
+      toolCalls: [],
+    });
+    expect(quota.usable({ provider: "groq", model: "openai/gpt-oss-120b", keyIndex: 0 })).toBe(true);
+  });
+});
+
 describe("chatOverLadder hedging a slow route", () => {
   beforeEach(() => {
     quota.setStorage(fakeKV());

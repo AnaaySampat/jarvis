@@ -424,7 +424,14 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   chat model had asked "want me to check?" for one and invented an uptime for another — and
   `loop.ts` gives a reply about the phone that called no tool one silent recheck round
   (`answeredPhoneWithoutLooking`, beside `claimedWithoutActing`): on its Groq fallback the
-  chat model answered "Android 14" for a phone on 16 without looking.
+  chat model answered "Android 14" for a phone on 16 without looking. When a turn runs out
+  of tool rounds it no longer says only "I worked on that but couldn't fully finish it" —
+  that threw away what the tools had found (a real "read my Chrome screen and search up the
+  time" request ended that way): one last call answers from the results, and if the model
+  still reaches for a tool, the reply quotes the tools' own summaries (`partialReply`). And
+  the chat ladder (`ask.ts`) now treats a 400 like the native ladder does — this model's
+  reply failed (Groq's `tool_use_failed`), so try the next model this turn, unbenched —
+  instead of ending the turn with "I hit an error: Groq 400".
 - **Doing exactly the goal.** The prompt (kept tight — it is paid on every step) says a
   goal to open/find/search/show/check is done when the thing is on screen, never toggle or
   select beyond it, and to use an app's search rather than browse. The checker judges the

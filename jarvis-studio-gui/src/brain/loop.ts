@@ -180,9 +180,32 @@ export async function runTurn(
     }
   }
 
-  // Hit the round cap — summarise honestly rather than claim completion.
-  return {
-    reply: "I worked on that but couldn't fully finish it.",
-    toolResults,
-  };
+  // Hit the round cap. The canned "couldn't fully finish" threw away everything the tools
+  // had found — live 2026-09-26, "read my Chrome screen and search up the time" ended that
+  // way. One last turn answers from the results; if the model still reaches for a tool (or
+  // can't be reached), say what the tools returned rather than nothing.
+  convo.push({ role: "user", content: FINAL_ANSWER_NOTE });
+  try {
+    const last = await chatOverLadder(convo, tools, deps.config, onFallback);
+    if (!last.toolCalls.length && last.text.trim()) return { reply: last.text, toolResults };
+  } catch {
+    // Fall through to the tools' own words.
+  }
+  return { reply: partialReply(toolResults), toolResults };
+}
+
+const FINAL_ANSWER_NOTE =
+  "(Automatic note, not from the user.) You have used every tool call this request allows. " +
+  "Answer the user now, in plain words, from the tool results above: give whatever they found, " +
+  "and say plainly what you couldn't do. Do not call any tool.";
+
+/** What the tools returned, when the model can't be asked to put it in words. */
+export function partialReply(results: ToolResult[]): string {
+  const said = results
+    .filter((r) => r.summary?.trim())
+    .slice(-3)
+    .map((r) => `${r.ok ? "" : "(failed) "}${r.summary.trim()}`);
+  return said.length
+    ? `I couldn't finish all of that, sir. Here's what I did get: ${said.join(" — ")}`
+    : "I worked on that but couldn't fully finish it.";
 }

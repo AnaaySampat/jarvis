@@ -60,6 +60,26 @@ describe("runTurn — said it did it but didn't", () => {
   });
 });
 
+describe("runTurn — out of tool rounds", () => {
+  const call = (id: string) => ({ text: "", toolCalls: [{ id, name: "web_search", args: { query: id } }] });
+
+  it("answers from what the tools found instead of a canned failure", async () => {
+    // Live 2026-09-26: "read my Chrome screen and search up the time" ended in
+    // "I worked on that but couldn't fully finish it", its search results thrown away.
+    replies.push(call("a"), call("b"), call("c"), { text: "It starts at 17:00 UTC.", toolCalls: [] });
+    const out = await ask("read my screen and search up what time it starts");
+    expect(out.reply).toBe("It starts at 17:00 UTC.");
+    expect(seen.at(-1)!.at(-1)).toMatch(/used every tool call/);
+  });
+
+  it("falls back to the tools' own words when the model still wants to act", async () => {
+    replies.push(call("a"), call("b"), call("c"), call("d"));
+    const out = await ask("read my screen and search up what time it starts");
+    expect(out.reply).toMatch(/^I couldn't finish all of that, sir\. Here's what I did get: Found it: 55\.2 GB used\./);
+    expect(dispatched).toHaveLength(3); // the fourth call was never run
+  });
+});
+
 describe("runTurn — answered about the phone without looking", () => {
   it("sends a phone question back to look instead of answering from memory", async () => {
     // Live 2026-09-26, fallback chat model: "Android 14" for a phone on Android 16.

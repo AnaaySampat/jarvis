@@ -242,8 +242,17 @@ export async function chatOverLadder(
           skipModels.add(route.model);
           continue;
         }
-        // A failure the ladder can't route around (a malformed request, say) is the
-        // caller's problem, not a reason to replay it against every other model.
+        // Any other 400 is usually THIS model's reply failing to parse — Groq answers a
+        // tool call it can't read with 400 `tool_use_failed` — not a request no model
+        // could serve. The native operator ladder learned that on 2026-09-25; in chat it
+        // still ended turns with "I hit an error: Groq 400" (2026-09-26, three times in
+        // an evening). Try the next model this turn, without benching this one.
+        if (err instanceof ProviderError && err.status === 400) {
+          skipModels.add(route.model);
+          continue;
+        }
+        // A failure the ladder can't route around is the caller's problem, not a reason
+        // to replay it against every other model.
         if (!isRetryable(err)) throw err;
         if (benchRoute(route, err)) skipModels.add(route.model);
       }
