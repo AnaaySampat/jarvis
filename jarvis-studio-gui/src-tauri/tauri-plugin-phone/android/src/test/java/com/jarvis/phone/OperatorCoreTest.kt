@@ -45,6 +45,7 @@ class OperatorCoreTest {
         override suspend fun scroll(direction: String) = rec("scroll:$direction")
         override suspend fun back() = rec("back")
         override suspend fun home() = rec("home")
+        override suspend fun quickSettings() = rec("quickSettings")
         private fun rec(a: String, t: OpTarget? = null): OpResult {
             actions += a
             t?.let(targets::add)
@@ -217,8 +218,20 @@ class OperatorCoreTest {
         val out = run("press go", dev, ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Pressed."}"""))
         assertTrue(out.summary, out.ok)
         assertEquals(listOf("tapFailed:0:stale_observation", "tap:2"), dev.actions)
-        assertEquals(9L, dev.targets.single().generation)
+        // Bound to the control, not the generation: a live screen (a running stopwatch) moves
+        // the generation on before any action lands — "Stop" went stale six times live.
+        assertEquals(-1L, dev.targets.single().generation)
+        assertEquals("go", dev.targets.single().selector)
         assertTrue(out.steps.any { it.contains("re-observed") })
+    }
+
+    @Test fun aStaleTapIsNotRetriedOnceItsWordsChanged() {
+        // Same button, new meaning (Start became Stop): the model decided about another state.
+        val first = screen(node(0, "Start", selector = "btn"))
+        val fresh = screen(node(0, "Stop", selector = "btn"), gen = 9)
+        val dev = FakeDevice(listOf(first, fresh)).apply { tapFailures += "stale_observation" }
+        run("start the stopwatch", dev, ScriptedModel("""{"do":"tap","target":0}""", """{"do":"fail","summary":"x"}"""))
+        assertEquals(listOf("tapFailed:0:stale_observation"), dev.actions)
     }
 
     @Test fun aStaleTapIsNotRetriedWhenTheControlIsGone() {
@@ -591,6 +604,252 @@ class OperatorCoreTest {
         assertEquals(true, parseVerdict("PASS.")?.pass)
         assertEquals(null, parseVerdict("sure, looks fine"))
         assertEquals(null, parseVerdict("""{"verdict":"maybe"}"""))
+    }
+
+    // ── Evidence the system records (2026-09-26 verifier pass) ──
+
+    @Test fun screenChangeReportsFlipsWhatAppearedAndWhatWentAway() {
+        val before = screen(node(0, "Wi-Fi", checked = false), node(1, "Turn on Wi-Fi?", clickable = false))
+        val after = screen(node(0, "Wi-Fi", checked = true), node(2, "Connected", clickable = false))
+        val c = screenChange(before, after)
+        assertEquals(listOf("\"Wi-Fi\" unchecked→checked"), c.flips)
+        assertEquals("\"Wi-Fi\" unchecked→checked; new: \"Connected\"; gone: \"Turn on Wi-Fi?\"", c.describe())
+        assertEquals("now in com.other", screenChange(before, screen(app = "com.other")).describe())
+        assertTrue(screenChange(before, before).isEmpty())
+        // The status bar's clock (another window) ticking over is not the action's doing.
+        val clock = { t: String -> OpNode(9, t, "TextView", windowId = 77, selector = "clock") }
+        assertTrue(screenChange(screen(node(0, "Row"), clock("18:15")), screen(node(0, "Row"), clock("18:16"))).isEmpty())
+    }
+
+    @Test fun aRecycledRowOrAScrollIsNeverReportedAsAFlip() {
+        // The same view at the same place now shows another row: not "the same switch".
+        assertTrue(screenChange(screen(node(0, "Bluetooth", checked = false)), screen(node(0, "Wi-Fi calling", checked = true))).flips.isEmpty())
+        // A real state difference seen across a scroll still isn't the scroll's doing.
+        val off = screen(node(0, "Wi-Fi", checked = false))
+        val on = screen(node(0, "Wi-Fi", checked = true))
+        assertTrue(screenChange(off, on, flips = false).flips.isEmpty())
+    }
+
+    @Test fun aPressedControlThatRenamesItselfOrChangesStateIsAChange() {
+        // Samsung's rotation tile reports its state in its label (live 2026-09-26); the id-less
+        // tile's selector changes with it, so it is matched by place.
+        fun tile(desc: String) = OpNode(0, "", "Button", description = desc, clickable = true, selector = desc,
+            windowId = 3, path = "0.1", bounds = OpBounds(0, 0, 100, 100))
+        val off = screen(tile("Portrait, Auto rotate"))
+        val on = screen(tile("Auto rotate, Set to portrait"))
+        assertEquals(listOf("\"Portrait, Auto rotate\" now reads \"Auto rotate, Set to portrait\""),
+            screenChange(off, on, tapped = off.nodes[0]).flips)
+        // A tile that says it in its state instead.
+        val dark = screen(node(0, "Flashlight").copy(state = "Off"))
+        val lit = screen(node(0, "Flashlight").copy(state = "On"))
+        assertEquals(listOf("\"Flashlight\" Off→On"), screenChange(dark, lit).flips)
+        assertTrue(renderObs(lit), renderObs(lit).contains("state: On"))
+        // The pressed control counts even with no words of its own (Samsung's DND switch, live);
+        // an unlabelled switch it didn't press does not.
+        val sw = OpNode(7, "", "Switch", clickable = true, checked = false, selector = "sw", windowId = 3)
+        val flipped = screen(sw.copy(checked = true))
+        assertEquals(listOf("\"the tapped Switch\" unchecked→checked"), screenChange(screen(sw), flipped, tapped = sw).flips)
+        assertTrue(screenChange(screen(sw), flipped).flips.isEmpty())
+        // A tap that navigates: whatever now sits in the tapped row's place is another page's row.
+        val row = OpNode(0, "Display", "LinearLayout", clickable = true, selector = "r", windowId = 3, path = "0.2")
+        val page = screen(row.copy(text = "Brightness", selector = "b"), node(1, "A"), node(2, "B"), node(3, "C"))
+        assertTrue(screenChange(screen(row), page, tapped = row).flips.isEmpty())
+    }
+
+    @Test fun eachStepSaysWhatItChangedAndTheCheckerGetsEveryFlip() {
+        val off = screen(node(0, "Dark mode", role = "Switch", checked = false))
+        val on = screen(node(0, "Dark mode", role = "Switch", checked = true), gen = 9)
+        val verifier = ScriptedModel(pass)
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Dark mode is on."}""")
+        val out = run("turn on dark mode", FakeDevice(listOf(off, on, on)), m, verifier = verifier)
+        assertTrue(out.summary, out.ok)
+        assertTrue(m.prompts[1], m.prompts[1].contains("tap[0] \"Dark mode\" — ok → \"Dark mode\" unchecked→checked"))
+        assertTrue(verifier.prompts[0], verifier.prompts[0].contains("\"changes_made\":[\"step 1: \\\"Dark mode\\\" unchecked→checked\"]"))
+    }
+
+    @Test fun anOperatorThatGivesUpOnAMetGoalIsCheckedFirst() {
+        val off = screen(node(0, "Portrait, Auto rotate"))
+        val on = screen(node(0, "Auto rotate, Set to portrait"), gen = 9)
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"fail","summary":"It still says portrait."}""")
+        val met = run("turn on auto rotate", FakeDevice(listOf(off, on, on)), m,
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"Auto-rotate is on."}"""))
+        assertTrue(met.summary, met.ok)
+        assertEquals("Auto-rotate is on.", met.summary)
+        val notMet = run("turn on auto rotate", FakeDevice(listOf(off, off, off)),
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"fail","summary":"It still says portrait."}"""),
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"still portrait"}"""))
+        assertFalse(notMet.ok)
+        assertEquals("It still says portrait.", notMet.summary)
+    }
+
+    @Test fun theUserHearsTheCheckersAccountNotTheOperatorsClaim() {
+        // Live: the operator switched Bluetooth on, then reported it "already turned on".
+        val off = screen(node(0, "Bluetooth", role = "Switch", checked = false))
+        val on = screen(node(0, "Bluetooth", role = "Switch", checked = true), gen = 9)
+        val out = run("turn on Bluetooth", FakeDevice(listOf(off, on, on)),
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Bluetooth is already turned on."}"""),
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"Bluetooth was turned on."}"""))
+        assertTrue(out.ok)
+        assertEquals("Bluetooth was turned on.", out.summary)
+    }
+
+    @Test fun claimEvidenceSaysWhereEachAnsweredValueWasSeen() {
+        val seen = linkedMapOf(
+            "2016" to "after step 1: 2016",
+            "16" to "after step 2: Android version · 16",
+            "Galaxy Bells" to "after step 4: Ringtone · Galaxy Bells",
+            "8,848.86 m" to "after step 3: Mount Everest · 8,848.86 m",
+            "Ringtone" to "after step 4: Ringtone",
+        )
+        val ev = claimEvidence(
+            "Android 16, the ringtone is Galaxy Bells, Everest is 8848.86 m, battery 85%",
+            "check the android version and the ringtone",
+            seen,
+        )
+        val where = (0 until ev.length()).associate { ev.getJSONObject(it).getString("value") to ev.getJSONObject(it).getString("seen") }
+        assertEquals("after step 2: Android version · 16", where["16"]) // not inside "2016"
+        assertEquals("after step 3: Mount Everest · 8,848.86 m", where["8848.86"])
+        assertEquals("nowhere", where["85"])
+        assertEquals("after step 4: Ringtone · Galaxy Bells", where["Galaxy Bells"])
+        assertFalse(where.containsKey("Ringtone")) // the goal's own word is the question, not an answer
+        // A timer's "01:30" is the goal's "1 minute 30 seconds", part by part.
+        val timer = claimEvidence("Timer is set to 01:30.", "set the timer to 1 minute 30 seconds", emptyMap())
+        assertEquals(listOf("in the goal itself", "in the goal itself"), (0 until timer.length()).map { timer.getJSONObject(it).getString("seen") })
+    }
+
+    @Test fun anAnswerReadOnAnEarlierScreenReachesTheChecker() {
+        val about = screen(node(0, "Android version", clickable = false), node(1, "16", clickable = false), node(2, "Back"))
+        val home = screen(node(0, "Settings home", clickable = false), node(3, "Back"), gen = 9)
+        val verifier = ScriptedModel(pass)
+        run("what android version is this", FakeDevice(listOf(about, home, home)),
+            ScriptedModel("""{"do":"tap","target":2}""", """{"do":"done","summary":"Android 16."}"""), verifier = verifier)
+        // (the JVM's org.json doesn't keep key order, so each half separately)
+        assertTrue(verifier.prompts[0], verifier.prompts[0].contains("\"value\":\"16\""))
+        assertTrue(verifier.prompts[0], verifier.prompts[0].contains("\"seen\":\"after step 0: Android version · 16\""))
+    }
+
+    @Test fun aPassThatListsAnUnmetCheckIsAFail() {
+        val v = parseVerdict(
+            """{"checks":[{"need":"Android version","evidence":"16 on screen","met":true},""" +
+                """{"need":"model name","evidence":"not shown anywhere","met":false}],"verdict":"pass","summary":"Done"}""",
+        )
+        assertEquals(false, v?.pass)
+        assertEquals("model name — not shown anywhere", v?.text)
+        assertEquals(true, parseVerdict("""{"checks":[{"need":"timer running","evidence":"04:59 counting","met":true}]}""")?.pass)
+        assertEquals(false, parseVerdict("""{"checks":[{"need":"x","evidence":"y","met":"no"}]}""")?.pass)
+        assertEquals(null, parseVerdict("""{"checks":[{"need":"x"}]}""")) // nothing ruled
+    }
+
+    @Test fun aNoFromTheListAfterAFlipGetsASecondLookWithAScreenshot() {
+        // Samsung's theme radios once read "Light" while the screen showed Dark (live).
+        val rows = (0 until 11).map { node(it, "Row $it") }
+        val before = screen(*rows.toTypedArray(), node(11, "Dark", role = "RadioButton", checked = false))
+        val after = screen(*rows.toTypedArray(), node(11, "Dark", role = "RadioButton", checked = true), gen = 9)
+        val dev = FakeDevice(listOf(before, after, after)).apply { shot = "SHOT" }
+        val verifier = ScriptedModel("""{"verdict":"fail","reason":"Light is still selected"}""", pass).apply { vision = true }
+        val lines = mutableListOf<String>()
+        val out = run("turn on dark mode", dev,
+            ScriptedModel("""{"do":"tap","target":11}""", """{"do":"done","summary":"Dark mode is on."}"""),
+            verifier = verifier, lines = lines)
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf(0, 1), verifier.imageCounts) // the list first, then the pixels
+        assertTrue(lines.any { it.contains("second look") })
+    }
+
+    @Test fun aNoWithNothingChangedIsNotPaidForTwice() {
+        val rich = screen(*(0 until 12).map { node(it, "Row $it") }.toTypedArray())
+        val dev = FakeDevice(listOf(rich)).apply { shot = "SHOT" }
+        val verifier = ScriptedModel("""{"verdict":"fail","reason":"not there"}""", """{"verdict":"fail","reason":"still not"}""")
+            .apply { vision = true }
+        val out = run("open row 3", dev,
+            ScriptedModel("""{"do":"tap","target":3}""", """{"do":"done","summary":"Opened."}""", """{"do":"done","summary":"Opened."}"""),
+            verifier = verifier)
+        assertFalse(out.ok)
+        assertEquals(listOf(0, 0), verifier.imageCounts) // one plain check per claim, no second look
+    }
+
+    // ── Unfamiliar apps ──
+
+    @Test fun aLookupMayWalkThroughASensitiveAreaButNeverActOnACriticalControl() {
+        // 2026-09-26: "what the security patch level is" was refused at its first tap.
+        val lookup = "on my phone, check in Settings what the security patch level is"
+        assertEquals("R1", classifyGoalRisk(lookup))
+        assertEquals("R1", classifyGoalRisk("which apps have camera permission?"))
+        assertEquals("R3", classifyGoalRisk("turn off the security updates"))
+        assertEquals("R3", classifyGoalRisk("what's my Wi-Fi password"))
+        assertEquals("R3", classifyGoalRisk("check my bank balance"))
+        val obs = screen(node(0, "Security and privacy"), node(1, "Delete account"), node(2, "Search", role = "EditText", editable = true))
+        fun cmd(s: String) = parseCommand(s)!!
+        assertEquals("R1", classifyAction(lookup, cmd("""{"do":"tap","target":0}"""), obs).risk)
+        assertEquals("R1", classifyAction(lookup, cmd("""{"do":"set_text","target":2,"text":"security patch"}"""), obs).risk)
+        assertEquals("R3", classifyAction(lookup, cmd("""{"do":"tap","target":1}"""), obs).risk)
+        assertEquals("R3", classifyAction("turn on dark mode", cmd("""{"do":"tap","target":0}"""), obs).risk)
+        assertFalse(isLookupGoal("find the Wi-Fi settings and turn Wi-Fi off"))
+    }
+
+    @Test fun scrollingBackAndForthIsRedirectedOnceBeforeItStops() {
+        // Live: "turn on auto rotate" scrolled Display settings up and down until the cycle
+        // guard ended the task — twice — without ever trying search.
+        val screens = (0..20).map { g -> screen(node(0, "Row $g"), gen = g.toLong()) }
+        val moves = arrayOf("""{"do":"scroll","direction":"down"}""", """{"do":"scroll","direction":"up"}""")
+        val m = ScriptedModel(*Array(12) { moves[it % 2] })
+        val out = run("turn on auto rotate", FakeDevice(screens), m, plan = true,
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"auto rotate is off"}"""))
+        assertFalse(out.ok)
+        assertTrue(out.steps.any { it.contains("scrolling back and forth") })
+        assertTrue(out.steps.any { it.contains("3 scrolls and still looking") })
+        assertTrue(m.prompts.any { it.contains("REPLAN") })
+        assertTrue(out.summary, out.summary.contains("circles"))
+        assertEquals(8, m.prompts.size) // redirected once, stopped at the second cycle
+    }
+
+    @Test fun goingOverOldGroundIsNudgedThenStopped() {
+        // Live: a lookup for a setting this phone doesn't have went Display → search → back three
+        // times over, each move "changing the screen", for 171s. Two pages, every move a different
+        // control (so no cycle), nothing new after the first visit to each.
+        val a = screen(*(0 until 12).map { node(it, "A$it") }.toTypedArray())
+        val b = screen(*(0 until 12).map { node(it, "B$it") }.toTypedArray(), gen = 9)
+        val m = ScriptedModel(*Array(14) { """{"do":"tap","target":$it}""" })
+        val out = run("find the screen resolution", FakeDevice((0..40).map { if (it % 2 == 0) a else b }), m,
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"no resolution shown"}"""))
+        assertFalse(out.ok)
+        assertTrue(out.steps.any { it.contains("showed nothing you hadn't already seen") })
+        assertTrue(out.summary, out.summary.contains("went over the same screens"))
+        assertEquals(10, m.prompts.size) // the first visit to each page is new; nine stale moves after it
+    }
+
+    @Test fun reTypingTheSameSearchIsNotProgress() {
+        // Live: the operator re-ran the same Settings search again and again; typing counted
+        // as progress every time, so the stale count never climbed.
+        fun field(t: String) = OpNode(20, t, "EditText", editable = true, selector = "field", windowId = 3,
+            bounds = OpBounds(0, 2000, 200, 90))
+        val a = screen(*(0 until 12).map { node(it, "A$it") }.toTypedArray(), field(""))
+        val b = screen(*(0 until 12).map { node(it, "B$it") }.toTypedArray(), field("resolution"), gen = 9)
+        val m = ScriptedModel(*Array(14) { """{"do":"tap","target":$it}""" })
+        val out = run("find the screen resolution", FakeDevice((0..40).map { if (it % 2 == 0) a else b }), m,
+            verifier = ScriptedModel("""{"verdict":"fail","reason":"no resolution shown"}"""))
+        assertTrue(out.summary, out.summary.contains("went over the same screens"))
+        assertEquals(11, m.prompts.size) // each text counted once, then nine stale moves
+    }
+
+    @Test fun quickSettingsOpensThePanelEvenFromJarvisItself() {
+        val self = screen(app = "com.jarvis.app")
+        val off = screen(node(0, "Auto rotate", role = "Switch", checked = false), app = "com.android.systemui")
+        val on = screen(node(0, "Auto rotate", role = "Switch", checked = true), app = "com.android.systemui", gen = 9)
+        val dev = FakeDevice(listOf(self, off, on, on))
+        val out = runBlocking {
+            OperatorLoop(
+                dev,
+                ScriptedModel("""{"do":"quick_settings"}""", """{"do":"tap","target":0}""", """{"do":"done","summary":"Auto rotate is on."}"""),
+                FakeJournal(),
+                OperatorOptions(taskId = "t", goal = "turn on auto rotate", plan = false, sleep = {}, selfPackage = "com.jarvis.app"),
+                ScriptedModel(pass),
+            ).run()
+        }
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("quickSettings", "tap:0"), dev.actions)
+        assertTrue(out.steps[0], out.steps[0].contains("now in com.android.systemui"))
+        assertEquals("R0", classifyAction("turn on auto rotate", parseCommand("""{"do":"quick_settings"}""")!!, off).risk)
     }
 
     // ── Vision ──

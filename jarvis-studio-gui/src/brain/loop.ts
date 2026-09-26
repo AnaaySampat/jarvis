@@ -88,6 +88,26 @@ const CLAIM_CHECK_NOTE =
   "called no tool in this turn, so nothing has happened. If the request needs an " +
   "action, call the right tool now. Otherwise answer without saying you did anything.";
 
+/** A request about the user's own phone — its settings, an app on it. */
+const PHONE_REF_RE =
+  /\b(?:on|in|from) (?:my|the) phone\b|\bmy phone['’]?s\b|\b(?:in|from) (?:the )?settings\b|\bin the [\w ]{1,20}? app\b/i;
+
+/**
+ * "Answered about the phone without looking": the user asked about their phone and the
+ * reply came with no tool call. Live 2026-09-26, on a fallback chat model: "Android 14"
+ * for a phone on 16, and an uptime of "3 hours 29 minutes" for one up almost four days.
+ */
+export function answeredPhoneWithoutLooking(userText: string, ranTools: boolean): boolean {
+  return !ranTools && PHONE_REF_RE.test(userText);
+}
+
+const PHONE_CHECK_NOTE =
+  "(Automatic check, not from the user.) The user asked about their phone, but you called " +
+  "no tool in this turn, so your reply didn't come from the phone. If the answer depends on " +
+  "what is on the phone right now (a setting, a value, what an app shows) or asks you to do " +
+  "something there, call phone_task now. Otherwise answer again without stating any phone " +
+  "value you haven't read.";
+
 /**
  * Run one user turn to completion. `tools` is the tier-tailored palette; `deps`
  * carries platform+memory+remote (and the config the route ladder is built from).
@@ -112,11 +132,19 @@ export async function runTurn(
     if (!reply.toolCalls.length) {
       // One silent recovery round, as main.py did: the claim is never spoken, and the
       // model gets to either make the call it skipped or answer honestly.
-      if (!claimChecked && claimedWithoutActing(userText, reply.text, toolResults.length > 0)) {
+      const ranTools = toolResults.length > 0;
+      const note = claimChecked
+        ? null
+        : claimedWithoutActing(userText, reply.text, ranTools)
+          ? CLAIM_CHECK_NOTE
+          : answeredPhoneWithoutLooking(userText, ranTools)
+            ? PHONE_CHECK_NOTE
+            : null;
+      if (note) {
         claimChecked = true;
-        console.warn("[turn] reply claimed an action with no tool call — rechecking");
+        console.warn("[turn] reply made no tool call where one was due — rechecking");
         convo.push({ role: "assistant", content: reply.text });
-        convo.push({ role: "user", content: CLAIM_CHECK_NOTE });
+        convo.push({ role: "user", content: note });
         continue;
       }
       return { reply: reply.text, toolResults };

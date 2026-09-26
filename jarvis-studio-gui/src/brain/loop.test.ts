@@ -17,7 +17,7 @@ vi.mock("./tools/dispatch", () => ({
   },
 }));
 
-import { claimedWithoutActing, runTurn } from "./loop";
+import { answeredPhoneWithoutLooking, claimedWithoutActing, runTurn } from "./loop";
 import type { DispatchDeps } from "./tools/dispatch";
 
 const deps = { config: {} } as unknown as DispatchDeps;
@@ -57,5 +57,27 @@ describe("runTurn — said it did it but didn't", () => {
     expect(claimedWithoutActing("what's the capital of France?", "It's Paris.", false)).toBe(false);
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", true)).toBe(false);
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", false)).toBe(true);
+  });
+});
+
+describe("runTurn — answered about the phone without looking", () => {
+  it("sends a phone question back to look instead of answering from memory", async () => {
+    // Live 2026-09-26, fallback chat model: "Android 14" for a phone on Android 16.
+    replies.push(
+      { text: "Phone info: Android 14.", toolCalls: [] },
+      { text: "", toolCalls: [{ id: "c1", name: "phone_task", args: { goal: "find the Android version" } }] },
+      { text: "Android 16.", toolCalls: [] },
+    );
+    const out = await ask("on my phone, check Settings and tell me the Android version");
+    expect(dispatched).toEqual(["phone_task"]);
+    expect(out.reply).toBe("Android 16.");
+    expect(seen[1]!.at(-1)).toMatch(/didn't come from the phone/);
+  });
+
+  it("only for requests about the phone, and not once a tool ran", () => {
+    expect(answeredPhoneWithoutLooking("what's my phone's device name?", false)).toBe(true);
+    expect(answeredPhoneWithoutLooking("how long has it been on? check in Settings", false)).toBe(true);
+    expect(answeredPhoneWithoutLooking("what's the tallest mountain?", false)).toBe(false);
+    expect(answeredPhoneWithoutLooking("on my phone, what's the Android version?", true)).toBe(false);
   });
 });

@@ -343,6 +343,31 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   2026-09-25 Spotify run had the song playing while the operator toggled play/pause into
   "nothing is changing". Running out of quota *after acting* says what was last done, so
   the user checks instead of resending.
+- **Evidence the system records (2026-09-26).** The checker no longer has only the final
+  screen and the operator's word. After every action the loop diffs the accessibility tree
+  before and after it (`screenChange`): switches/radios that flipped, a tab selected, a
+  quick-settings tile's `stateDescription` (now captured by the service), a pressed control
+  that renamed itself ("Portrait" → "Auto rotate", Start → Stop), text typed into a field,
+  and the words that appeared or went away. That tail rides on the step line (`tap[4]
+  "Wi-Fi" — ok → "Wi-Fi" unchecked→checked`) so the executor sees what its move did, and
+  every state flip (not typing) goes to the checker as `changes_made` — what the task really
+  changed, even on a screen since left. Scrolls and other navigation never report flips (a
+  recycled row is not a toggle), and only the front window's words count (the status-bar
+  clock ticked into "new: 18:16"). Every label any screen showed is kept too, so the checker
+  gets `claim_evidence`: where each number and name in the claimed answer was seen
+  ("nowhere" flags an invented value; "01" matches the goal's "1"; fields are excluded — the
+  operator's own typing is not evidence). The checker replies with `checks` first (each
+  thing the goal needs, its evidence, met or not) and `parseVerdict` refuses a "pass" that
+  lists an unmet check. A "no" read off the element list after a state flip gets **one
+  second look with a screenshot** before it rejects — a false rejection sends the operator
+  back to a toggle it already set (the rejection now also says never to re-tap a switch the
+  screen shows set). A place the goal names ("in Settings") is a route, not a requirement
+  (live, auto-rotate was on via the quick panel and the checker rejected it twice for not
+  using Settings); "couldn't find it" is not a pass unless the goal asked whether it exists.
+  On a pass the user hears **the checker's summary**, written from that evidence — the
+  operator's chained `done` is composed before its tap runs, and said "already on" for
+  switches it had just turned on. An explicit `fail` gets the same one-look rescue check as
+  every other give-up.
 - **Speed (2026-09-25 night).** Every model round-trip costs 2–8s, so the loop avoids them:
   JARVIS's own screen is never walked (an empty observation — its WebView took 0.9–3s);
   when the goal names exactly one installed app, it is opened with no model call
@@ -376,6 +401,30 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   The keyboard window, JARVIS's own windows, the header line and pixel bounds on plain text
   are left out. `open_app` from the operator lands on the app's main screen
   (`CLEAR_TOP`), never on the page an earlier task left it on.
+- **Unfamiliar apps (2026-09-26).** Most failures on never-tried tasks were the operator
+  getting lost, not the model being unable: it scrolled Display settings up and down until
+  the cycle guard ended the task, twice, and never searched. Now three scrolls in a row add a
+  hint naming the screen's search control; a back-and-forth scroll cycle (harmless — it breaks
+  nothing) is redirected once instead of ending the task; two failures in a row, a stuck
+  screen or that redirect ask for a **new plan** on the next command (no extra call, at most
+  two per task). **Progress means new information**, not a changed screen: a move that shows
+  no label unseen this task, flips nothing, types nothing and notes nothing is stale; five in
+  a row say "you're going over old ground — if it isn't in what you've seen, fail" and stop
+  earning budget extensions, nine end the task (after the checker looks). Live, a lookup for
+  a setting this phone doesn't have went Display → search → back three times for 171 s and
+  36 model calls, every move "changing the screen". Stale actions are retried more patiently
+  (see *Stale observations*). `quick_settings` (`GLOBAL_ACTION_QUICK_SETTINGS`, R0) reaches phone-wide
+  switches Samsung keeps out of Settings (auto-rotate has no Settings entry at all); the panel
+  is dismissed when the task ends so it isn't left over JARVIS. A **lookup** goal ("check…",
+  "what is…", no change verb) may walk through sensitive *areas* — `security`, `permission`,
+  `administrator` — without the whole task becoming R3 ("what's my security patch level" was
+  refused at its first tap); critical *acts* (delete, uninstall, pay, sign in, passwords) stay
+  R3 in every goal. On the chat side, the system prompt now says `phone_task` also answers
+  questions only the phone's screens can (a setting's value, the device name, uptime) — the
+  chat model had asked "want me to check?" for one and invented an uptime for another — and
+  `loop.ts` gives a reply about the phone that called no tool one silent recheck round
+  (`answeredPhoneWithoutLooking`, beside `claimedWithoutActing`): on its Groq fallback the
+  chat model answered "Android 14" for a phone on 16 without looking.
 - **Doing exactly the goal.** The prompt (kept tight — it is paid on every step) says a
   goal to open/find/search/show/check is done when the thing is on screen, never toggle or
   select beyond it, and to use an app's search rather than browse. The checker judges the
@@ -392,8 +441,12 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   (≤ 2.5 s) so the first look isn't a splash screen.
 - **Stale observations.** Every action is bound to the observation's generation, and a
   live screen moves it on during a model call. On `stale_observation` the loop re-observes
-  **once** and retries only if the same control (its native selector) is still there at
-  the same risk — no extra model call.
+  (up to three times, 250/500/750 ms apart) and retries only if the same control (its
+  native selector) is still there, at the same risk, **still saying the same words** — if
+  "Start" has become "Stop" the model decides again. A low-risk retry is bound to the
+  control rather than the generation (`generation = -1`; the service still checks app,
+  selector, index and window when it acts): a running stopwatch redraws every 10 ms, and
+  "Stop" went stale six times in a row (2026-09-26) until a coordinate tap got through.
 - **Coming back to report.** The spoken summary is produced by the WebView, which is
   paused by the time a task ends, so native brings JARVIS to the front when a task
   finishes (a bound AccessibilityService exempts the app from background-launch limits).

@@ -160,6 +160,16 @@ fresh single-commit snapshot, so history never goes public. `reference/` and
   icon-only or non-English "Send"/"Pay" control is classified R1. Treating every
   unlabeled tap as R2 would suspend most real tasks, so this needs a better signal
   (resource-id, the planner's own intent), not a blanket rule.
+- **2026-09-26 — lookups may walk through sensitive areas (deliberate relaxation).** A goal
+  that only reads (a lookup verb and no change verb — `isLookupGoal`) no longer becomes R3
+  just for naming `security`, `permission(s)`, `administrator`, `root` or `sudo`, and in such
+  a goal a tap on a row with those words is R1: "what's my security patch level" was refused
+  at its first tap. Critical *acts* — delete, uninstall, pay, buy, transfer, sign in,
+  passwords/PINs/OTPs, factory reset — stay R3 in every goal, and the change-verb list is broad
+  on purpose (any one of them turns the relaxation off). Residual risk: inside a lookup the
+  model could still flip a toggle on a security page; the checker fails unrequested changes
+  (now from system-recorded `changes_made`), but only after the fact. Also new in that pass:
+  `quick_settings`, R0 navigation to the quick-settings shade.
 - **logcat carries step text** (plan lines, tapped labels). Other apps can't read logcat
   without `READ_LOGS`; it's visible over adb. Trim to action + risk before a release build.
 - `AutonomyBootReceiver` is `exported="true"`; its handler is idempotent. `default.json`'s

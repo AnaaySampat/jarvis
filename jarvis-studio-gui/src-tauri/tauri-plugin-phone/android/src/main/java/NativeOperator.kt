@@ -147,7 +147,12 @@ object NativeOperator {
             run.outcome = final
             // The WebView that would normally hide the STOP overlay may be paused
             // right now; don't leave it floating over the app the task just drove.
-            withContext(Dispatchers.Main) { JarvisAccessibilityService.instance?.hideStopOverlay() }
+            withContext(Dispatchers.Main) {
+                JarvisAccessibilityService.instance?.run {
+                    hideStopOverlay()
+                    dismissShadeIfOpen()
+                }
+            }
             notifyResult(app, final)
             // The spoken summary is produced by the (by now paused) WebView, so until the
             // user reopens JARVIS they hear nothing — measured 2026-09-23: the answer came
@@ -319,6 +324,7 @@ object NativeOperator {
                         password = n.password,
                         bounds = OpBounds(n.bounds.left, n.bounds.top, n.bounds.width(), n.bounds.height()),
                         path = n.path,
+                        state = n.stateDescription,
                     )
                 },
             )
@@ -405,6 +411,7 @@ object NativeOperator {
             (context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)?.isMusicActive
         override suspend fun back() = act { s, done -> s.goBack(done) }
         override suspend fun home() = act { s, done -> s.goHome(done) }
+        override suspend fun quickSettings() = act { s, done -> s.openQuickSettings(done) }
     }
 
     // ── Model ladder ──

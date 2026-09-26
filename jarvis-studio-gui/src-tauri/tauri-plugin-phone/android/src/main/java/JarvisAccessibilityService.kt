@@ -84,6 +84,9 @@ class JarvisAccessibilityService : AccessibilityService() {
         val path: String,
         val collectionIndex: Int,
         val selector: String,
+        /** A control's spoken state ("On", "Off", "Expanded") where it has no checked flag —
+         *  quick-settings tiles and Compose toggles report it only here. */
+        val stateDescription: String = "",
     )
 
     data class Snapshot(
@@ -322,6 +325,9 @@ class JarvisAccessibilityService : AccessibilityService() {
                     path = path,
                     collectionIndex = collectionIndex,
                     selector = selector,
+                    stateDescription = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        node.stateDescription?.toString()?.trim()?.take(40) ?: ""
+                    } else "",
                 ),
             )
         }
@@ -590,6 +596,16 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     fun goHome(done: (ActionReceipt) -> Unit) =
         performGlobalNavigation(GLOBAL_ACTION_HOME, "Home", done)
+
+    fun openQuickSettings(done: (ActionReceipt) -> Unit) =
+        performGlobalNavigation(GLOBAL_ACTION_QUICK_SETTINGS, "Quick settings", done)
+
+    /** A task that ended in the quick-settings panel left it drawn over JARVIS (live) — close it. */
+    fun dismissShadeIfOpen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        if (rootInActiveWindow?.packageName?.toString() != "com.android.systemui") return
+        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+    }
 
     private fun performGlobalNavigation(
         globalAction: Int,
