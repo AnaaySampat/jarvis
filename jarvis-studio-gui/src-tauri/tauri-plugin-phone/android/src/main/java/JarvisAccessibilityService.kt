@@ -229,6 +229,11 @@ class JarvisAccessibilityService : AccessibilityService() {
     // ── Event-driven world model ─────────────────────────────────────────────
 
     fun snapshot(): Snapshot {
+        // Views an app marks "not important for accessibility" (included since 2026-09-26 for
+        // Samsung's radio pickers) don't always send the events that refresh the node cache:
+        // Clock's button text stayed "Resume" in the list after it had become "Stop". Read
+        // fresh every time — a snapshot is ~20–80 ms, so the extra IPC is affordable.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) clearCache()
         // If an event lands while walking, take one fresh retry so all selectors and
         // the returned generation describe one coherent revision.
         var snap = snapshotOnce()
@@ -281,7 +286,10 @@ class JarvisAccessibilityService : AccessibilityService() {
         val description = node.contentDescription?.toString()?.trim()?.take(160) ?: ""
         val id = node.viewIdResourceName?.take(160) ?: ""
         val role = node.className?.toString()?.substringAfterLast('.') ?: ""
-        val actionable = node.isClickable || node.isEditable || node.isScrollable ||
+        // Checkable counts: Samsung's option pickers (screen timeout, the Light/Dark theme) are
+        // bare, non-clickable RadioButtons — left out, which option was CHECKED was invisible,
+        // and the checker rejected two correct changes (2026-09-26).
+        val actionable = node.isClickable || node.isEditable || node.isScrollable || node.isCheckable ||
             node.isLongClickable || text.isNotEmpty() || description.isNotEmpty()
         if (actionable) {
             val bounds = Rect().also(node::getBoundsInScreen)

@@ -362,8 +362,19 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   (inside)`) and those plain children aren't listed again; a bare control takes the
   nearest sibling label (`RadioButton "Dark" (beside)` — Samsung's theme picker); both use
   the hierarchy `path`, not bounds (a floating search bar is drawn over rows it doesn't
-  own). The keyboard window, JARVIS's own windows, the header line and pixel bounds on
-  plain text are left out. `open_app` from the operator lands on the app's main screen
+  own). A row with exactly one checkable inside shows its state (`"5 minutes" (inside)
+  (clickable,checked)`); a container that holds labelled rows is a list and borrows no
+  label. The service sets `flagIncludeNotImportantViews` and the snapshot keeps checkable
+  nodes: Samsung's option pickers hide bare RadioButtons that way, and without them which
+  option was checked was invisible — the checker rejected correct screen-timeout changes.
+  Those views don't always send the events that refresh the service's node cache (Clock's
+  "Resume" stayed "Resume" in the list after it became "Stop"), so every snapshot starts
+  with `clearCache()` (API 33+). `appNamedIn` matches whole labels, or a label's first word
+  when only one app starts with it ("Chrome" → this phone's "Chrome Beta"), ignores "my
+  phone", and prefers the app right after an opening verb ("open Chrome and search
+  Google" → Chrome).
+  The keyboard window, JARVIS's own windows, the header line and pixel bounds on plain text
+  are left out. `open_app` from the operator lands on the app's main screen
   (`CLEAR_TOP`), never on the page an earlier task left it on.
 - **Doing exactly the goal.** The prompt (kept tight — it is paid on every step) says a
   goal to open/find/search/show/check is done when the thing is on screen, never toggle or

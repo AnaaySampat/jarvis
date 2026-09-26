@@ -252,6 +252,14 @@ the R3 words, so a coordinate tap onto a sign-in control, or a sign-in goal, nee
 human. Separately, the operator could see and press JARVIS's own floating STOP; its
 windows are now excluded from what the operator sees and can touch.
 
+**Changed 2026-09-26 — the accessibility service reads "not important" views too.**
+`flagIncludeNotImportantViews` was added so the operator can see bare checkable controls
+(Samsung hides its option-picker RadioButtons that way; without them the completion
+checker could not tell which option was selected). It widens what the service reads to
+views apps marked unimportant — the same screen, no new permission, still only while a
+task runs and still sent only to the configured model provider. The keyboard window and
+JARVIS's own windows are excluded from snapshots.
+
 **Mitigation integrity — found and fixed 2026-09-22 (in source, not device-tested):**
 
 A codebase-wide correctness pass found that two controls this document leans on as

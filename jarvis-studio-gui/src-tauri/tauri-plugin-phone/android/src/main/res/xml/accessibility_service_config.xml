@@ -3,11 +3,15 @@
      - retrieve window content (read the node tree)
      - retrieve interactive windows + view ids (better node targeting)
      - perform gestures (taps / swipes via dispatchGesture)
+     - include views apps mark "not important for accessibility": Samsung's option pickers
+       (screen timeout, Light/Dark) hide their RadioButtons that way, so which option was
+       CHECKED was invisible and the completion checker rejected correct changes (2026-09-26).
+       The snapshot still keeps only labelled / interactive / checkable nodes.
      The user must still toggle the service on in system Settings. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged|typeViewClicked|typeViewFocused|typeViewTextChanged|typeViewScrolled|typeNotificationStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:canTakeScreenshot="true"

@@ -536,8 +536,10 @@ class OperatorLoop(
             if (isActuationCmd(action) && cycleDetected(sigHistory, sig)) {
                 return giveUpUnlessMet(step, partial(steps, "I caught myself going in circles, sir — stopping before I make a mess."))
             }
-            // ── Duplicate-message guard ──
-            if (action in setOf("type", "set_text", "fill")) {
+            // ── Duplicate-message guard ── only where a repeat could reach a person: retyping a
+            // search query into a second box is not a duplicate message (it ended a Chrome
+            // lookup, live).
+            if (action in setOf("type", "set_text", "fill") && classifyGoalRisk(opts.goal) != "R1") {
                 val t = normalizeText(cmd.optString("text"))
                 if (t.length >= 4 && t in typedTexts) {
                     return partial(steps, "I've already entered that once, sir — I won't send it again to avoid duplicates.")
@@ -1214,13 +1216,16 @@ internal fun renderObs(obs: OpObservation): String {
     if (obs.nodes.isEmpty()) return "(no actionable elements detected)"
     // A row that speaks through its children (a clickable container with 1–3 labels inside)
     // carries them itself, so those plain text children aren't listed a second time.
-    val absorbed = obs.nodes.asSequence()
-        .filter { it.clickable && it.text.isEmpty() && it.description.isEmpty() }
-        .map { labelsInside(it, obs) }
-        .filter { it.size in 1..3 }
-        .flatMap { inside -> inside.filter { !it.clickable && !it.editable && !it.scrollable && it.checked == null } }
-        .map { it.index }
-        .toSet()
+    val rows = obs.nodes.filter {
+        it.clickable && it.text.isEmpty() && it.description.isEmpty() && innerLabel(it, obs).isNotEmpty()
+    }
+    // A row with exactly one checkable inside shows its state ("5 minutes" … checked), so an
+    // option picker reads as one line per option; a non-clickable radio then folds into it.
+    val rowState = rows.associate { r -> r.index to checkablesInside(r, obs).singleOrNull() }
+        .filterValues { it != null }.mapValues { it.value!! }
+    val absorbed = rows.flatMap { r ->
+        labelsInside(r, obs).filter { !it.clickable && !it.editable && !it.scrollable && it.checked == null }
+    }.map { it.index }.toSet() + rowState.values.filter { !it.clickable }.map { it.index }
     val ranked = rankNodes(obs.nodes.filter { it.index !in absorbed })
     val hidden = maxOf(0, ranked.size - OperatorLoop.OBS_MAX_NODES)
     // Never silently truncate: an operator that thinks it sees the whole screen
@@ -1233,7 +1238,7 @@ internal fun renderObs(obs: OpObservation): String {
             "clickable".takeIf { n.clickable },
             "editable".takeIf { n.editable },
             "scrollable".takeIf { n.scrollable },
-            when (n.checked) { true -> "checked"; false -> "unchecked"; null -> null },
+            when (n.checked ?: rowState[n.index]?.checked) { true -> "checked"; false -> "unchecked"; null -> null },
             "selected".takeIf { n.selected },
         ).joinToString(",")
         // Icon-only controls (a Send FAB, a back arrow) carry no visible text.
@@ -1553,17 +1558,28 @@ internal fun opensSearch(n: OpNode, obs: OpObservation): Boolean {
  *  bounds alone lied for Samsung Settings' floating search bar, which is drawn over the
  *  "Display" row and got labelled "Display · Search" — else those drawn within its bounds. */
 internal fun labelsInside(n: OpNode, obs: OpObservation): List<OpNode> =
-    obs.nodes.filter { o ->
-        o.index != n.index && (o.text.isNotEmpty() || o.description.isNotEmpty()) &&
-            if (n.path.isNotEmpty() && o.path.isNotEmpty()) o.path.startsWith(n.path + ".") else n.bounds.contains(o.bounds)
-    }
+    obs.nodes.filter { o -> (o.text.isNotEmpty() || o.description.isNotEmpty()) && isInside(o, n) }
+
+/** [o] is a descendant of [n] — by hierarchy when known, else drawn within its bounds. */
+internal fun isInside(o: OpNode, n: OpNode): Boolean =
+    o.index != n.index &&
+        if (n.path.isNotEmpty() && o.path.isNotEmpty()) o.path.startsWith(n.path + ".") else n.bounds.contains(o.bounds)
+
+/** The checkable elements inside [n] (radios, checkboxes, switches). */
+internal fun checkablesInside(n: OpNode, obs: OpObservation): List<OpNode> =
+    obs.nodes.filter { o -> o.checked != null && isInside(o, n) }
 
 /** What a label-less control says through the views inside it: a row's title and its
  *  subtitle together ("Dark mode · Display" vs "Dark mode · Calendar style" — live, the
  *  operator opened Calendar's dark mode off a bare "Dark mode"), or "". */
 internal fun innerLabel(n: OpNode, obs: OpObservation): String {
     val inside = labelsInside(n, obs).map { it.text.ifEmpty { it.description } }.distinct()
-    return (if (inside.size <= 3) inside else inside.take(1)).joinToString(" · ").take(90)
+    // A list is not a row: Samsung's screen-timeout list borrowed "15 seconds" and, flagged
+    // `selected`, read as the chosen option (live). So no label for a container with more than
+    // a row's worth of words, or one holding other labelled clickable rows.
+    if (inside.size !in 1..3) return ""
+    val holdsRows = obs.nodes.any { o -> o.clickable && isInside(o, n) && labelsInside(o, obs).isNotEmpty() }
+    return if (holdsRows) "" else inside.joinToString(" · ").take(90)
 }
 
 /** For a label-less control whose words are a SIBLING rather than a child — Samsung's
@@ -1572,6 +1588,9 @@ internal fun innerLabel(n: OpNode, obs: OpObservation): String {
  *  same parent, or "". Needs the hierarchy; "" without it. */
 internal fun nearbyLabel(n: OpNode, obs: OpObservation): String {
     if (n.path.isEmpty() || !n.path.contains('.')) return ""
+    // Only a bare control borrows a neighbour's words; a container with words of its own
+    // inside (the screen-timeout list's wrapper) got labelled "Keep screen on while viewing".
+    if (labelsInside(n, obs).isNotEmpty()) return ""
     val parent = n.path.substringBeforeLast('.') + "."
     val cx = n.bounds.x + n.bounds.w / 2
     val cy = n.bounds.y + n.bounds.h / 2
@@ -1600,7 +1619,7 @@ internal fun controlLabel(n: OpNode, obs: OpObservation): String =
  *  Samsung Clock's Start/Lap are not. */
 internal fun unlabelledControls(obs: OpObservation): List<OpNode> = obs.nodes.filter { n ->
     n.clickable && n.text.isEmpty() && n.description.isEmpty() && n.bounds.w > 0 && n.bounds.h > 0 &&
-        controlLabel(n, obs).isEmpty()
+        labelsInside(n, obs).isEmpty() && nearbyLabel(n, obs).isEmpty()
 }
 
 /** A chained command re-aimed at the same control (its native selector) on a fresh
@@ -1620,9 +1639,15 @@ internal fun remapOnto(cmd: JSONObject, from: OpObservation, to: OpObservation):
 
 /** A goal whose outcome is audio playing ("play Back in Black", "resume my podcast") —
  *  not a game, and not the Play Store. */
-internal fun wantsPlayback(goal: String): Boolean =
-    Regex("\\b(play|resume|listen to|put on)\\b", RegexOption.IGNORE_CASE).containsMatchIn(goal) &&
-        !Regex("\\b(games?|store|chess|quiz|level)\\b", RegexOption.IGNORE_CASE).containsMatchIn(goal)
+internal fun wantsPlayback(goal: String): Boolean {
+    val g = goal.lowercase()
+    if (Regex("\\b(games?|store|chess|quiz|level|stopwatch|timer|alarm|download|upload)\\b").containsMatchIn(g)) return false
+    // "resume"/"continue" is playback only with media in the goal — "resume the stopwatch"
+    // was rejected as "nothing is playing" (live, 2026-09-26).
+    val media = Regex("\\b(music|songs?|tracks?|albums?|playlists?|podcasts?|episodes?|audiobooks?|videos?|radio|spotify|youtube)\\b")
+    return Regex("\\b(play|listen to|put on)\\b").containsMatchIn(g) ||
+        (Regex("\\b(resume|continue|unpause)\\b").containsMatchIn(g) && media.containsMatchIn(g))
+}
 
 internal fun summaryLooksIncomplete(summary: String): Boolean {
     val s = summary.trim().lowercase()

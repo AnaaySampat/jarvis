@@ -748,7 +748,8 @@ internal object LauncherApps {
         val launcher = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
         return pm.queryIntentActivities(launcher, 0).mapNotNull { r ->
             val info = r.activityInfo ?: return@mapNotNull null
-            App(r.loadLabel(pm).toString().trim(), info.packageName, info.name)
+            // Invisible format characters (direction marks) in a label defeat whole-word matching.
+            App(r.loadLabel(pm).toString().replace(Regex("\\p{Cf}"), "").trim(), info.packageName, info.name)
         }.also { cache = it }
     }
 }
@@ -760,18 +761,35 @@ internal fun appNamedInGoal(context: Context, goal: String): String? {
     // "on my phone, check Settings…" names the DEVICE, not Samsung's Phone app — counted as
     // an app, it made two matches and cost the task its no-model-call open (2026-09-26).
     val said = goal.replace(Regex("(?i)\\b(my|the|this|your)\\s+(phone|device|mobile)\\b"), " ")
-    val named = LauncherApps.all(context)
+    val labels = LauncherApps.all(context)
         .filter { it.packageName != context.packageName }
         .map { it.label }
         .filter { it.length >= 3 }
         .distinct()
-        .filter { Regex("(?<![\\p{L}\\p{N}])${Regex.escape(it)}(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(said) }
+    fun saysWord(w: String) = Regex("(?<![\\p{L}\\p{N}])${Regex.escape(w)}(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE).containsMatchIn(said)
+    // People say "Chrome" for an app labelled "Chrome Beta" (this phone's): a label's first word
+    // names it too when that word starts no other label and isn't a label itself ("Google" does
+    // neither — it starts several).
+    val firstWords = labels.groupBy { it.substringBefore(' ').lowercase() }
+    val named = labels.filter { l ->
+        saysWord(l) || (l.contains(' ') && l.substringBefore(' ').let { w ->
+            w.length >= 4 && firstWords[w.lowercase()]?.size == 1 &&
+                labels.none { it.equals(w, ignoreCase = true) } && saysWord(w)
+        })
+    }
     val outermost = named.filter { a -> named.none { b -> b != a && b.contains(a, ignoreCase = true) } }
-    return outermost.singleOrNull()
+    // "open Chrome and search Google for …": the app after the opening verb is the one to open,
+    // not every app-shaped word (the Google app was opened instead, live).
+    val opened = outermost.filter { l ->
+        val spoken = if (saysWord(l)) l else l.substringBefore(' ')
+        Regex("(?i)\\b(open|launch|start|go to|in|on|using)\\s+(the\\s+)?${Regex.escape(spoken)}(?![\\p{L}\\p{N}])").containsMatchIn(said)
+    }
+    Log.i("JarvisOperator", "apps named in the goal: $outermost${if (opened.isNotEmpty()) " (opened: $opened)" else ""}")
+    return opened.singleOrNull() ?: outermost.singleOrNull()
 }
 
-/** Resolve a user-facing app name (or package) to its launcher activity and start it. */
-/** [fresh]: return to the app's main screen (CLEAR_TOP on its launcher activity) instead of
+/** Resolve a user-facing app name (or package) to its launcher activity and start it.
+ *  [fresh]: return to the app's main screen (CLEAR_TOP on its launcher activity) instead of
  *  resuming the page it was last on — Settings reopened on "Storage" left by the previous
  *  task, and the operator looped "home → open Settings" trying to get out (2026-09-26). The
  *  app keeps running (music keeps playing); only the screens above its main one close. */

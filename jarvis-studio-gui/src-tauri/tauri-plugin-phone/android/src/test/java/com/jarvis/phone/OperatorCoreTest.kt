@@ -426,6 +426,27 @@ class OperatorCoreTest {
         assertEquals("Dark", controlLabel(darkRadio, s))
     }
 
+    @Test fun anOptionPickerReadsAsOneLinePerOptionWithItsState() {
+        // Samsung's screen-timeout list, as captured live: a clickable list, rows of a bare
+        // (non-clickable) RadioButton + a label. The list must not borrow "15 seconds".
+        val list = OpNode(4, "", "RecyclerView", clickable = true, selected = true, bounds = OpBounds(28, 283, 1024, 963), path = "0.3")
+        fun row(i: Int, y: Int, label: String, on: Boolean) = listOf(
+            OpNode(i, "", "LinearLayout", clickable = true, bounds = OpBounds(28, y, 1024, 158), path = "0.3.$i"),
+            OpNode(i + 1, "", "RadioButton", checked = on, bounds = OpBounds(73, y + 30, 129, 90), path = "0.3.$i.0"),
+            OpNode(i + 2, label, "TextView", bounds = OpBounds(202, y, 800, 144), path = "0.3.$i.1"),
+        )
+        val nodes = listOf(list) + row(10, 283, "15 seconds", false) + row(20, 444, "5 minutes", true)
+        val r = renderObs(screen(*nodes.toTypedArray()))
+        assertFalse(r, r.lines().first { it.startsWith("[4]") }.contains("15 seconds"))
+        assertTrue(r, r.lines().first { it.startsWith("[20]") }.contains("\"5 minutes\" (inside) (clickable,checked)"))
+        assertTrue(r, r.lines().first { it.startsWith("[10]") }.contains("unchecked"))
+        assertFalse(r, r.lines().any { it.startsWith("[11]") || it.startsWith("[21]") }) // radios folded in
+        // A wrapper around the list doesn't borrow a neighbour's label either.
+        val wrapper = OpNode(3, "", "FrameLayout", clickable = true, bounds = OpBounds(28, 283, 1024, 963), path = "0")
+        val neighbour = OpNode(30, "Keep screen on while viewing", "TextView", bounds = OpBounds(28, 1300, 800, 60), path = "1.0")
+        assertEquals("", nearbyLabel(wrapper, screen(*(nodes + wrapper + neighbour).toTypedArray())))
+    }
+
     @Test fun parseCommandForgivesCommonSchemaDrift() {
         assertEquals("tap", parseCommand("""{"action":"tap","target":3}""")!!.getString("do"))
         assertEquals("done", parseCommand("""{"done":"summary","summary":"Opened it."}""")!!.getString("do"))
@@ -530,6 +551,9 @@ class OperatorCoreTest {
         assertTrue(verifier.prompts[0].contains("\"audio_playing_now\":true"))
         assertTrue(m.prompts[1].contains("AUDIO: something IS playing"))
         assertTrue(wantsPlayback("resume my podcast"))
+        assertTrue(wantsPlayback("open Spotify and play Back in Black by AC/DC"))
+        assertFalse(wantsPlayback("resume the stopwatch in the Clock app")) // live false reject
+        assertFalse(wantsPlayback("continue the download"))
         assertFalse(wantsPlayback("open the Play Store"))
         assertFalse(wantsPlayback("play a chess game"))
     }
@@ -702,6 +726,16 @@ class OperatorCoreTest {
             ScriptedModel("""{"do":"set_text","target":0,"text":"hello there"}""", """{"do":"set_text","target":0,"text":"hello there"}"""))
         assertEquals(1, dev.actions.size)
         assertTrue(out.summary.contains("already entered"))
+    }
+
+    @Test fun aSearchGoalMayRetypeItsQueryInAnotherBox() {
+        // Live: typed into the wrong page's search box, then again into Chrome's — not a duplicate message.
+        val box = node(0, "", role = "EditText", editable = true)
+        val dev = FakeDevice(listOf(screen(box), screen(box.copy(text = "x"), gen = 8), screen(box, gen = 9)))
+        run("search google for the height of mount everest", dev,
+            ScriptedModel("""{"do":"set_text","target":0,"text":"height of Mount Everest"}""",
+                """{"do":"set_text","target":0,"text":"height of Mount Everest"}""", """{"do":"fail","summary":"x"}"""))
+        assertEquals(2, dev.actions.size)
     }
 
     @Test fun typingAtAPlaceholderGoesIntoTheFieldAroundIt() {
