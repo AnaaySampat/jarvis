@@ -93,6 +93,13 @@ phone tasks share. Results are cached by normalized name; there is **no unground
 garbage) — without a Gemini key an unknown model just gets a low guessed score. Tiers
 (fast / mid / flagship) come from rules, never the LLM.
 
+**Grounded calls use Gemini 2.5 Flash / Flash-Lite only** (`GROUNDING_MODELS` in
+`tools/http.ts`, shared by `web_search` and the estimate). Google Search grounding is
+"Not available" on the free tier for every 3.x model, and free on the 2.5 pair (500
+requests/day, shared) — pricing page, checked 2026-09-27. `web_search` walks both models ×
+every Gemini key, skipping routes `quota.ts` already has benched; it doesn't bench routes
+itself (a grounding limit isn't the chat quota).
+
 `routesFor()` maps the request class to a tier (dumb→fast, smart→mid, very-smart→flagship)
 and puts the ranked ladder first: that tier best-first, then stronger tiers, then weaker.
 Two filters apply: pooled free providers (OpenRouter/NVIDIA/Mistral) never enter the
@@ -518,7 +525,17 @@ fired native event silently never arrives. Confirmed live. The plain request/res
 
 Two features already work around it the same way — **poll a monotonic sequence counter**:
 
-- Wake word: `platform/wakeword.ts` polls `poll_wake_word` every 140 ms for a rising `seq`.
+- Wake word: `platform/wakeword.ts` polls `poll_wake_word` every 140 ms for a rising `seq`,
+  **one poll in flight at a time** (with overlap, a later tiny reply overtook the ~140 KB
+  one carrying the audio). A poll also carries `preRoll`, sent once, when the engine has
+  it: a base64 WAV of the 3 s before the detection plus up to 0.4 s after — the model often
+  fires before "Jarvis" has ended — handed over when the 0.4 s pass or the engine stops,
+  whichever is first. The listener stops the engine, starts recording the command, and
+  meanwhile fetches that audio and has Whisper transcribe it with the name alone as the
+  hint (never the command prompt's "Hey JARVIS": Whisper can echo its prompt, and an echo
+  of "Jarvis" has no greeting). The command counts only if a greeting precedes the name
+  (`heardWakePhrase`, which also takes Whisper's "Kay"/"A." for "Hey"); a rejected wake
+  cancels the recording. A check that can't run (no audio, offline) lets the wake through.
 - Cross-app STOP: `platform/stopOverlay.ts` polls `poll_stop_overlay` every 250 ms.
 
 If you add a new native→JS async signal, use this same pattern. Don't reach for the event
@@ -538,7 +555,7 @@ Settings 2026-09-25.
 |---|---|
 | `OperatorCore.kt` / `NativeOperator.kt` | The on-phone operator loop (§4) and its Android glue |
 | `JarvisAccessibilityService.kt` | Reads the screen's node tree; taps, types, scrolls (a scroll only reports ok if the screen actually moved), gestures, back/home; screenshot; the STOP overlay |
-| `WakeWordManager.kt` / `WakeWordService.kt` | On-device "Hey Jarvis" (openWakeWord ONNX) as a foreground service |
+| `WakeWordManager.kt` / `WakeWordService.kt` / `WakePreRoll.kt` | On-device "Hey Jarvis" (openWakeWord ONNX) as a foreground service. The mic loop is ours (2026-09-27): same model, 80 ms chunks, 0.35 threshold and 3 s cooldown as the library's `WakeWordEngine`, driving its `internal` `AudioProcessor` via a file-level suppression (Kotlin 1.9), so a ring buffer can keep the 3 s pre-roll (+ up to 0.4 s after the detection) |
 | `SecureSecretStore.kt` | Provider credentials encrypted by a **non-exportable Android Keystore key**. SharedPreferences holds only ciphertext + IV; plaintext crosses the bridge for the life of one call and is never written to WebView storage |
 | `DeviceIdentityManager.kt` | The phone's EC identity key (Keystore, non-exportable). Only the public key, fingerprint, a monotonic counter and signatures cross the bridge — this is what authenticates the phone to the PC |
 | `AutonomyTaskStore.kt` | A **Room** database: the task journal. Goals, receipts, screenshots and results stay here, not in WebView storage, so a WebView backup can't become a second unredacted audit log |

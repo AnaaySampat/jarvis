@@ -636,8 +636,13 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun pollWakeWord(invoke: Invoke) {
         val res = JSObject()
-        res.put("seq", WakeWordService.wakeSeq.get())
+        val seq = WakeWordService.wakeSeq.get()
+        res.put("seq", seq)
         res.put("listening", WakeWordService.isListening)
+        // Once it's ready (~0.4 s after the wake, or when the engine stops) a poll also
+        // carries the latest detection's audio (~140 KB, sent once), for the wake check in
+        // wakeword.ts.
+        WakeWordService.takePreRoll(seq)?.let { res.put("preRoll", it) }
         invoke.resolve(res)
     }
 

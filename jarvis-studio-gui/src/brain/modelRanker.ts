@@ -23,6 +23,7 @@ import type { RankTier } from "./modelCatalog";
 import { makeKV, readJson, writeJson, type KV } from "./memory/store";
 import { postJson } from "./tools/httpClient";
 import { liveModelId } from "./modelRemap";
+import { GROUNDING_MODELS } from "./tools/http";
 
 export type { RankTier };
 export const TIERS: RankTier[] = ["fast", "mid", "flagship"];
@@ -63,8 +64,10 @@ const BATCH = 30;
 const MAX_ESTIMATE = 70;
 /** Searching ~30 models is a minutes-long job, not a chat turn. */
 const ESTIMATE_TIMEOUT_MS = 180_000;
-/** Grounded models to ask, best first (remapped if Google retired one). */
-const ESTIMATORS = ["gemini-3.6-flash", "gemini-3.5-flash"];
+/** Grounded models to ask, best first (remapped if Google retired one). These were
+ *  3.6/3.5-flash, whose search grounding isn't on the free tier — every Re-rank estimate
+ *  on the phone ended in 429 "exceeded your current quota". */
+const ESTIMATORS = GROUNDING_MODELS;
 
 let kv: KV | null = null;
 let state: RankState | null = null;

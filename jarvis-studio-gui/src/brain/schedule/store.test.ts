@@ -71,6 +71,9 @@ describe("runSchedule", () => {
     expect(getTodaySchedule().map((i) => i.task)).toContain(task);
     // and it must not report a nameless day back to the user
     expect(add.summary).not.toMatch(/your {2,}schedule|to your schedule\.$/);
+    // Left behind, it was a stray item on today's weekday: on Sundays the "removes an
+    // item by match" test below found it and failed.
+    runSchedule({ do: "remove", day: "", match: task });
   });
 
   it("resolves a blank day to a real moment so the calendar mirror still fires", () => {

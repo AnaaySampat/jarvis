@@ -31,9 +31,10 @@
 
 # Defensive: xyz.rementia:openwakeword wraps onnxruntime and is the only thing that
 # runs a native model this early -- keep its classes too rather than discover a
-# second JNI break later.
--keep class xyz.rementia.** { *; }
--dontwarn xyz.rementia.**
+# second JNI break later. Its classes live in com.rementia.openwakeword (xyz.rementia
+# is only the Maven group, so the rule written against it never matched anything).
+-keep class com.rementia.openwakeword.** { *; }
+-dontwarn com.rementia.openwakeword.**
 
 # Our own Tauri plugin package (com.jarvis.phone.*: PhonePlugin, the accessibility
 # service, WakeWordService, and every @InvokeArg args class). Tauri's OWN generated

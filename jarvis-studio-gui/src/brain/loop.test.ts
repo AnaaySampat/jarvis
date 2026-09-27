@@ -100,4 +100,16 @@ describe("runTurn — answered about the phone without looking", () => {
     expect(answeredPhoneWithoutLooking("what's the tallest mountain?", false)).toBe(false);
     expect(answeredPhoneWithoutLooking("on my phone, what's the Android version?", true)).toBe(false);
   });
+
+  it("without the words 'on my phone'", () => {
+    for (const q of ["what model is my phone?", "is this phone on silent?", "what's my battery at",
+      "which wifi am I on? my wifi keeps dropping", "what android version am I running",
+      "how much storage does my device have left"]) {
+      expect(answeredPhoneWithoutLooking(q, false), q).toBe(true);
+    }
+    for (const q of ["what's the capital of France?", "tell me a joke", "who won the match yesterday",
+      "what's the phone number for Pizza Hut?"]) {
+      expect(answeredPhoneWithoutLooking(q, false), q).toBe(false);
+    }
+  });
 });

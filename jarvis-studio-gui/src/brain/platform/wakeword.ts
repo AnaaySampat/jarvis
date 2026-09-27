@@ -2,7 +2,8 @@
  *
  * Matches the desktop flow: openWakeWord listens on-device (free, instant, always
  * running). When "Hey Jarvis" is heard, we release the wake mic, capture your command
- * with Groq Whisper Large v3, and send it to the brain — same as the laptop.
+ * with Groq Whisper Large v3, and send it to the brain — same as the laptop — once
+ * Whisper has also heard "Hey Jarvis" in the audio that fired the wake (heardWake).
  *
  * The old Whisper-in-a-loop hack (record 3.5s → API → regex → repeat) is gone.
  */
@@ -10,13 +11,27 @@
 import { invoke } from "@tauri-apps/api/core";
 import { MicRecorder, transcribe, isNoiseTranscript } from "./stt";
 import { inTauri } from "../tools/httpClient";
+import { base64ToBytes } from "../tools/base64";
 
 const WAKE = /\b(?:hey\s+|ok(?:ay)?\s+|hi\s+)?j[ae][rv]+i[s5]\b/i;
+
+/** "Hey Jarvis" the way a recogniser writes it: a greeting, then the name. Whisper also
+ *  spells the name Jervis, Javis or Travis, and hears "Hey" as "Kay" or "A." (live
+ *  2026-09-27). A bare "Jarvis" doesn't count — "my Jarvis app" is someone talking ABOUT
+ *  JARVIS, which is how the 2026-09-26 false wake started. */
+const WAKE_PHRASE =
+  /(?:\b(?:hey|hi|hay|hei|ay|eh|kay|ok(?:ay)?|hello|yo)\b[\s,.!-]*|\ba[.,!]\s*)(?:j|ch|tr)[ae]r?v[aeiu]s\b/i;
+
+export function heardWakePhrase(text: string): boolean {
+  return WAKE_PHRASE.test(text);
+}
+
 // Ceiling only: capture ends ~0.9s after you stop talking (MicRecorder.untilSilence).
 // Was a fixed 6s window — every command waited the full 6s, and longer ones got cut.
 const COMMAND_MS = 10000;
 const POLL_MS = 140; // how often JS asks the native engine "any new detection?" — low
 // enough that a wake is picked up almost immediately (the poll is a cheap atomic read).
+const POLL_STUCK_MS = 3000; // a poll unanswered this long is presumed dropped
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,7 +46,8 @@ export interface WakeWordOpts {
   groqKey?: string;
   vertexSaJson?: string; // not used to transcribe (that's in `transcribe`) — only to
   // compute the config signature so syncWakeWord() knows when to restart the engine.
-  transcribe?: (blob: Blob) => Promise<string>;
+  /** `prompt: ""` asks for no vocabulary prompt (the wake check needs an unbiased ear). */
+  transcribe?: (blob: Blob, o?: { prompt?: string }) => Promise<string>;
   isBusy: () => boolean;
   onStatus?: (s: "listening" | "idle") => void;
   onCommand: (text: string) => void;
@@ -85,6 +101,8 @@ export class WakeWordListener {
   private lastSeq = -1; // baseline set on first poll so we ignore prior detections
   private notListeningStreak = 0;
   private onVisible?: () => void;
+  /** When the in-flight poll started (0 = none). See poll(). */
+  private pollingSince = 0;
 
   constructor(private opts: WakeWordOpts) {}
 
@@ -155,7 +173,23 @@ export class WakeWordListener {
     }
   }
 
+  /**
+   * One poll in flight at a time. A detection's audio rides on exactly one reply, and
+   * that ~130 KB reply is slow: with overlapping polls the next, tiny reply overtook it
+   * and reported the wake with no audio (live 2026-09-27, 114 ms apart), so it went
+   * through unchecked. Bounded, so a reply the bridge drops can't stop polling for good.
+   */
   private async poll(): Promise<void> {
+    if (Date.now() - this.pollingSince < POLL_STUCK_MS) return;
+    this.pollingSince = Date.now();
+    try {
+      await this.pollOnce();
+    } finally {
+      this.pollingSince = 0;
+    }
+  }
+
+  private async pollOnce(): Promise<void> {
     // Skip while onWake() is capturing a command — it intentionally stops the engine,
     // and we must neither re-fire nor auto-restart underneath it. But never trust
     // that flag indefinitely: if it has been set longer than a whole cycle could
@@ -170,9 +204,10 @@ export class WakeWordListener {
       void invoke("plugin:phone|start_wake_word").catch(() => {});
       return;
     }
-    let st: { seq?: number; listening?: boolean } | null = null;
+    type WakeState = { seq?: number; listening?: boolean; preRoll?: string };
+    let st: WakeState | null = null;
     try {
-      st = (await invoke("plugin:phone|poll_wake_word")) as { seq?: number; listening?: boolean };
+      st = (await invoke("plugin:phone|poll_wake_word")) as WakeState;
     } catch {
       return; // transient bridge hiccup — just try again next tick
     }
@@ -182,7 +217,7 @@ export class WakeWordListener {
       this.lastSeq = seq; // first poll: baseline, don't react to pre-existing detections
     } else if (seq > this.lastSeq) {
       this.lastSeq = seq;
-      void this.onWake();
+      void this.onWake(st.preRoll);
       return;
     }
     if (st.listening) {
@@ -201,7 +236,7 @@ export class WakeWordListener {
     }
   }
 
-  private async onWake(): Promise<void> {
+  private async onWake(preRoll?: string): Promise<void> {
     if (!this.on || this.opts.isBusy() || this.handling) return;
     this.handling = true;
     this.handlingSince = Date.now();
@@ -209,6 +244,7 @@ export class WakeWordListener {
     // handoff below — otherwise the user gets no feedback for ~½ second after saying
     // "Hey Jarvis" and it feels dead. Reset to idle on any early bail-out.
     this.opts.onStatus?.("listening");
+    let verdict = Promise.resolve(true);
     try {
       await invoke("plugin:phone|stop_wake_word").catch(() => {});
       // Let the wake-word AudioRecord release before MediaRecorder opens. Kept short so
@@ -218,23 +254,24 @@ export class WakeWordListener {
         this.opts.onStatus?.("idle");
         return;
       }
+      // The engine hands the wake audio over once it stops (the audio runs a little past
+      // the detection, which often fires before "Jarvis" has ended). It's fetched and
+      // checked while the command records — recording starts no later than before — and a
+      // false wake is dropped, its recording cut short, once the verdict is in.
+      verdict = (preRoll ? Promise.resolve(preRoll) : this.fetchPreRoll()).then((audio) => {
+        if (audio) return this.heardWake(audio);
+        console.info("[wake] no wake audio came with this detection; unchecked");
+        return true;
+      });
+      void verdict.then((ok) => ok || this.rec.cancel());
 
       const blob = await this.capture(COMMAND_MS);
       this.opts.onStatus?.("idle");
-      if (!blob || !this.on) return;
-
-      const transcribeFn =
-        this.opts.transcribe ??
-        ((b: Blob) => {
-          const key = (this.opts.groqKey || "").trim();
-          if (!key)
-            throw new Error("Add a Groq API key to transcribe commands after “Hey Jarvis”.");
-          return transcribe(b, { groqKey: key });
-        });
+      if (!(await verdict) || !blob || !this.on) return;
 
       let text = "";
       try {
-        text = await transcribeFn(blob);
+        text = await this.transcribeBlob(blob);
       } catch (e) {
         this.opts.onError?.((e as Error)?.message || String(e));
         return;
@@ -267,6 +304,56 @@ export class WakeWordListener {
           }
         }
       }
+    }
+  }
+
+  private transcribeBlob(blob: Blob, o?: { prompt?: string }): Promise<string> {
+    if (this.opts.transcribe) return this.opts.transcribe(blob, o);
+    const key = (this.opts.groqKey || "").trim();
+    if (!key) {
+      return Promise.reject(
+        new Error("Add a Groq API key to transcribe commands after “Hey Jarvis”."),
+      );
+    }
+    return transcribe(blob, { groqKey: key, ...o });
+  }
+
+  /** The wake audio, which the engine hands over as it stops (a few polls at most). */
+  private async fetchPreRoll(): Promise<string | undefined> {
+    for (let i = 0; i < 5; i++) {
+      try {
+        const st = (await invoke("plugin:phone|poll_wake_word")) as { preRoll?: string } | null;
+        if (st?.preRoll) return st.preRoll;
+      } catch {
+        // try again
+      }
+      await sleep(100);
+    }
+    return undefined;
+  }
+
+  /**
+   * Did a real recogniser hear "Hey Jarvis" in the audio that fired the wake? The on-device
+   * model also fires on conversation that only sounds close (live 2026-09-26), and its
+   * scores can't tell them apart: genuine wakes on this phone scored as low as 0.37. The
+   * hint is the name alone, never the command prompt's "Hey JARVIS": Whisper can echo its
+   * prompt, and an echo of "Jarvis" has no greeting, so it can't pass on its own.
+   * A check that can't run (no audio, a failed call) lets the wake through, as before.
+   */
+  private async heardWake(preRollB64: string): Promise<boolean> {
+    try {
+      const wav = new Blob([base64ToBytes(preRollB64)], { type: "audio/wav" });
+      const text = await this.transcribeBlob(wav, { prompt: "Jarvis" });
+      const heard = WAKE_PHRASE.exec(text);
+      if (heard) {
+        console.info(`[wake] confirmed: "${heard[0]}"`);
+        return true;
+      }
+      console.info(`[wake] ignored — no "Hey Jarvis" in the wake audio: "${text.slice(0, 60)}"`);
+      return false;
+    } catch (e) {
+      console.warn("[wake] couldn't check the wake audio; accepting the wake:", e);
+      return true;
     }
   }
 

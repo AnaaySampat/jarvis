@@ -13,6 +13,7 @@ vi.mock("./httpClient", () => ({
 
 import { generateImage, webSearch } from "./http";
 import type { HttpToolCtx } from "./http";
+import * as quota from "../quota";
 
 const ctx = (): HttpToolCtx =>
   ({
@@ -98,5 +99,59 @@ describe("webSearch — the grounded call must leave room to answer", () => {
     postJson.mockResolvedValue({ candidates: [{ finishReason: "MAX_TOKENS", content: {} }] });
 
     expect((await webSearch("who won", ctx())).summary).toMatch(/MAX_TOKENS/);
+  });
+});
+
+describe("webSearch — grounds only where the free tier allows it", () => {
+  const answer = { candidates: [{ content: { parts: [{ text: "Saturday 10am PT" }] } }] };
+  const modelOf = (call: unknown[]) => String(call[0]).match(/models\/([^:]+):/)![1];
+  const keyOf = (call: unknown[]) => (call[2] as { headers: Record<string, string> }).headers["x-goog-api-key"];
+  const twoKeys = (): HttpToolCtx => {
+    const c = ctx();
+    c.config.keys.gemini = ["k1", "k2"];
+    return c;
+  };
+
+  beforeEach(() => {
+    postJson.mockReset();
+    quota.setStorage(null);
+    quota.reset();
+  });
+
+  it("uses Gemini 2.5 even when the chosen model is a 3.x one", async () => {
+    // 3.x grounding is "Not available" on the free tier: grounding with the user's model
+    // (gemini-3.6-flash here) failed every search on a free Gemini key.
+    postJson.mockResolvedValue(answer);
+    expect((await webSearch("when is minecraft live", ctx())).ok).toBe(true);
+    expect(modelOf(postJson.mock.calls[0]!)).toBe("gemini-2.5-flash");
+  });
+
+  it("tries the next key, then Flash-Lite, before giving up", async () => {
+    postJson
+      .mockRejectedValueOnce(new Error("HTTP 429: quota"))
+      .mockRejectedValueOnce(new Error("HTTP 429: quota"))
+      .mockResolvedValueOnce(answer);
+    const r = await webSearch("when is minecraft live", twoKeys());
+    expect(r).toMatchObject({ ok: true, summary: "Saturday 10am PT" });
+    expect(postJson.mock.calls.map((c) => `${modelOf(c)}#${keyOf(c)}`)).toEqual([
+      "gemini-2.5-flash#k1",
+      "gemini-2.5-flash#k2",
+      "gemini-2.5-flash-lite#k1",
+    ]);
+  });
+
+  it("skips a key the chat ladder already found spent", async () => {
+    quota.bench({ provider: "gemini", model: "gemini-2.5-flash", keyIndex: 0 }, { durationMs: quota.DAY });
+    postJson.mockResolvedValue(answer);
+    await webSearch("x", twoKeys());
+    expect(keyOf(postJson.mock.calls[0]!)).toBe("k2");
+  });
+
+  it("says why when every route failed", async () => {
+    postJson.mockRejectedValue(new Error("HTTP 429: quota"));
+    const r = await webSearch("x", twoKeys());
+    expect(r.ok).toBe(false);
+    expect(r.summary).toMatch(/429/);
+    expect(postJson).toHaveBeenCalledTimes(4);
   });
 });

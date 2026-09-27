@@ -82,7 +82,7 @@ impl<R: Runtime> Phone<R> {
     unavailable_command!(start_wake_word());
     unavailable_command!(stop_wake_word());
     pub fn poll_wake_word(&self) -> crate::Result<crate::models::WakeStateResponse> {
-        Ok(crate::models::WakeStateResponse { seq: 0, listening: false })
+        Ok(crate::models::WakeStateResponse { seq: 0, listening: false, pre_roll: None })
     }
     unavailable_command!(show_stop_overlay());
     unavailable_command!(hide_stop_overlay());

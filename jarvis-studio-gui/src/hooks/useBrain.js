@@ -1622,7 +1622,7 @@ export function useBrain() {
         ? {
             groqKey,
             vertexSaJson: saJson,
-            transcribe: (blob) => transcribe(blob, { groqKey, vertexSaJson: saJson }),
+            transcribe: (blob, o) => transcribe(blob, { groqKey, vertexSaJson: saJson, ...o }),
             isBusy: () => busyRef.current || listeningRef.current,
             onStatus: (s) => {
               if (s === "listening") setStatus("listening");

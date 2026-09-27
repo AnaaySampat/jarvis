@@ -158,16 +158,22 @@ export class MicRecorder {
   }
 }
 
-/** Transcribe a recorded audio blob to text via Groq Whisper Large v3. */
-export async function transcribeWithGroq(blob: Blob, groqKey: string): Promise<string> {
-  const ext = (blob.type || "").includes("mp4") ? "m4a" : "webm";
+/** Transcribe a recorded audio blob to text via Groq Whisper Large v3. `prompt: ""`
+ *  sends none — the wake check needs Whisper unbiased toward writing "Hey JARVIS". */
+export async function transcribeWithGroq(
+  blob: Blob,
+  groqKey: string,
+  prompt = WHISPER_PROMPT,
+): Promise<string> {
+  const type = blob.type || "";
+  const ext = type.includes("wav") ? "wav" : type.includes("mp4") ? "m4a" : "webm";
   const form = new FormData();
   form.append("file", blob, `speech.${ext}`);
   form.append("model", WHISPER_MODEL);
   form.append("response_format", "json");
   form.append("language", "en");
   form.append("temperature", "0");
-  form.append("prompt", WHISPER_PROMPT);
+  if (prompt) form.append("prompt", prompt);
 
   const res = await withRetry(() =>
     platformFetch()(GROQ_STT_URL, {
@@ -252,7 +258,7 @@ export async function transcribeWithVertex(
  */
 export async function transcribe(
   blob: Blob,
-  keys: { groqKey?: string; vertexSaJson?: string },
+  keys: { groqKey?: string; vertexSaJson?: string; prompt?: string },
 ): Promise<string> {
   const groqKey = (keys.groqKey || "").trim();
   const saJson = (keys.vertexSaJson || "").trim();
@@ -263,7 +269,7 @@ export async function transcribe(
   }
   if (groqKey) {
     try {
-      return await transcribeWithGroq(blob, groqKey);
+      return await transcribeWithGroq(blob, groqKey, keys.prompt);
     } catch (err) {
       if (!saJson) throw err;
       console.warn("Groq STT failed, falling back to Vertex Chirp:", err);

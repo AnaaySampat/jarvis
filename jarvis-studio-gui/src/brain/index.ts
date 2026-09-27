@@ -134,6 +134,9 @@ export function buildSystemPrompt(cfg: BrainConfig, facts: string[], pcPaired = 
         facts.join("\n- ")
       : "",
     playbooksPromptHint(),
+    // Without it a fallback model takes its training cutoff for "now" when asked about
+    // "latest" or "this year". Date only: it changes once a day, so caching barely notices.
+    `TODAY\n${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}.`,
   ];
   return sections.filter(Boolean).join("\n\n");
 }

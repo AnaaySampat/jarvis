@@ -21,6 +21,8 @@ import type { BrainConfig } from "../config";
 import { getJson, getText, postJson, resilientFetch, isOffline } from "./httpClient";
 import { geocode, haversineM, prettyDist, type LocationService } from "./location";
 import { wmo } from "../wmoCodes";
+import { liveModelId } from "../modelRemap";
+import * as quota from "../quota";
 
 /** Swap in a single clear message when the device has no connectivity at all —
  *  otherwise keep the tool's own (already user-facing) failure summary. */
@@ -197,20 +199,22 @@ export async function getNews(topic: string): Promise<ToolResult> {
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-/** The Gemini model to ground with: the user's model if it's a Gemini one, else a
- * fast default. Port of groq_bridge.py:_grounding_model. */
-function groundingModel(cfg: BrainConfig): string {
-  const sel = (cfg.model ?? "").trim();
-  return /gemini/i.test(sel) ? sel : "gemini-2.5-flash";
-}
+/**
+ * The Gemini models whose Google Search grounding is on the FREE tier ("Free of charge,
+ * up to 500 RPD", shared between the two). Every 3.x model says "Not available" there
+ * (ai.google.dev pricing, checked 2026-09-27). Search used to ground with the user's own
+ * model whenever it was a Gemini one — a 3.x model by default — so it failed for every
+ * free key set to Gemini, and the ranker's grounded estimate never once succeeded.
+ */
+export const GROUNDING_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
 export async function webSearch(query: string, ctx: HttpToolCtx): Promise<ToolResult> {
   const q = (query ?? "").trim();
   if (!q) return { ok: false, summary: "What should I look up, sir?" };
-  // Grounded search is a one-shot side call, not a chat turn — it doesn't ride
-  // the route ladder, so it just uses the user's primary Gemini key.
-  const key = ctx.config.keys.gemini?.[0];
-  if (!key) {
+  // Grounded search is a one-shot side call, not a chat turn: it walks its own short
+  // ladder (both grounding models × every Gemini key) rather than the chat ladder.
+  const keys = ctx.config.keys.gemini ?? [];
+  if (!keys.length) {
     return {
       ok: false,
       summary:
@@ -254,18 +258,38 @@ export async function webSearch(query: string, ctx: HttpToolCtx): Promise<ToolRe
     // already asks for a concise answer.
     generationConfig: { temperature: 0.3 },
   });
-  let json: GeminiGroundedResponse;
-  try {
-    json = await postJson<GeminiGroundedResponse>(
-      `${GEMINI_BASE}/models/${groundingModel(ctx.config)}:generateContent`,
-      body,
-      // Uncapped output means the model may think for a while before answering.
-      { headers: { "Content-Type": "application/json", "x-goog-api-key": key }, timeoutMs: 30000 },
-    );
-  } catch (err) {
+  let json: GeminiGroundedResponse | null = null;
+  let lastErr = "";
+  search: for (const raw of GROUNDING_MODELS) {
+    const model = liveModelId(raw);
+    for (const [keyIndex, key] of keys.entries()) {
+      // A grounded call is also a call to the model: skip a key the chat ladder already
+      // found spent for it rather than paying another 429 to learn the same thing.
+      if (!quota.usable({ provider: "gemini", model, keyIndex })) continue;
+      try {
+        json = await postJson<GeminiGroundedResponse>(
+          `${GEMINI_BASE}/models/${model}:generateContent`,
+          body,
+          // Uncapped output means the model may think for a while before answering.
+          {
+            headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+            timeoutMs: 30000,
+          },
+        );
+        break search;
+      } catch (err) {
+        lastErr = String(err);
+      }
+    }
+  }
+  if (!json) {
     return {
       ok: false,
-      summary: offlineOr(`I couldn't reach the web just now, sir. (${String(err)})`),
+      summary: offlineOr(
+        lastErr
+          ? `I couldn't reach the web just now, sir. (${lastErr})`
+          : "Web search is rate-limited on every Gemini key right now, sir.",
+      ),
     };
   }
   const cand = json.candidates?.[0];

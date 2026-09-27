@@ -170,6 +170,13 @@ fresh single-commit snapshot, so history never goes public. `reference/` and
   model could still flip a toggle on a security page; the checker fails unrequested changes
   (now from system-recorded `changes_made`), but only after the fact. Also new in that pass:
   `quick_settings`, R0 navigation to the quick-settings shade.
+- **2026-09-27 — each wake now sends the 3 s before it (and up to 0.4 s after) to the
+  transcription provider** (Groq Whisper, else Vertex Chirp — the same one that already gets
+  the command), to check "Hey Jarvis" was actually said. It can hold ~2 s of whatever was
+  said just before. Kept in memory only until the next poll; never written anywhere. In return,
+  a false wake no longer ships the next ~10 s of conversation: its recording is cancelled
+  once the check fails. This is **not** speaker verification — anyone who says "Hey
+  Jarvis" still passes, so M2 stands.
 - **logcat carries step text** (plan lines, tapped labels). Other apps can't read logcat
   without `READ_LOGS`; it's visible over adb. Trim to action + risk before a release build.
 - `AutonomyBootReceiver` is `exported="true"`; its handler is idempotent. `default.json`'s

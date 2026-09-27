@@ -46,6 +46,9 @@ the app**, so the phone needs no server and no Python.
   ([openWakeWord](https://github.com/dscripka/openWakeWord)) running as an Android
   foreground service, so it keeps listening with the app in the background. Speech is
   transcribed by Groq Whisper (or Vertex Chirp); recording stops when you stop talking.
+  Each wake is double-checked: Whisper must also hear "Hey Jarvis" in the few seconds that
+  triggered it, so conversation that merely mentions Jarvis doesn't start a command (say
+  "Hey Jarvis", not just "Jarvis").
 - **Phone control** — an AccessibilityService operator drives other apps step by step
   (read the screen → decide one action → do it → repeat), with a planner and a verifier.
   The loop runs natively in Kotlin, so a task keeps going after JARVIS leaves the screen.

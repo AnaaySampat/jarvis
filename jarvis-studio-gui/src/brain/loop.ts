@@ -88,9 +88,15 @@ const CLAIM_CHECK_NOTE =
   "called no tool in this turn, so nothing has happened. If the request needs an " +
   "action, call the right tool now. Otherwise answer without saying you did anything.";
 
-/** A request about the user's own phone — its settings, an app on it. */
-const PHONE_REF_RE =
-  /\b(?:on|in|from) (?:my|the) phone\b|\bmy phone['’]?s\b|\b(?:in|from) (?:the )?settings\b|\bin the [\w ]{1,20}? app\b/i;
+/** A request about the user's own phone — its settings, its state, an app on it. It used
+ *  to need "on my phone"/"my phone's", so "what model is my phone?" or "what's my battery
+ *  at?" got no recheck — the phrasings a fallback model is likeliest to answer from memory. */
+const PHONE_REF_RE = new RegExp(
+  "\\b(?:my|this) (?:phone|device)\\b|\\b(?:on|in|from) the phone\\b|\\b(?:in|from) (?:the )?settings\\b|" +
+    "\\bin the [\\w ]{1,20}? app\\b|\\bandroid version\\b|" +
+    "\\bmy (?:battery|storage|wi-?fi|bluetooth|ringtone|wallpaper|screen timeout|uptime|data usage)\\b",
+  "i",
+);
 
 /**
  * "Answered about the phone without looking": the user asked about their phone and the

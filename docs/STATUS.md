@@ -1,8 +1,9 @@
 # Status
 
-Last reviewed: **2026-09-26** (verifier + unfamiliar-task pass, live-verified against ground
-truth; before that, 2026-09-25: routing regression fixed and live-verified; Gemma reasoning
-hidden; voice capture ends on silence; release APK verified on a phone; published).
+Last reviewed: **2026-09-27** (wake-word check + fallback-model pass, live-verified on a
+phone; 2026-09-26: verifier + unfamiliar-task pass, live-verified against ground truth;
+2026-09-25: routing regression fixed and live-verified; Gemma reasoning hidden; voice capture
+ends on silence; release APK verified on a phone; published).
 
 This is the honest state of the app. It separates three different things, because
 conflating them is how you end up debugging something that was never tested:
@@ -13,8 +14,8 @@ conflating them is how you end up debugging something that was never tested:
 | 🟡 **Built** | In source, typecheck/lint/tests green, but no recorded on-device test |
 | ⬜ **Open** | Not done |
 
-Repo checks as of 2026-09-26: `npm test` **285 passed / 32 files** (also run by CI on
-every push), JVM plugin tests 102 passed, `npm run typecheck` clean, `npm run build` clean, and **`npm run lint` clean — 0
+Repo checks as of 2026-09-27: `npm test` **298 passed / 32 files** (also run by CI on
+every push), JVM plugin tests 104 passed, `npm run typecheck` clean, `npm run build` clean, and **`npm run lint` clean — 0
 problems** (was 59 errors / 26 warnings). Two suppressions remain, each with its reason in
 place: App.jsx's `uiCommand` effect (an event delivered as state by two transports) and
 useBrain's model-discovery effect (the rule can't see the setState is after an `await`).
@@ -31,11 +32,13 @@ useBrain's model-discovery effect (the rule can't see the setState is after an `
 |---|---|---|
 | ✅ | Boots on a real device (arm64) | Emulator is boot-only — no real mic, SystemUI freezes under load |
 | ✅ | Chat through the in-app TypeScript brain | No Python process on the phone |
+| ✅ | Fallback-model guards, round 2 (2026-09-27) — the "answered about the phone without looking" recheck now fires on "what model is my phone", "my battery", "Android version" (it needed the literal "on my phone"); today's date is in the system prompt (a fallback model took its training cutoff for "now") | When Gemini's quota is spent the chat runs on Groq's qwen3.8-27b. Live 2026-09-27 with the chat on the fallback: "what model is my phone?" → qwen called `phone_task` → "Samsung Galaxy F15 5G (SM-E156B)" (matches `getprop`, 21.7 s); "how many days until New Year's Day?" → "96" (right). A weaker model is still weaker: these close the failure paths seen, not the gap |
 | ✅ | HTTP tools — weather, news, web search, places, directions | Ported as-is from the Python backend |
+| ✅ | Web search grounds only on Gemini 2.5 Flash / Flash-Lite, across every Gemini key (2026-09-27) | Search used to ground with the selected Gemini model — a 3.x one by default — and 3.x grounding is "Not available" on the free tier, so every search failed for a free key with Gemini selected. Live 2026-09-27 with the chat on the Groq fallback (Gemini chat routes benched): "which team won the most recent Formula 1 Grand Prix" → qwen called `web_search` → yesterday's Azerbaijan GP, Baku, Russell/Mercedes (a Saturday race, past any model's cutoff). The Gemini-selected config the bug hit is unit-tested only (this phone's Auto config already grounded on 2.5) |
 | ✅ | Reminders, alarms, timers, schedule | Native `AlarmManager` + a `BroadcastReceiver` |
 | ✅ | Providers: Vertex AI (Service Account JSON), Gemini, Groq | Provider **and** model selectable in Settings |
 | 🟡 | Auto mode + the route ladder (`routes.ts`/`quota.ts`) | Unit-tested; the escalating bench ladder hasn't been watched through a real multi-day quota exhaustion |
-| ✅ | Smart routing — benchmark-ranked ladder, Settings ▸ Routing, Re-rank, per-key Remove (2026-09-24, ported from desktop) | Live 2026-09-25: chat turns and phone tasks routed by it, zero 429s (after the fixes below). The grounded estimate of unknown models runs only from Re-rank and has never *succeeded* on the phone (Gemini 429 both times it ran). Settings list checked on-screen 2026-09-25 |
+| ✅ | Smart routing — benchmark-ranked ladder, Settings ▸ Routing, Re-rank, per-key Remove (2026-09-24, ported from desktop) | Live 2026-09-25: chat turns and phone tasks routed by it, zero 429s (after the fixes below). The grounded estimate of unknown models runs only from Re-rank and has never *succeeded* on the phone (Gemini 429 both times it ran) — likely cause found 2026-09-27: it grounded on 3.6/3.5-flash, where the free tier has no search grounding; now on the 2.5 pair, not yet re-run. Settings list checked on-screen 2026-09-25 |
 | 🟡 | Provider + model choice (2026-09-25) — provider list is Auto + providers you have keys for; model list is what those keys reach, grouped by provider; Auto on a provider = best model from that provider, Auto/Auto = full smart routing | Unit-tested (routes/resolveConfig); pickers checked on the Galaxy M15 (Auto, Gemini, Groq, OpenRouter, NVIDIA NIM listed, no Vertex). A chat turn under a provider-scoped Auto not yet watched live |
 | ✅ | HUD menus rebuilt on the Settings design (2026-09-25) — Conversation, Capabilities (tap an example → chat box), Device (live Wi-Fi/battery readouts, app control), Skills (QR and clipboard results shown in place), Terminal ▸ Clear | Live on the Galaxy M15: all four sheets render opaque with live readouts, Android back closes a sheet and stays in the app, QR shows in place, Clear arms then disarms after 3s (confirm not pressed). Fixes the see-through Skills/Capabilities panels seen on the Galaxy M15 and the QR result that was dropped on the phone |
 | ✅ | Settings redesign (2026-09-25) — drill-down index with a live readout per section (phone), nav column + page (≥760px), switches, pinned Save with an unsaved-changes note | Checked on the Galaxy M15 2026-09-25: index readouts show real state, and Routing lists 31 ranked models (so the Smart-routing list above is now checked on-screen too). Android back steps page → index → closes Settings, then leaves the app as before (live-verified after the fix) |
@@ -50,7 +53,8 @@ useBrain's model-discovery effect (the rule can't see the setState is after an `
 | ✅ | Spoken replies (`window.speechSynthesis`) | Plus real TTS-completion tracking, so "stop" lands correctly |
 | ✅ | "Hey Jarvis" wake word, on-device (openWakeWord ONNX) | Works end to end. Root cause of the long-running failure was React StrictMode remounting the listener — hence the module-level singleton, don't refactor it back into an effect |
 | ✅ | Wake word as a foreground service | Keeps listening with the app backgrounded |
-| 🟡 | Wake command capture ends on silence (energy VAD, ~0.9s) instead of a fixed 6s; Groq STT on full `whisper-large-v3` + prompt, temp 0 (2026-09-25) | Unit-tested only, not yet on device. Known gap: the mic handoff (engine stop → 250ms → `getUserMedia`) still drops the first ~0.5–1s after the beep, so "Hey Jarvis open X" in one breath loses the command's start. Real fix is capturing the command natively; the openWakeWord lib's `AudioRecorder` is private, so that means owning the mic loop |
+| ✅ | Wake check (2026-09-27): a command counts only if Whisper hears "Hey Jarvis" in the audio that fired the wake | Why: 2026-09-26 the wake word typed a nearby conversation — someone describing JARVIS — into the chat. Scores can't separate the two: logged genuine wakes on this phone scored 0.37–0.99, so raising the 0.35 threshold would have missed about 40% of them. **Live 2026-09-27, SM-E156B, the laptop's two TTS voices at the phone:** final build 16/16 genuine wakes confirmed (seven fired early at 0.38–0.47) and every command answered; the model fired on 7 lines *about* Jarvis ("Jarvis is the name of the assistant…", "Say hey to Jarvis for me", "Hey, did Jarvis finish the task?") and all 7 were ignored — each would have been a command before. The first build wrongly rejected 6 of 14 real wakes (the clip ended at the first frame over the threshold, mid-"Jarvis"; Whisper heard "Kay Jarvis", "A. Jarvis", "Age or Miss") and let one through unchecked (a later poll overtook the one carrying the audio); fixed with 0.4 s of audio past the detection, the name as Whisper's hint, "Kay"/"A." accepted as "Hey", and one poll in flight. Deliberate: a bare "Jarvis, …" is ignored. When the phone is offline the check can't run and lets wakes through (seen live during a Wi-Fi drop). Not yet: the user's own voice |
+| ✅ | Wake command capture ends on silence (energy VAD, ~0.9s) instead of a fixed 6s; Groq STT on full `whisper-large-v3` + prompt, temp 0 (2026-09-25) | Live 2026-09-27: every wake command in the wake-check runs ended on silence and transcribed word for word ("What is the capital of Japan?", "What is 10 minus 3?"). Known gap, confirmed live the same day ("Hey Jarvis, what is five plus five?" in one breath arrived as "That's five."): the mic handoff (engine stop → 250ms → `getUserMedia`) still drops the first ~0.5–1s after the beep, so "Hey Jarvis open X" in one breath loses the command's start. Real fix is capturing the command natively; the openWakeWord lib's `AudioRecorder` is private, so that means owning the mic loop — which the wake check (above) now does, so this is unblocked |
 | 🟡 | Gemma 4 thought parts filtered out of replies (JS + native operator), thinking forced to `minimal` (2026-09-25) | Gemma 4 ignores `includeThoughts:false`; its reasoning was being shown as the answer. Not yet on device |
 | ⬜ | Heavy-use wake-word soak test | Needs the user's own voice over a long session; never done |
 
@@ -435,11 +439,20 @@ turn answered on its first route.
    mode" as JARVIS's own HUD theme. The system prompt and the `answeredPhoneWithoutLooking`
    recheck round target the first three (on the final build all three kinds of question went
    to the operator and came back right); watch whether that holds on the weakest routes. The
-   operator itself was right whenever it was reached.
+   operator itself was right whenever it was reached. 2026-09-27: the recheck now also fires
+   without the words "on my phone", and the prompt carries today's date (both live-verified
+   with the chat on the fallback).
 0e. **Phones without a setting.** This M15 has no screen-resolution setting and no Settings
    entry for auto-rotate. The operator now fails honestly (86.6 s) instead of looping, but
    the right end is faster: a lookup that the app's search and the obvious section both
    miss could stop after the first pass.
+0f. **The wake check with the user's own voice** (2026-09-27: live with laptop TTS only —
+   16/16 genuine, 7/7 conversation lines about Jarvis ignored). Watch logcat `JarvisWW`
+   scores and `[wake]` lines over a day of real use. Then capture the command natively too:
+   the mic loop is ours now, so "Hey Jarvis, what is five plus five?" in one breath can stop
+   losing its first words (live 2026-09-27 it arrived as "That's five.").
+0g. **Run a Re-rank on the phone** with a free Gemini key: the grounded estimate now uses
+   the 2.5 pair and has never succeeded before (web search itself is live-verified).
 1b. **Re-test the rest of the 2026-09-22 fixes on a device.** Still unexercised: the remote
    STOP button, a long spoken reply, and adding then deleting a calendar-mirrored agenda
    item.

@@ -31,10 +31,10 @@ class WakeWordService : Service() {
     companion object {
         private const val TAG = "JarvisWW"
 
-        // Proactive recycle interval. Root cause not fully pinned down (needs the
-        // openwakeword native engine's own source, which isn't available to us — see
-        // the memory of this investigation), but the failure signature is clear from
-        // logcat review: the engine's detection Flow can go silently inert — it never
+        // Proactive recycle interval. Root cause never pinned down, and the listen loop
+        // has since been rewritten (WakeWordManager, 2026-09-27) — this stays as the
+        // safety net until a soak test shows the new loop doesn't need it. The failure
+        // signature from logcat review: the old engine's detection Flow could go silently inert — it never
         // throws and never completes, it just stops emitting — while `manager` stays
         // non-null, so `isListening` (manager != null) keeps reporting true forever
         // and the JS poll's self-heal (which only restarts on listening:false) never
@@ -80,6 +80,22 @@ class WakeWordService : Service() {
          *  live page. The plain request/response poll path is reliable (getDeviceStats
          *  polls it every second without loss). Survives engine stop/start (companion). */
         val wakeSeq = java.util.concurrent.atomic.AtomicInteger(0)
+
+        /** The audio that fired detection [seq], as a base64 WAV, for the pre-roll check in
+         *  wakeword.ts. In memory only; handed out once, or replaced by the next detection. */
+        class PreRoll(val seq: Int, val wavBase64: String)
+
+        private var lastPreRoll: PreRoll? = null
+
+        @Synchronized
+        private fun offerPreRoll(p: PreRoll) {
+            lastPreRoll = p
+        }
+
+        /** Detection [seq]'s audio, handed out once (and only while [seq] is the latest). */
+        @Synchronized
+        fun takePreRoll(seq: Int): String? =
+            lastPreRoll?.takeIf { it.seq == seq }?.also { lastPreRoll = null }?.wavBase64
 
         /** One-shot: fired from onStartCommand once we KNOW whether listening
          *  actually started. PhonePlugin sets this instead of blocking its own
@@ -161,11 +177,21 @@ class WakeWordService : Service() {
         createChannel()
     }
 
-    private fun newDetectionCallback(): () -> Unit = {
-        wakeSeq.incrementAndGet()
-        playWakeCue(applicationContext)
-        onDetected?.invoke()
-    }
+    private fun newManager() = WakeWordManager(
+        applicationContext,
+        onDetected = { _ ->
+            wakeSeq.incrementAndGet()
+            playWakeCue(applicationContext)
+            onDetected?.invoke()
+        },
+        // Arrives up to 0.4 s after its detection (or when JS stops the engine), for the
+        // wake that detection counted — one detection at a time, both on the main thread.
+        onPreRoll = { audio ->
+            offerPreRoll(
+                PreRoll(wakeSeq.get(), android.util.Base64.encodeToString(pcm16Wav(audio, 16_000), android.util.Base64.NO_WRAP)),
+            )
+        },
+    )
 
     private fun scheduleRecycle() {
         recycleHandler.removeCallbacks(recycleRunnable)
@@ -181,7 +207,7 @@ class WakeWordService : Service() {
         android.util.Log.i(TAG, "watchdog: proactive engine recycle (every ${RECYCLE_INTERVAL_MS / 60000}min)")
         manager?.release()
         manager = null
-        val mgr = WakeWordManager(applicationContext, newDetectionCallback())
+        val mgr = newManager()
         val ok = mgr.start()
         if (ok) {
             manager = mgr
@@ -207,7 +233,7 @@ class WakeWordService : Service() {
         startForegroundCompat()
         if (manager == null) {
             lastError = null
-            val mgr = WakeWordManager(applicationContext, newDetectionCallback())
+            val mgr = newManager()
             val ok = mgr.start()
             android.util.Log.i(TAG, "manager.start() → $ok lastError=${mgr.lastError}")
             if (ok) {
