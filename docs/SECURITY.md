@@ -183,6 +183,20 @@ fresh single-commit snapshot, so history never goes public. `reference/` and
   `"*"` window grant has no `platforms` filter (Android declares only `main`, so no effect
   there). M1 (indirect prompt injection) and M2 (open mic) stand as before; `pc_task` has
   no up-front consent gate where `phone_task` does.
+- **2026-09-30 — TV control opens network ADB on the user's TV.**
+  - **The exposure.** Turning on the TV's USB debugging makes it listen on port 5555 on the
+    home LAN. Any key the TV has accepted gets a full shell on the TV. Unknown hosts only get
+    the on-TV "Allow USB debugging?" prompt, and that prompt is the whole gate.
+  - **The phone's key.** It's a 2048-bit RSA pair from `dadb`, in the app's `noBackupFilesDir`
+    (private, excluded from backups, `allowBackup="false"`). It is **not** Keystore-wrapped:
+    `dadb` wants the key as a file. Root or an adb backup of the app could lift it and gain
+    the same TV shell.
+  - **What reaches the shell.** The brain sends only commands built from typed `tv_control`
+    actions. Titles and search text are single-quoted (`shellQuote`), package names are
+    allow-listed by pattern, and Netflix ids are digits verified against Netflix's own page.
+  - **Reach.** LAN only; the TV is never exposed over Tailscale.
+  - **Undoing it.** Turn off USB debugging on the TV, then "Revoke USB debugging
+    authorisations" there.
 
 ---
 

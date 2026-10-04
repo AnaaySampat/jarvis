@@ -40,6 +40,9 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     // SAF tree navigation for the user-granted read-only folder (read_file/list_directory).
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Network-ADB client for controlling the user's Android TV (TvAdb.kt). Hand-rolling
+    // the ADB wire protocol + RSA auth is the alternative.
+    implementation("dev.mobile:dadb:2.0.0")
     // Provides app.tauri.plugin.* (Plugin/Invoke/JSObject) + the annotations. Tauri
     // wires the :tauri-android project into the app's Gradle build during init.
     implementation(project(":tauri-android"))

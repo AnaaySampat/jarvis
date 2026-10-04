@@ -144,6 +144,9 @@ export default function App() {
     pcState,
     pairPC,
     unpairPC,
+    tvConfig,
+    pairTV,
+    unpairTV,
     setPcCommandMode,
     screenState,
     screenDetail,
@@ -610,7 +613,7 @@ export default function App() {
                   ? "Remote PC — online (tap to manage)"
                   : pcConfig
                     ? `Remote PC — ${pcState}`
-                    : "Pair a Windows PC to control it from here"
+                    : "Pair a Windows PC or set up your TV"
               }
               aria-pressed={remoteOpen}
               onClick={() => setRemoteOpen(true)}
@@ -769,6 +772,9 @@ export default function App() {
             void startScreen();
           }}
           onClose={() => setRemoteOpen(false)}
+          tvConfig={tvConfig}
+          onTvPair={pairTV}
+          onTvUnpair={unpairTV}
         />
       )}
 

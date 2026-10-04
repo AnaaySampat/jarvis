@@ -121,6 +121,7 @@ phone_command!(operator_status(task_id: String, since: i32) -> serde_json::Value
 phone_command!(config_secret_set(name: String, value: String) -> ActionResponse, ConfigSecretSetRequest);
 phone_command!(config_secret_get(name: String) -> ConfigSecretResponse, ConfigSecretNameRequest);
 phone_command!(config_secret_delete(name: String) -> ActionResponse, ConfigSecretNameRequest);
+phone_command!(tv_shell(host: String, command: String) -> serde_json::Value, TvShellRequest);
 phone_command!(identity_info() -> IdentityInfoResponse);
 phone_command!(identity_sign_auth(host_id: String, nonce: String) -> IdentitySignedResponse, IdentityAuthRequest);
 phone_command!(identity_sign_envelope(connection_nonce: String, message_type: String, task_id: String, payload_digest: String) -> IdentitySignedResponse, IdentityEnvelopeRequest);

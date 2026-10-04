@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-tv-shell"
+description = "Enables the tv_shell command without any pre-configured scope."
+commands.allow = ["tv_shell"]
+
+[[permission]]
+identifier = "deny-tv-shell"
+description = "Denies the tv_shell command without any pre-configured scope."
+commands.deny = ["tv_shell"]

@@ -15,15 +15,19 @@ describe("toSpec", () => {
     expect(toSpec("open_application")).toEqual({ type: "open_app", target: "" });
   });
 
-  it("maps manage_routine's action/prompt into the routine spec, mirroring prompt into match", () => {
-    expect(toSpec("manage_routine", { action: "remove", prompt: "wake me up" })).toEqual({
+  it("maps manage_routine into the routine spec, matching by name and falling back to prompt", () => {
+    expect(toSpec("manage_routine", { action: "remove", name: "bedtime" })).toEqual({
       type: "routine",
       do: "remove",
+      name: "bedtime",
       time: "",
       days: "daily",
-      prompt: "wake me up",
-      match: "wake me up",
+      prompt: "",
+      match: "bedtime",
     });
+    expect(toSpec("manage_routine", { action: "remove", prompt: "wake me up" }).match).toBe(
+      "wake me up",
+    );
   });
 
   it("maps manage_playbook's name into both name and query", () => {
@@ -92,5 +96,19 @@ describe("toolPalette", () => {
     const withPc = toolPalette(cfg, { pcPaired: true });
     expect(withoutPc.some((t) => t.name === "pc_task")).toBe(false);
     expect(withPc.some((t) => t.name === "pc_task")).toBe(true);
+  });
+
+  it("only advertises tv_control when a TV is set up, and lowers it to one spec", () => {
+    const cfg = { tier: "groq" as const, model: "x", keys: {}, pinnedLocation: "" };
+    expect(toolPalette(cfg).some((t) => t.name === "tv_control")).toBe(false);
+    expect(toolPalette(cfg, { tvPaired: true }).some((t) => t.name === "tv_control")).toBe(true);
+    expect(toSpec("tv_control", { action: "play", target: "Stranger Things" })).toEqual({
+      type: "tv_control",
+      do: "play",
+      target: "Stranger Things",
+      app: "netflix",
+      season: 0,
+      episode: 0,
+    });
   });
 });

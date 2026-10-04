@@ -56,6 +56,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-sign-pairing`
 - `allow-identity-verify-host-challenge`
 - `allow-identity-verify-host-envelope`
+- `allow-tv-shell`
 
 ## Permission Table
 
@@ -1388,6 +1389,32 @@ Enables the task_status command without any pre-configured scope.
 <td>
 
 Denies the task_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-tv-shell`
+
+</td>
+<td>
+
+Enables the tv_shell command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-tv-shell`
+
+</td>
+<td>
+
+Denies the tv_shell command without any pre-configured scope.
 
 </td>
 </tr>

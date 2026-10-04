@@ -54,7 +54,10 @@ const ACTIONY_RE = new RegExp(
     "generate|create|make|draw|read|list|directions|news|weather|nearby|" +
     "change|switch|adjust|recolou?r|colou?r|rename|move|swap|increase|decrease|" +
     "raise|lower|enable|disable|toggle|customi[sz]e|dim|brighten|resize|" +
-    "rearrange|update|edit|apply)\\b",
+    "rearrange|update|edit|apply|" +
+    // Media follow-ups. Live 2026-09-30: "Resume" got "Resumed — back to Arcane on
+    // Netflix" with no tool call (and the wrong show), and neither word was listed.
+    "resume|unpause|skip|rewind|fast\\s*forward|louder|quieter)\\b",
   "i",
 );
 
@@ -69,7 +72,8 @@ const COMPLETION_CLAIM_RE = new RegExp(
     "launched|launching|played|playing|paused|pausing|muted|muting|unmuted|" +
     "unmuting|created|creating|made|making|generated|generating|enabled|enabling|" +
     "disabled|disabling|adjusted|adjusting|updated|updating|applied|applying|" +
-    "recolou?red|recolou?ring|moved|moving|hidden|hiding|shown|showing)\\b)",
+    "recolou?red|recolou?ring|moved|moving|hidden|hiding|shown|showing|" +
+    "resumed|resuming|unpaused|skipped|skipping|rewound|rewinding)\\b)",
   "i",
 );
 

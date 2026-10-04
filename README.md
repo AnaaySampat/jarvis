@@ -57,6 +57,11 @@ the app**, so the phone needs no server and no Python.
   whole tasks to it, watch its screen live over WebRTC, and drive it by touch. Works on
   the same Wi-Fi or across networks via Tailscale. (The desktop app is a separate project
   and is not part of this repository.)
+- **TV** — control an Android TV on the same Wi-Fi by voice: open apps, play a show on
+  Netflix (a named season and episode too) or a YouTube search, pause/resume, volume, power,
+  remote buttons. It uses the TV's own USB debugging over the network, so nothing is
+  installed on the TV. Set up under the Remote PC & TV screen: turn on USB debugging on the
+  TV, type its IP, tap Connect and accept the prompt on the TV.
 
 Known gaps and the things that still need a live on-device test are tracked in
 [docs/STATUS.md](docs/STATUS.md).

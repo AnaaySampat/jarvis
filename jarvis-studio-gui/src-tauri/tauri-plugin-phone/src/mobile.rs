@@ -91,6 +91,7 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(config_secret_set(payload: ConfigSecretSetRequest) -> ActionResponse, "configSecretSet");
     mobile_command!(config_secret_get(payload: ConfigSecretNameRequest) -> ConfigSecretResponse, "configSecretGet");
     mobile_command!(config_secret_delete(payload: ConfigSecretNameRequest) -> ActionResponse, "configSecretDelete");
+    mobile_command!(tv_shell(payload: TvShellRequest) -> serde_json::Value, "tvShell");
     mobile_command!(identity_info() -> IdentityInfoResponse, "identityInfo");
     mobile_command!(identity_sign_auth(payload: IdentityAuthRequest) -> IdentitySignedResponse, "identitySignAuth");
     mobile_command!(identity_sign_envelope(payload: IdentityEnvelopeRequest) -> IdentitySignedResponse, "identitySignEnvelope");

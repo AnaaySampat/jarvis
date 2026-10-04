@@ -19,6 +19,7 @@ import type { MemoryStore } from "../memory/store";
 import type { LocationService } from "./location";
 import { agendaStartMillis, runSchedule } from "../schedule/store";
 import { parseReminderDetail } from "../schedule/reminderTime";
+import { addRoutine, claimRoutine, describeRoutines, removeRoutine } from "../schedule/routines";
 import { addPlaybook, describePlaybooks, removePlaybook } from "../memory/playbooks";
 import { applyScreenAction } from "../mobile/screenConfig";
 import { benchFromNative } from "../ask";
@@ -32,6 +33,7 @@ import { providerFor } from "../providers";
 import * as quota from "../quota";
 import * as http from "./http";
 import type { HttpToolCtx } from "./http";
+import { runTvControl, tvEnv, type TvShell } from "../remote/tv";
 
 export interface DispatchDeps {
   platform: Platform;
@@ -42,6 +44,8 @@ export interface DispatchDeps {
   location: LocationService;
   /** Phase 3: a connected remote-PC link, or null when no PC is paired. */
   remote?: { runTask(goal: string, kind?: "browser" | "computer"): Promise<ToolResult> } | null;
+  /** The user's TV (network ADB, remote/tv.ts), or null when none is set up. */
+  tv?: TvShell | null;
   /** Optional activity feed sink. Receives agent_* shaped events. */
   onAgentEvent?: (ev: { event: string; data?: Record<string, unknown> }) => void;
   /** JARVIS driving its OWN HUD: a `control_interface` action → the React layer
@@ -316,15 +320,40 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
         spec.kind === "computer" ? "computer" : "browser",
       );
 
-    // ── Not yet ported (Phase 2) — honest stub, not a fabricated success.
-    // Descoped: a recurring native alarm needs either boot-persistence in Kotlin
-    // or a native day-of-week scheduler — bigger lift than the one-shot reminder
-    // this phase added, and a half-working recurrence would be worse than an
-    // honest "not yet". ──
-    case "routine":
-      return notReady(
-        "Recurring routines aren't available yet, sir — I can set a one-off reminder instead.",
+    // ── The user's TV (network ADB) ──
+    case "tv_control":
+      if (!deps.tv) {
+        return { ok: false, summary: "No TV is set up yet — add it under Remote PC & TV, sir." };
+      }
+      return runTvControl(
+        deps.tv,
+        String(spec.do ?? ""),
+        String(spec.target ?? ""),
+        String(spec.app ?? "netflix"),
+        tvEnv(httpCtx),
+        { season: Number(spec.season) || 0, episode: Number(spec.episode) || 0 },
       );
+
+    // ── Routines — saved steps, run as an ordinary brain turn (see schedule/routines.ts).
+    // "run" doesn't execute anything here: it returns the steps for the model to carry
+    // out through the normal tools, so each one still reports its own real result. ──
+    case "routine": {
+      switch (String(spec.do ?? "list").toLowerCase()) {
+        case "add":
+          return addRoutine({
+            name: String(spec.name ?? ""),
+            prompt: String(spec.prompt ?? ""),
+            time: String(spec.time ?? ""),
+            days: String(spec.days ?? ""),
+          });
+        case "remove":
+          return removeRoutine(String(spec.match ?? spec.name ?? ""));
+        case "run":
+          return claimRoutine(String(spec.match ?? spec.name ?? ""));
+        default:
+          return describeRoutines();
+      }
+    }
 
     // ── Playbooks — raw model/user prose is a disabled reference only. Promotion
     // is available solely to trusted deterministic receipt producers, never this tool. ──
@@ -378,8 +407,8 @@ const UI_CONFIRM: Record<string, string> = {
   close_activity: "Closed Agent Activity.",
   open_customize: "Opened the home-screen customiser, sir.",
   close_customize: "Closed the customiser.",
-  open_remote: "Opened the Remote PC screen, sir.",
-  close_remote: "Closed the Remote PC screen.",
+  open_remote: "Opened the Remote PC & TV screen, sir.",
+  close_remote: "Closed the Remote PC & TV screen.",
   listen: "Listening, sir.",
   stop_speaking: "Stopped.",
   mute: "Muted — I'll show replies as text, sir.",

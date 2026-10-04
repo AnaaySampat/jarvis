@@ -52,6 +52,7 @@ blueprint; it is never edited, imported or shipped.
 | Phone operator | `operator/controller.ts` → **Kotlin** `OperatorCore.kt` / `NativeOperator.kt` | Drives other apps — the loop is native (see §4) |
 | Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` (+ `playbooks.ts`) | Three separate stores — check which one a feature reads (see §7) |
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
+| TV | `remote/tv.ts` → **Kotlin** `TvAdb.kt` | The user's Android TV over network ADB (see §6a) |
 | Native bridge | `platform/*.ts` | The JS side of the Kotlin plugin (see §5) |
 | Scheduling | `schedule/{store,reminderTime}.ts` | Reminders, alarms, timers |
 
@@ -562,6 +563,7 @@ Settings 2026-09-25.
 | `AutonomySupervisorService.kt` | Foreground service owning task lifecycle — start, cancel, suspend, complete. If the WebView dies, recovery marks the task *suspended*; it never blindly repeats the last action |
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
+| `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
 | `PhonePlugin.kt` / `ReminderReceiver.kt` | The `@TauriPlugin` command surface; the receiver for scheduled reminders |
 
 The current command surface, grouped: the native operator (`operator_start`,
@@ -577,8 +579,9 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 (`identity_info`, `identity_sign_auth/envelope/pairing`,
 `identity_verify_host_challenge/envelope`), the task journal (`task_begin`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
-(`calendar_action`, `clock_action`), and device/file access (`get_device_stats`,
-`capture_screenshot`, `pick_folder`, `list_directory`, `read_file`).
+(`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
+`capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), and the TV
+(`tv_shell`, §6a).
 
 The operator loop is tested without a device on the JVM: `OperatorCoreTest.kt` drives
 `OperatorLoop` with a fake device, a scripted model and a fake journal
@@ -643,6 +646,42 @@ forwards whole tasks to it.
 > There was once a second phone↔PC channel (`platform/remoteLink.ts`, PeerJS-mediated). It
 > never got past a stub and has been deleted along with the dependency. The live path is
 > `remote/pc.ts` + `remote/webrtcScreen.ts`, and nothing else.
+
+## 6a. Controlling the TV
+
+The phone drives the user's Android TV over **network ADB**, the TV's own "USB
+debugging" on the home Wi-Fi (port 5555). Nothing is installed on the TV. The TV must be
+on the same LAN as the phone; it is never reached over Tailscale.
+
+- **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
+  `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
+  enters a command through `shellQuote()` or as a validated package name or title id, so
+  the model never writes shell.
+- **Every action is verified from the TV itself (rule 3).**
+
+  | Action | Proof it worked |
+  |---|---|
+  | Open an app | `dumpsys window` `mCurrentFocus` names it |
+  | Volume | `media volume --get`; if `--set` doesn't take, it falls back to volume keys and reads again |
+  | Mute | `dumpsys audio` `Muted:` |
+  | Power | `dumpsys power` `mWakefulness` |
+  | Playback | The app's `dumpsys media_session` entry: state 3 **and** a position that advances between two reads |
+  | Remote-button presses | None; reported as "sent" |
+
+- **Netflix links need `-e source 30`.** Without it Netflix ignores
+  `https://www.netflix.com/title/<id>`. A cold start shows "Who's watching?"; Netflix keeps
+  the link across it, and one OK picks the last-used profile.
+- **Netflix's playback state lies at the profile screen.** It reports state 3 at position 0
+  there, so state alone never counts as playing.
+- **The name → id lookup is checked against Netflix.** The id comes from grounded web
+  search. Netflix's public title page (`<title>Watch X | Netflix…`, the first ~300 bytes of
+  a ~3.5 MB page, read by streaming) then confirms which show it is. That is why
+  `https://www.netflix.com/*` is in the `http` capability.
+- **What this TV can't do.** `screencap` is black on every screen of the user's Sony, so
+  there is no vision. `uiautomator dump` is opaque inside Netflix, YouTube and Prime. So a
+  native TV operator loop (reusing `OperatorDevice`) was not built; anything in-app beyond
+  play and pause is remote-button presses. Measurements are in `docs/STATUS.md`
+  "TV control".
 
 ---
 

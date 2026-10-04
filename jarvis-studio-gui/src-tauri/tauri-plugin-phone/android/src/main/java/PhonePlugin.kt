@@ -208,6 +208,12 @@ internal class ConfigSecretSetArgs {
 }
 
 @InvokeArg
+internal class TvShellArgs {
+    var host: String = ""
+    var command: String = ""
+}
+
+@InvokeArg
 internal class IdentityAuthArgs {
     var hostId: String = ""
     var nonce: String = ""
@@ -389,6 +395,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     private val autonomyDao by lazy { AutonomyTaskDatabase.get(activity).tasks() }
     private val deviceIdentity by lazy { DeviceIdentityManager(activity.applicationContext) }
     private val secureSecrets by lazy { SecureSecretStore(activity.applicationContext) }
+    private val tvAdb by lazy { TvAdb(activity.applicationContext) }
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -989,6 +996,22 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                     put("summary", "Credential could not be loaded securely.")
                 })
             }
+        }
+    }
+
+    /** One shell command on the user's TV over network ADB (see TvAdb). `ok` means the
+     *  command ran; whether it did what was meant is for the caller to read back. */
+    @Command
+    fun tvShell(invoke: Invoke) {
+        val args = invoke.parseArgs(TvShellArgs::class.java)
+        autonomyScope.launch {
+            val r = tvAdb.shell(args.host, args.command)
+            invoke.resolve(JSObject().apply {
+                put("ok", r.ok)
+                put("output", r.output)
+                put("exitCode", r.exitCode)
+                put("summary", r.summary)
+            })
         }
     }
 

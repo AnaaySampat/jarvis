@@ -33,7 +33,7 @@ const kv = makeKV();
 
 /** Local calendar date as YYYY-MM-DD (NOT toISOString, which is UTC and would roll
  *  over at the wrong moment for anyone not on UTC). */
-function localISODate(d: Date = new Date()): string {
+export function localISODate(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
   ).padStart(2, "0")}`;

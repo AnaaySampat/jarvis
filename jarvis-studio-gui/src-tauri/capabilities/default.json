@@ -34,7 +34,8 @@
         { "url": "https://aiplatform.googleapis.com/*" },
         { "url": "https://*.aiplatform.googleapis.com/*" },
         { "url": "https://*.speech.googleapis.com/*" },
-        { "url": "https://*.googleapis.com/*" }
+        { "url": "https://*.googleapis.com/*" },
+        { "url": "https://www.netflix.com/*" }
       ]
     }
   ]

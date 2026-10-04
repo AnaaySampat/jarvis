@@ -109,7 +109,25 @@ function locationTools(cap: Capabilities): ToolDeclaration[] {
 export interface PaletteOpts {
   /** A Windows PC is paired → advertise `pc_task` (Phase 3). */
   pcPaired?: boolean;
+  /** An Android TV is set up → advertise `tv_control`. */
+  tvPaired?: boolean;
 }
+
+/** Every `tv_control` action; each has its handler in remote/tv.ts:runTvControl. */
+export const TV_ACTIONS = [
+  "play",
+  "open_app",
+  "pause",
+  "resume",
+  "volume_up",
+  "volume_down",
+  "set_volume",
+  "mute",
+  "power_on",
+  "power_off",
+  "key",
+  "status",
+];
 
 /**
  * The full tool palette for the active config. A fresh array each call (callers
@@ -262,12 +280,13 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
     ),
     fn(
       "manage_routine",
-      "Add/list/remove a recurring routine.",
+      "Save, run, list or remove a named routine: steps JARVIS actually carries out (\"my bedtime routine\", \"morning briefing\"), optionally at a set time. Use this, not manage_playbook, when the steps should be DONE. For 'run', do each returned step with your tools and report the real results.",
       {
-        action: str("What to do.", ["add", "list", "remove"]),
-        time: str("Time of day for 'add'."),
-        days: str("'daily', 'weekdays', 'weekends', or 'mon,wed,fri'."),
-        prompt: str("What to do when it fires (add) or text to match (remove)."),
+        action: str("What to do.", ["add", "run", "list", "remove"]),
+        name: str("The routine's name."),
+        prompt: str("For 'add': the steps in plain English, e.g. 'give me the weather, today's agenda and top news'."),
+        time: str("For 'add': time of day to run it automatically. Omit for a routine that only runs when asked."),
+        days: str("For 'add' with a time: 'daily', 'weekdays', 'weekends', or 'mon,wed,fri'."),
       },
       ["action"],
     ),
@@ -398,6 +417,40 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
           ),
         ]
       : []),
+
+    // ── The user's TV (network ADB, see remote/tv.ts) — only when one is set up ──
+    ...(opts.tvPaired
+      ? [
+          fn(
+            "tv_control",
+            "Control the user's TV (an Android TV on the home Wi-Fi). Use for anything about " +
+              "'the TV' or 'on my TV' — never the phone tools. 'play' puts a named show or " +
+              "film on Netflix, or a video/music search on YouTube, and plays it.",
+            {
+              action: str("What to do on the TV.", TV_ACTIONS),
+              target: str(
+                "play: the show, film or video to put on (omit to resume). open_app: the app " +
+                  "name. key: a remote button — up, down, left, right, ok, back, home, next, " +
+                  "previous, fast forward, rewind, channel up, channel down, input, captions " +
+                  "(add a number to press it several times, e.g. 'down 3'). set_volume: the " +
+                  "level 0-100. volume_up/volume_down: how many steps (default 5).",
+              ),
+              app: str(
+                "For play: 'netflix' for shows and films (default), 'youtube' for videos, music " +
+                  "or anything the user says is on YouTube.",
+                ["netflix", "youtube"],
+              ),
+              season: int(
+                "For play on Netflix: the season number — only when the user names a season or " +
+                  "episode ('season 1 episode 1', 'from the beginning' = 1). Omit to resume where " +
+                  "they left off.",
+              ),
+              episode: int("For play on Netflix: the episode number — only when the user names one."),
+            },
+            ["action"],
+          ),
+        ]
+      : []),
   ];
 }
 
@@ -426,8 +479,9 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
     do: a.action ?? "list",
     time: a.time ?? "",
     days: a.days ?? "daily",
+    name: a.name ?? "",
     prompt: a.prompt ?? "",
-    match: a.prompt ?? "",
+    match: a.name ?? a.prompt ?? "",
   }),
   get_weather: () => ({ type: "weather" }),
   find_places: (a) => ({ type: "places", query: a.query ?? "" }),
@@ -488,6 +542,14 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
     type: "pc_task",
     goal: a.goal ?? "",
     kind: a.kind === "computer" ? "computer" : "browser",
+  }),
+  tv_control: (a) => ({
+    type: "tv_control",
+    do: a.action ?? "",
+    target: a.target ?? "",
+    app: a.app ?? "netflix",
+    season: Number(a.season ?? 0),
+    episode: Number(a.episode ?? 0),
   }),
 };
 

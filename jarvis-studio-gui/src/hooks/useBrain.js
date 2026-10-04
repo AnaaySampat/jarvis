@@ -18,8 +18,10 @@ import { androidPlatform } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
+import { dueRoutines, markRoutineRan, routineTurn } from "../brain/schedule/routines";
 import { loadScreenConfig, patchScreenConfig } from "../brain/mobile/screenConfig";
 import { RemotePC } from "../brain/remote/pc";
+import { nativeTvShell } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
@@ -79,6 +81,7 @@ const MAX_LISTEN_MS = 30_000;
 
 const CONFIG_KEY = "jarvis.android.config.v1";
 const PC_KEY = "jarvis.android.pc.v1";
+const TV_KEY = "jarvis.android.tv.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
@@ -102,6 +105,17 @@ function loadCommands() {
 }
 function saveCommands(list) {
   writeJson(kv, COMMANDS_KEY, list.slice(-80));
+}
+
+// The TV record is just its LAN address (plus the model it reported, for display).
+// The ADB key that lets this phone in lives natively (TvAdb.kt), never in WebView storage.
+export function sanitizeTvConfig(value) {
+  const host = String(value?.host ?? "").trim();
+  if (!/^[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/.test(host)) return null;
+  const model = String(value?.model ?? "")
+    .trim()
+    .slice(0, 80);
+  return model ? { host, model } : { host };
 }
 
 // Paired-PC records are public routing/identity pins only. This allowlist is also
@@ -595,6 +609,33 @@ export function useBrain() {
   // reconnects authenticate with a signed auth.response.
   const pcPinRef = useRef("");
   const pcConfigured = Boolean(pcConfig && pcConfig.host);
+
+  // ── The user's TV (network ADB) ─────────────────────────────────────────────
+  const [tvConfig, setTvConfig] = useState(() => sanitizeTvConfig(readJson(kv, TV_KEY, null)));
+  // null when no TV is set up, so `tv_control` isn't even advertised.
+  const tv = useMemo(() => (tvConfig ? nativeTvShell(tvConfig.host) : null), [tvConfig]);
+  // Saved only once the TV actually answers, which on the first connection means the
+  // user accepted "Allow USB debugging?" on the TV.
+  const pairTV = useCallback(async (host) => {
+    const clean = sanitizeTvConfig({ host });
+    if (!clean) {
+      return {
+        ok: false,
+        summary: "That isn't a TV address — use the IP in the TV's network settings.",
+      };
+    }
+    const r = await nativeTvShell(clean.host)("getprop ro.product.model");
+    if (!r.ok || r.exitCode !== 0)
+      return { ok: false, summary: r.summary || "The TV didn't answer." };
+    const next = sanitizeTvConfig({ ...clean, model: r.output });
+    writeJson(kv, TV_KEY, next);
+    setTvConfig(next);
+    return { ok: true, summary: `Connected to ${next.model || "the TV"}.` };
+  }, []);
+  const unpairTV = useCallback(() => {
+    kv.remove(TV_KEY);
+    setTvConfig(null);
+  }, []);
 
   // ── Remote desktop (live WebRTC screen view + direct control) ────────────────
   // The RemoteScreen owns a WebRTC PeerConnection whose signalling rides pcRef's
@@ -1112,10 +1153,12 @@ export function useBrain() {
       authorizePhoneAction,
       onDispatched,
       remote,
+      tv,
     };
   }, [
     stored,
     remote,
+    tv,
     onAgentEvent,
     emitUiCommand,
     pushWarning,
@@ -1137,6 +1180,7 @@ export function useBrain() {
       platform: taskPlatform,
       memory: memoryRef.current,
       remote,
+      tv,
       onAgentEvent,
       onUiCommand: emitUiCommand,
       onFallback: pushWarning,
@@ -1146,6 +1190,7 @@ export function useBrain() {
     });
   }, [
     remote,
+    tv,
     onAgentEvent,
     emitUiCommand,
     pushWarning,
@@ -1279,6 +1324,28 @@ export function useBrain() {
     },
     [runPcTask, drainCards],
   );
+
+  // Timed routines. Fires from here because this is the only place a brain turn can
+  // run; the trade-off is it only happens while the WebView is awake (see routines.ts).
+  // Skips while a turn or recording is in flight and retries on the next tick, so a
+  // due routine never talks over the user.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      if (busyRef.current || listeningRef.current || !brainRef.current) return;
+      const due = dueRoutines()[0];
+      if (!due) return;
+      markRoutineRan(due.name);
+      void sendMessage(routineTurn(due));
+    };
+    tick();
+    const id = setInterval(tick, 30_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [sendMessage]);
 
   // Quick-action buttons fire a command without echoing a user bubble. On mobile we
   // just treat it as a normal turn (the brain decides whether to act/answer).
@@ -1961,6 +2028,11 @@ export function useBrain() {
     pcState,
     pairPC,
     unpairPC,
+
+    // The user's TV (network ADB) — set up from the same Remote screen.
+    tvConfig,
+    pairTV,
+    unpairTV,
 
     // Remote desktop (live WebRTC screen view + direct control).
     screenState,

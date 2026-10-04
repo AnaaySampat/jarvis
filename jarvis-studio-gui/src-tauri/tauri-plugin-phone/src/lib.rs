@@ -93,6 +93,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::identity_sign_pairing,
             commands::identity_verify_host_challenge,
             commands::identity_verify_host_envelope,
+            commands::tv_shell,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

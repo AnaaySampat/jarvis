@@ -360,6 +360,12 @@ pub struct ConfigSecretSetRequest {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TvShellRequest {
+    pub host: String,
+    pub command: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ConfigSecretResponse {
     #[serde(default)]

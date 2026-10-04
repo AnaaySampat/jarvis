@@ -55,4 +55,5 @@ permissions = [
     "allow-identity-sign-pairing",
     "allow-identity-verify-host-challenge",
     "allow-identity-verify-host-envelope",
+    "allow-tv-shell",
 ]

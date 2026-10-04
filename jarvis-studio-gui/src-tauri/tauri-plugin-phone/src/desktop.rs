@@ -202,6 +202,9 @@ impl<R: Runtime> Phone<R> {
         })
     }
     unavailable_command!(config_secret_delete(ConfigSecretNameRequest));
+    pub fn tv_shell(&self, _p: TvShellRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "output": "", "exitCode": -1, "summary": "TV control is only available on Android." }))
+    }
     pub fn identity_info(&self) -> crate::Result<IdentityInfoResponse> {
         Ok(IdentityInfoResponse {
             ok: false,

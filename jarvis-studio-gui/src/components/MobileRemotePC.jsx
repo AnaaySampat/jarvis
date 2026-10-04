@@ -39,7 +39,22 @@ export default function MobileRemotePC({
   onUnpair,
   onViewScreen,
   onClose,
+  tvConfig,
+  onTvPair,
+  onTvUnpair,
 }) {
+  const [tvHost, setTvHost] = useState(tvConfig?.host ?? "");
+  const [tvBusy, setTvBusy] = useState(false);
+  const [tvResult, setTvResult] = useState(null);
+  const connectTv = async () => {
+    setTvBusy(true);
+    setTvResult(null);
+    try {
+      setTvResult(await onTvPair(tvHost));
+    } finally {
+      setTvBusy(false);
+    }
+  };
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
   // After a valid QR scan we hold the parsed pairing config here and ask for the
@@ -157,7 +172,7 @@ export default function MobileRemotePC({
   }
 
   return (
-    <ModalPanel title="Remote PC" onClose={onClose}>
+    <ModalPanel title="Remote PC & TV" onClose={onClose}>
       <div className="settings-sec">
         <div
           style={{
@@ -251,6 +266,59 @@ export default function MobileRemotePC({
           Unpair this PC
         </button>
       )}
+
+      {/* The user's TV — network ADB from this phone; nothing is installed on the TV. */}
+      <div className="settings-sec" style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}>
+          <Icon name="monitor" size={14} />
+          <span>{tvConfig ? `TV — ${tvConfig.model || "connected"}` : "No TV set up"}</span>
+          {tvConfig && (
+            <span style={{ marginLeft: "auto", opacity: 0.6, fontWeight: 400 }}>{tvConfig.host}</span>
+          )}
+        </div>
+        <div className="settings-hint">
+          Control an Android TV on this Wi-Fi by voice — “open Netflix on the TV”. On the TV: Settings
+          → Device Preferences → About, click <b>Build</b> 7 times, then Developer options → turn on{" "}
+          <b>USB debugging</b>. Enter the TV&apos;s IP (Settings → Network) and tap Connect.
+        </div>
+        <input
+          className="settings-model-id"
+          type="text"
+          inputMode="decimal"
+          placeholder="192.168.0.50"
+          value={tvHost}
+          onChange={(e) => setTvHost(e.target.value.trim())}
+          style={{ marginTop: 10 }}
+        />
+        <button
+          className="settings-save"
+          style={{ marginTop: 10 }}
+          disabled={tvBusy || !tvHost}
+          onClick={connectTv}
+        >
+          {tvBusy ? "Waiting for the TV…" : tvConfig ? "Reconnect" : "Connect"}
+        </button>
+        {tvBusy && (
+          <div className="settings-hint">
+            If the TV asks “Allow USB debugging?”, tick <b>Always allow</b> and press OK.
+          </div>
+        )}
+        {tvResult && (
+          <div className={tvResult.ok ? "settings-hint" : "settings-warn"}>{tvResult.summary}</div>
+        )}
+        {tvConfig && (
+          <button
+            className="dirlist-addbtn"
+            style={{ marginTop: 8 }}
+            onClick={() => {
+              onTvUnpair();
+              setTvResult(null);
+            }}
+          >
+            Forget this TV
+          </button>
+        )}
+      </div>
     </ModalPanel>
   );
 }

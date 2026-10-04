@@ -57,6 +57,8 @@ describe("runTurn — said it did it but didn't", () => {
     expect(claimedWithoutActing("what's the capital of France?", "It's Paris.", false)).toBe(false);
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", true)).toBe(false);
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", false)).toBe(true);
+    // Live 2026-09-30, no tool call and the wrong show named.
+    expect(claimedWithoutActing("Resume", "Resumed — back to *Arcane* on Netflix.", false)).toBe(true);
   });
 });
 

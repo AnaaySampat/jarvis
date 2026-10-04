@@ -55,6 +55,7 @@ const COMMANDS: &[&str] = &[
     "identity_sign_pairing",
     "identity_verify_host_challenge",
     "identity_verify_host_envelope",
+    "tv_shell",
 ];
 
 fn main() {
