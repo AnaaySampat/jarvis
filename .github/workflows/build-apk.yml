@@ -1,0 +1,30 @@
+name: Build APK
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Install packages
+        working-directory: jarvis-studio-gui
+        run: npm ci
+      - name: Build APK
+        working-directory: jarvis-studio-gui
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: npx tauri android build --debug --apk --target aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-apk
+          path: jarvis-studio-gui/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
