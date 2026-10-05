@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-studio-gui"
-version = "0.1.0"
+version = "2.0.0"
 description = "JARVIS — local AI voice assistant"
 edition = "2021"
 
