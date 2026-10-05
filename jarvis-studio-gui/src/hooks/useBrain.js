@@ -649,6 +649,10 @@ export function useBrain() {
   const [controlSecondsLeft, setControlSecondsLeft] = useState(0);
   const remoteScreenRef = useRef(null);
   const controlLeaseRef = useRef(createControlLeaseTracker());
+  // The user has the live view open (between startScreen and stopScreen). The PC
+  // tears the stream down whenever the link drops, so a reconnect restarts it.
+  const wantScreenRef = useRef(false);
+  const startScreenRef = useRef(null);
 
   const clearControlLease = useCallback(() => {
     controlLeaseRef.current.clear();
@@ -698,6 +702,10 @@ export function useBrain() {
         setPcState(s);
         if (s !== "online") {
           clearControlLease();
+          if (wantScreenRef.current && s === "offline") {
+            setScreenState("connecting");
+            setScreenDetail("Lost the link to your PC — reconnecting…");
+          }
         } else {
           // The original React promise does not survive Activity/WebView death,
           // but the accepted host task does. Restore each opaque subscription and
@@ -711,6 +719,7 @@ export function useBrain() {
               pc.signal("task.subscribe", { task_id: taskId, resume_after_seq: lastSeq });
               pc.signal("task.status", { task_id: taskId });
             }
+            if (wantScreenRef.current) void startScreenRef.current?.();
           });
         }
       },
@@ -879,6 +888,33 @@ export function useBrain() {
     };
   }, [pcConfig, pcConfigured, pushWarning, clearControlLease]);
 
+  // Android freezes the WebView in the background, and the reconnect backoff (up to
+  // 15s) freezes with it — so coming back to the app, or the network coming back,
+  // redials NOW. A real network switch (Wi-Fi ↔ cellular) also leaves the old socket
+  // half-open, so that drops it outright. navigator.connection fires "change" on
+  // every bandwidth estimate too; only a change of network TYPE counts.
+  useEffect(() => {
+    const conn = typeof navigator !== "undefined" ? navigator.connection : undefined;
+    let lastType = conn?.type;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") pcRef.current?.nudge();
+    };
+    const onOnline = () => pcRef.current?.nudge(true);
+    const onConnChange = () => {
+      if (conn.type === lastType) return;
+      lastType = conn.type;
+      pcRef.current?.nudge(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    conn?.addEventListener?.("change", onConnChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+      conn?.removeEventListener?.("change", onConnChange);
+    };
+  }, []);
+
   // ── Fingerprint gate for PC control (security audit — Part A) ──────────────
   // Sending a task to the PC or arming direct mouse/keyboard control are the phone's
   // most powerful actions, so require the device fingerprint first — a borrowed or
@@ -973,6 +1009,7 @@ export function useBrain() {
       onDetail: setScreenDetail,
     });
     remoteScreenRef.current = screen;
+    wantScreenRef.current = true;
     try {
       await screen.start();
     } catch (err) {
@@ -980,8 +1017,12 @@ export function useBrain() {
       setScreenState("failed");
     }
   }, [iceServers, pushWarning, clearControlLease]);
+  useEffect(() => {
+    startScreenRef.current = startScreen;
+  }, [startScreen]);
 
   const stopScreen = useCallback(async () => {
+    wantScreenRef.current = false;
     const lease = nextControlLeaseEnvelope();
     if (lease) pcRef.current?.signal("disarm_control", lease);
     clearControlLease();
@@ -1127,12 +1168,44 @@ export function useBrain() {
   }, [journaledPhone, pushWarning, requestPhoneStop, clearControlLease, nextControlLeaseEnvelope]);
 
   // One direct input event from the live-view canvas (guarded server-side by arm()).
+  // Drag moves arrive every 40ms, but each signed envelope costs a Keystore
+  // signature plus a counter commit on the phone — often longer than that — so a
+  // long drag queued moves faster than they could be signed and the PC cursor
+  // trailed ever further behind the finger. Keep ONE move in flight and send only
+  // the newest; any other action supersedes a waiting move (it carries its own x/y).
+  const moveSlotRef = useRef({ busy: false, next: null });
   const sendRemoteInput = useCallback(
     (input) => {
       if (!input?.action) return false;
-      const lease = nextControlLeaseEnvelope();
-      if (!lease) return false;
-      return pcRef.current?.signal("remote_input", { ...input, ...lease }) || false;
+      const slot = moveSlotRef.current;
+      if (input.action !== "move") {
+        slot.next = null;
+        const lease = nextControlLeaseEnvelope();
+        if (!lease) return false;
+        return pcRef.current?.signal("remote_input", { ...input, ...lease }) || false;
+      }
+      if (slot.busy) {
+        slot.next = input;
+        return true;
+      }
+      const pump = (move) => {
+        const lease = nextControlLeaseEnvelope();
+        const sent = lease && pcRef.current?.signalConfirmed("remote_input", { ...move, ...lease });
+        if (!sent) {
+          slot.busy = false;
+          slot.next = null;
+          return false;
+        }
+        slot.busy = true;
+        sent.finally(() => {
+          const next = slot.next;
+          slot.next = null;
+          if (next) pump(next);
+          else slot.busy = false;
+        });
+        return true;
+      };
+      return pump(input);
     },
     [nextControlLeaseEnvelope],
   );

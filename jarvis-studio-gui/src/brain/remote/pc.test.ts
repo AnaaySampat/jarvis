@@ -314,6 +314,56 @@ describe("RemotePC — durable v2 transport", () => {
     await expect(task).resolves.toMatchObject({ ok: true, summary: "Verified done" });
   });
 
+  it("drops a silent half-open link and redials, but only once the PC proved it pings", async () => {
+    const events: string[] = [];
+    const pc = new RemotePC({
+      host: "100.100.100.1",
+      ...autoAuthenticatedIdentity(),
+      onEvent: (ev) => events.push(ev.event),
+      WebSocketImpl: FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>,
+    });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    await waitForOnline(pc);
+    // An older desktop never pings: silence alone must not churn its link.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(FakeWS.instances).toHaveLength(1);
+
+    const ws1 = FakeWS.instances[0]!;
+    ws1.receive("link.ping", { t: 1 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(events).not.toContain("link.ping");
+    // Half-open: FakeWS.close never fires onclose, like a socket on a dead network.
+    await vi.advanceTimersByTimeAsync(56_000);
+    expect(FakeWS.instances.length).toBe(2);
+    await waitForOnline(pc);
+  });
+
+  it("nudge redials at once instead of waiting out the backoff", async () => {
+    let up = false;
+    FakeWS.outcome = () => (up ? "open" : "refuse");
+    const pc = new RemotePC({
+      host: "100.100.100.1",
+      ...autoAuthenticatedIdentity(),
+      reconnectMs: 10_000,
+      WebSocketImpl: FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>,
+    });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pc.state).toBe("offline");
+    up = true;
+    pc.nudge();
+    await vi.advanceTimersByTimeAsync(20);
+    await waitForOnline(pc);
+
+    // A network change kills an open-looking socket and dials a fresh one.
+    const before = FakeWS.instances.length;
+    pc.nudge(true);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(FakeWS.instances.length).toBe(before + 1);
+    await waitForOnline(pc);
+  });
+
   it("resubscribes an accepted task with its event cursor after reconnect", async () => {
     const pc = new RemotePC({
       host: "1.2.3.4",

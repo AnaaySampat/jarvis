@@ -208,6 +208,12 @@ interface ActiveApprovalChallenge {
 }
 
 const PROTOCOL_VERSION = 2;
+/** The PC sends a signed `link.ping` every 20s. Once one has arrived on a connection,
+ *  this much silence means the socket is half-open (Wi-Fi→cellular switch, NAT
+ *  timeout, a WebView frozen in the background) even though readyState still says
+ *  OPEN — so drop it and redial instead of swallowing the next task for minutes. */
+const LINK_SILENCE_MS = 50_000;
+const LINK_CHECK_MS = 5_000;
 
 function newId(prefix: string): string {
   const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -364,6 +370,11 @@ export class RemotePC {
   private probedLan = false;
   /** Resolvers waiting for the socket to come online (or fail). */
   private onlineWaiters: Array<(online: boolean) => void> = [];
+  /** When this connection last received anything, and whether the PC speaks
+   *  link.ping (older desktops don't — the silence watchdog stays off for them). */
+  private lastHeardAt = 0;
+  private pingSeen = false;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
 
   private readonly idleMs: number;
   private readonly maxMs: number;
@@ -427,7 +438,9 @@ export class RemotePC {
     this.idleMs = opts.taskIdleTimeoutMs ?? 210_000;
     this.maxMs = opts.taskMaxMs ?? 15 * 60_000;
     this.awaitingMs = opts.awaitingUserTimeoutMs ?? 5 * 60_000;
-    this.connectMs = opts.connectTimeoutMs ?? 8_000;
+    // Generous: a cold handshake can spend several native-bridge retry windows, and
+    // a task asked for right after the app opens should wait for it, not fail.
+    this.connectMs = opts.connectTimeoutMs ?? 20_000;
     this.reconnectBase = opts.reconnectMs ?? 3_000;
     this.lanProbeMs = opts.lanProbeTimeoutMs ?? 2_500;
     this.identity = opts.identityBridge ?? nativeIdentityBridge;
@@ -490,6 +503,15 @@ export class RemotePC {
       this.lastHostCounter = 0;
       this.pairingAttempted = false;
       this.sawChallenge = false;
+      this.lastHeardAt = Date.now();
+      this.pingSeen = false;
+      if (this.liveTimer) clearInterval(this.liveTimer);
+      this.liveTimer = setInterval(() => {
+        if (this.ws !== ws) return;
+        if (this.pingSeen && Date.now() - this.lastHeardAt > LINK_SILENCE_MS) {
+          this.dropDeadLink(ws, "no word from the PC in 50s");
+        }
+      }, LINK_CHECK_MS);
       if (this.authTimer) clearTimeout(this.authTimer);
       // A silent-server guard, NOT an identity verdict. Generous because one
       // handshake can legitimately burn several native-bridge retry windows
@@ -512,6 +534,7 @@ export class RemotePC {
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      this.lastHeardAt = Date.now();
       if (typeof ev.data === "string") {
         this.incomingChain = this.incomingChain
           .then(() => this.handleMessage(ev.data as string, ws))
@@ -529,45 +552,86 @@ export class RemotePC {
         /* ignore */
       }
     };
-    ws.onclose = (ev) => {
-      if (this.ws !== ws) return;
-      this.ws = null;
-      this.authenticated = false;
-      this.connectionNonce = "";
-      this.activeApprovals.clear();
-      if (this.authTimer) {
-        clearTimeout(this.authTimer);
-        this.authTimer = null;
+    ws.onclose = (ev) => this.handleClosed(ws, ev?.code, ev?.reason);
+  }
+
+  /** Socket `ws` is gone (or declared dead). `fast` redials almost at once — used
+   *  when WE detected the loss, so the user isn't left on a backoff timer. */
+  private handleClosed(ws: WebSocketLike, code?: number, reason?: string, fast = false): void {
+    if (this.ws !== ws) return;
+    this.ws = null;
+    this.authenticated = false;
+    this.connectionNonce = "";
+    this.activeApprovals.clear();
+    if (this.liveTimer) {
+      clearInterval(this.liveTimer);
+      this.liveTimer = null;
+    }
+    if (this.authTimer) {
+      clearTimeout(this.authTimer);
+      this.authTimer = null;
+    }
+    // 1008 is terminal ONLY when this connection's handshake actually engaged
+    // (we saw auth.challenge). The server also closes 1008 for transport-level
+    // refusals — e.g. dialing its plaintext LAN address, which the Tailscale-only
+    // gate rejects before any identity exchange. Treating THAT as "identity
+    // rejected" permanently bricked pairing after one bad dial; instead fall
+    // through to offline + reconnect, which cycles to the other address.
+    const unauthorized = code === 1008 && this.sawChallenge;
+    if (code === 1008 || code === 4000) {
+      console.error(
+        `[RemotePC] closed code=${code} reason=${reason || ""} ` +
+        `sawChallenge=${this.sawChallenge} → ${unauthorized ? "unauthorized" : "retry"}`,
+      );
+    }
+    if (unauthorized) {
+      this.setState("unauthorized");
+      this.failPending("Your PC rejected this phone's identity or pairing pins.");
+      this.resolveWaiters(false);
+      return;
+    }
+    this.setState("offline");
+    // The desktop owns accepted task execution. Pause the *idle* watchdog while
+    // offline and keep the absolute deadline running; reconnect will replay only
+    // this task's missed events after lastSeq.
+    if (this.pending?.idleTimer) {
+      clearTimeout(this.pending.idleTimer);
+      this.pending.idleTimer = null;
+    }
+    if (!this.manualClose) this.scheduleReconnect(fast);
+  }
+
+  /** A half-open socket may never deliver onclose (or only after a long TCP
+   *  timeout), so treat it as closed NOW and redial; its late onclose no-ops. */
+  private dropDeadLink(ws: WebSocketLike, why: string): void {
+    if (this.ws !== ws) return;
+    console.error(`[RemotePC] dead link: ${why} — redialing`);
+    try {
+      ws.close(4000, "dead link");
+    } catch {
+      /* ignore */
+    }
+    this.handleClosed(ws, 4000, "dead link", true);
+  }
+
+  /**
+   * The app returned to the foreground or the network changed. A backed-off
+   * reconnect timer (up to 15s, and frozen while the WebView was in the
+   * background) shouldn't make the user wait, and a socket that sat through a
+   * network switch is almost certainly dead even if it still looks open.
+   */
+  nudge(networkChanged = false): void {
+    if (this.manualClose || this._state === "unauthorized" || !this.hosts.length) return;
+    const ws = this.ws;
+    if (ws && ws.readyState === OPEN) {
+      if (networkChanged || (this.pingSeen && Date.now() - this.lastHeardAt > LINK_SILENCE_MS)) {
+        this.dropDeadLink(ws, networkChanged ? "network changed" : "silent after resume");
       }
-      // 1008 is terminal ONLY when this connection's handshake actually engaged
-      // (we saw auth.challenge). The server also closes 1008 for transport-level
-      // refusals — e.g. dialing its plaintext LAN address, which the Tailscale-only
-      // gate rejects before any identity exchange. Treating THAT as "identity
-      // rejected" permanently bricked pairing after one bad dial; instead fall
-      // through to offline + reconnect, which cycles to the other address.
-      const unauthorized = ev?.code === 1008 && this.sawChallenge;
-      if (ev?.code === 1008 || ev?.code === 4000) {
-        console.error(
-          `[RemotePC] closed code=${ev?.code} reason=${ev?.reason || ""} ` +
-          `sawChallenge=${this.sawChallenge} → ${unauthorized ? "unauthorized" : "retry"}`,
-        );
-      }
-      if (unauthorized) {
-        this.setState("unauthorized");
-        this.failPending("Your PC rejected this phone's identity or pairing pins.");
-        this.resolveWaiters(false);
-        return;
-      }
-      this.setState("offline");
-      // The desktop owns accepted task execution. Pause the *idle* watchdog while
-      // offline and keep the absolute deadline running; reconnect will replay only
-      // this task's missed events after lastSeq.
-      if (this.pending?.idleTimer) {
-        clearTimeout(this.pending.idleTimer);
-        this.pending.idleTimer = null;
-      }
-      if (!this.manualClose) this.scheduleReconnect();
-    };
+      return;
+    }
+    if (ws && ws.readyState === 0) return; // already dialing
+    this.attempt = 0;
+    this.connect();
   }
 
   /** Close for good — stop reconnecting and drop any in-flight task. */
@@ -804,6 +868,10 @@ export class RemotePC {
     this.connectionNonce = "";
     this.activeApprovals.clear();
     this.subscribedTaskIds.clear();
+    if (this.liveTimer) {
+      clearInterval(this.liveTimer);
+      this.liveTimer = null;
+    }
     if (this.authTimer) {
       clearTimeout(this.authTimer);
       this.authTimer = null;
@@ -820,9 +888,13 @@ export class RemotePC {
     this.setState("idle");
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(fast = false): void {
     if (this.manualClose) return;
     this.clearReconnect();
+    if (fast) {
+      this.reconnectTimer = setTimeout(() => this.connect(), 250);
+      return;
+    }
     this.attempt += 1;
     // Autonomous network switching: every failed/dropped attempt tries the OTHER
     // known address next (plain LAN vs. Tailscale) instead of asking the user
@@ -1393,6 +1465,10 @@ export class RemotePC {
       return;
     }
     if (!this.authenticated) throw new Error("message arrived before authentication");
+    if (event === "link.ping") {
+      this.pingSeen = true; // keepalive only — nothing for the UI
+      return;
+    }
     const nestedTaskId =
       data && typeof data === "object" ? (data as { task_id?: unknown }).task_id : undefined;
     const taskId =

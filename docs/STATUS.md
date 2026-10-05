@@ -94,6 +94,7 @@ useBrain's model-discovery effect (the rule can't see the setState is after an `
 | ✅ | Live PC screen over WebRTC + touch input | Signaling rides the existing WebSocket; video is a real `RTCPeerConnection` |
 | 🟡 | Device-key auth (Keystore EC identity, pinned host, expiring single-use pairing challenge) | Replaces the bearer token completely. In source and unit-tested; no recorded live re-pair on a device since the change |
 | 🟡 | Task protocol v2 (stable ids, idempotency, event-cursor resubscribe) | Same — built and tested, not live-confirmed |
+| 🟡 | Link resilience (2026-10-05): signed `link.ping` every 20s → phone drops a half-open link after 50s silence; instant redial on app resume / network-type change; live view auto-restarts after a reconnect; drag moves coalesced (one signed move in flight) | Desktop half live-verified with a fake-phone probe over Tailscale (ping verifies, screen 14.5 fps @1280×720, same-phone screen takeover, busy-reject delivered, finished-task result replays on reconnect, resubmit replays). Phone half unit-tested only — no device |
 
 One environment gotcha that will waste an afternoon if you forget it: **Windows Firewall
 blocks inbound 8765 on the Tailscale adapter** unless the rule is scoped for it. `start.py`
