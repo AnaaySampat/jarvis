@@ -4,6 +4,7 @@ import {
   runTvControl,
   sameTitle,
   shellQuote,
+  titleNameIn,
   type ShellReply,
   type TvEnv,
 } from "./tv";
@@ -220,6 +221,29 @@ describe("helpers", () => {
     expect(findEpisode(page, 2, 1)).toEqual({ id: "21", title: "" });
     expect(findEpisode(page, 2, 2)).toBeNull();
     expect(findEpisode(page, 3, 1)).toBeNull();
+  });
+
+  it("reads the Oct 2026 page shape: nested unlabelled seasons, \\x escapes, a recommendations tail", () => {
+    const ep = (vid: number, n: number, title: string) =>
+      `{"__typename":"EpisodeEdge","node":{"__typename":"Episode","videoId":${vid},"number":${n},"runtimeSec":1,"shortSynopsis":"x","title":"${title}"}}`;
+    const season = (eps: string, title: string) =>
+      `{"node":{"__typename":"Season","episodes":{"edges":[${eps}]},"title":"${title}"}}`;
+    const page =
+      String.raw`"__typename":"Show","title":"Stranger\x20Things","videoId":80057281,` +
+      `"seasons":{"__typename":"SeasonsConnection","edges":[` +
+      season(ep(11, 1, "One") + "," + ep(12, 2, String.raw`Two\x21`), String.raw`Stranger\x20Things`) +
+      "," +
+      season(ep(21, 1, "Uno"), String.raw`Stranger\x20Things\x202`) +
+      `]},"more":[` +
+      ep(99, 7, "Other show") +
+      "]";
+    expect(findEpisode(page, 1, 2)).toEqual({ id: "12", title: "Two!" });
+    expect(findEpisode(page, 2, 1)).toEqual({ id: "21", title: "Uno" });
+    expect(findEpisode(page, 2, 2)).toBeNull();
+    expect(findEpisode(page, 3, 1)).toBeNull();
+    expect(titleNameIn(page, "80057281")).toBe("Stranger Things");
+    expect(titleNameIn("<title>Watch Dark | Netflix Official Site</title>", "1")).toBe("Dark");
+    expect(titleNameIn("<title>Netflix</title>", "1")).toBeNull();
   });
 
   it("single-quotes text for the TV shell", () => {

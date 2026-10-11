@@ -569,37 +569,49 @@ export async function lookupNetflixTitle(
   };
 }
 
-/** Netflix's name for a title, from its public page's <title> ("Watch X | Netflix…"),
- *  which sits in the first few hundred bytes of a ~3.5 MB page — so stop reading there. */
+/** A JSON string literal's body: no unescaped quote. */
+const JS_STR = String.raw`"((?:[^"\\]|\\.)*)"`;
+
+/** The page's data is a JS literal: \x20-style escapes, then \" and friends. */
+function jsUnescape(s: string): string {
+  return s
+    .replace(/\\x([0-9A-Fa-f]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\(.)/g, "$1");
+}
+
+/** Netflix's name for a title, from its public page (~1 MB, read whole: see titleNameIn). */
 export async function netflixTitleName(id: string): Promise<string | null> {
   try {
-    const res = await resilientFetch(`https://www.netflix.com/title/${id}`, {}, 12_000);
-    if (!res.ok || !res.body) return null;
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let html = "";
-    while (html.length < 65_536 && !html.includes("</title>")) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      html += dec.decode(value, { stream: true });
-    }
-    void reader.cancel().catch(() => undefined);
-    const raw = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? "";
-    const name = raw
-      .replace(/&amp;/g, "&")
-      .replace(/&quot;/g, '"')
-      .replace(/&#x27;|&#39;/g, "'")
-      .replace(/^Watch\s+/i, "")
-      .replace(/\s*\|\s*Netflix.*$/i, "")
-      .trim();
-    return name && name.toLowerCase() !== "netflix" ? name : null;
+    const res = await resilientFetch(`https://www.netflix.com/title/${id}`, {}, 20_000);
+    return res.ok ? titleNameIn(await res.text(), id) : null;
   } catch {
     return null;
   }
 }
 
-/** A show's season/episode → the episode's Netflix id, from the show's public page. Unlike
- *  the name check above this needs the whole ~3.5 MB page: the episode list sits near its end. */
+/**
+ * Measured 2026-10-11 (from the PC, same native HTTP client kind as the phone's): <title>
+ * is just "Netflix" and the name sits in the embedded data near the END of the page,
+ * as "__typename":"Show"/"Movie","title":…,"videoId":<id>. The Sept 2026 shape —
+ * "Watch X | Netflix" in <title> — is kept as the fallback.
+ */
+export function titleNameIn(html: string, id: string): string | null {
+  const m = new RegExp(
+    String.raw`"__typename":"(?:Show|Movie)","title":${JS_STR},"videoId":${id}\b`,
+  ).exec(html);
+  if (m) return jsUnescape(m[1]).trim() || null;
+  const raw = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? "";
+  const name = raw
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/^Watch\s+/i, "")
+    .replace(/\s*\|\s*Netflix.*$/i, "")
+    .trim();
+  return name && name.toLowerCase() !== "netflix" ? name : null;
+}
+
+/** A show's season/episode → the episode's Netflix id, from the show's public page. */
 export async function netflixEpisode(
   showId: string,
   season: number,
@@ -618,13 +630,45 @@ export async function netflixEpisode(
   }
 }
 
-/** The page's embedded data lists each Season (labelled "Season N"), in order, with its
- *  episodes' ids in order; each Episode object carries its title. */
+/**
+ * Page shape measured 2026-10-11: "__typename":"SeasonsConnection" → each
+ * {"node":{"__typename":"Season","episodes":{…[{"node":{"__typename":"Episode",
+ * "videoId":N,"number":1,…,"title":…}}…]}}} in page order, with no season number label.
+ * A recommendations tail follows the last season, so a list ends where `number` breaks
+ * the 1, 2, 3… run.
+ */
+function findEpisodeNested(
+  html: string,
+  season: number,
+  episode: number,
+): { id: string; title: string } | null {
+  const start = html.indexOf('"__typename":"SeasonsConnection"');
+  if (start < 0) return null;
+  const parts = html.slice(start).split('"__typename":"Season","episodes"').slice(1);
+  const part = parts[season - 1];
+  if (season < 1 || !part) return null;
+  let expected = 1;
+  for (const m of part.matchAll(/"__typename":"Episode","videoId":(\d+),"number":(\d+)/g)) {
+    if (Number(m[2]) !== expected) break;
+    if (expected === episode) {
+      const end = m.index! + m[0].length;
+      const t = new RegExp(`"title":${JS_STR}`).exec(part.slice(end, end + 6000));
+      return { id: m[1], title: t ? jsUnescape(t[1]) : "" };
+    }
+    expected++;
+  }
+  return null;
+}
+
+/** The current page shape first (findEpisodeNested); then the Sept 2026 one, where each
+ *  Season is labelled "Season N" and lists its episodes' ids in order. */
 export function findEpisode(
   html: string,
   season: number,
   episode: number,
 ): { id: string; title: string } | null {
+  const nested = findEpisodeNested(html, season, episode);
+  if (nested) return nested;
   const seasons = [
     ...html.matchAll(/"__typename":"Season","videoId":\d+([\s\S]*?)"edges":\[([^\]]*)\]/g),
   ].map((m) => ({

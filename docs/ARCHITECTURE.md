@@ -682,14 +682,16 @@ on the same LAN as the phone; it is never reached over Tailscale.
 - **Netflix's playback state lies at the profile screen.** It reports state 3 at position 0
   there, so state alone never counts as playing.
 - **The name → id lookup is checked against Netflix.** The id comes from grounded web
-  search. Netflix's public title page (`<title>Watch X | Netflix…`, the first ~300 bytes of
-  a ~3.5 MB page, read by streaming) then confirms which show it is. That is why
-  `https://www.netflix.com/*` is in the `http` capability.
-- **What this TV can't do.** `screencap` is black on every screen of the user's Sony, so
-  there is no vision. `uiautomator dump` is opaque inside Netflix, YouTube and Prime. So a
-  native TV operator loop (reusing `OperatorDevice`) was not built; anything in-app beyond
-  play and pause is remote-button presses. Measurements are in `docs/STATUS.md`
-  "TV control".
+  search. Netflix's public title page (~1 MB, read whole: since Oct 2026 the name is in the
+  embedded data near the end, see `titleNameIn`) then confirms which show it is. That is
+  why `https://www.netflix.com/*` is in the `http` capability.
+- **What this TV can and can't see.** Screenshots work (re-tested 2026-10-11: the launcher
+  and Settings capture in full) except while a DRM app is in front: Netflix marks its video
+  *and* its UI secure, so it can never be captured, and `uiautomator dump` is opaque inside
+  Netflix, YouTube and Prime too. A vision-based TV operator loop (reusing
+  `OperatorDevice`) is therefore possible outside Netflix but hasn't been built: the
+  earlier belief that every capture was black is why. Today anything in-app beyond play
+  and pause is remote-button presses. Measurements are in `docs/STATUS.md` "TV control".
 
 ---
 
