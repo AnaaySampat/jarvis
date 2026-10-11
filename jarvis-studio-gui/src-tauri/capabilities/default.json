@@ -31,6 +31,7 @@
         { "url": "https://api.mistral.ai/*" },
         { "url": "https://integrate.api.nvidia.com/*" },
         { "url": "https://api.tavily.com/*" },
+        { "url": "https://api.github.com/repos/AnaaySampat/jarvis/releases/latest" },
         { "url": "https://oauth2.googleapis.com/*" },
         { "url": "https://aiplatform.googleapis.com/*" },
         { "url": "https://*.aiplatform.googleapis.com/*" },

@@ -79,7 +79,8 @@ pub struct IsEnabledResponse {
 /// grows); `listening` reports whether the engine is currently up so JS can restart it
 /// if it died. Polling this over the reliable request/response path avoids the Tauri
 /// event/Channel bridge, which drops callbacks on this device during startup reloads.
-/// `pre_roll` is the base64 WAV of the 3 s that fired detection `seq`, sent once.
+/// `pre_roll` is the base64 WAV of detection `seq`'s clip (the wake plus the command after
+/// it), sent once; `speech` is false when nothing past the wake word sounded like speech.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WakeStateResponse {
     #[serde(default)]
@@ -88,6 +89,8 @@ pub struct WakeStateResponse {
     pub listening: bool,
     #[serde(default, rename = "preRoll", skip_serializing_if = "Option::is_none")]
     pub pre_roll: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<bool>,
 }
 
 /// Polled TTS state so JS can hold "speaking" (and anything gated on it, like the

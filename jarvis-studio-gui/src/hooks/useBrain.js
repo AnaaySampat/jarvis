@@ -29,6 +29,8 @@ import { webSpeechTTS } from "../brain/platform/webspeech";
 import { MicRecorder, transcribe } from "../brain/platform/stt";
 import { syncWakeWord } from "../brain/platform/wakeword";
 import { syncStopOverlay } from "../brain/platform/stopOverlay";
+import { checkForUpdate } from "../brain/platform/update";
+import { getVersion } from "@tauri-apps/api/app";
 import { subscribeTelemetry } from "../brain/platform/deviceTelemetry";
 import { resolveAmbientLocation, netInfoFrom, fetchPanelWeather } from "../brain/platform/ambient";
 import { discoverModels } from "../brain/providers/models";
@@ -345,9 +347,29 @@ export function useBrain() {
     return cards;
   }, []);
 
-  const pushWarning = useCallback((text) => {
-    setWarnings((prev) => [...prev, { text, id: uid() }]);
+  /** `action` ({ label, run }) adds a button beside the text — e.g. "Get it". */
+  const pushWarning = useCallback((text, action) => {
+    setWarnings((prev) => [...prev, { text, action, id: uid() }]);
   }, []);
+
+  // "A new version is available": once per launch, at most one GitHub check a day.
+  useEffect(() => {
+    if (!inTauri()) return undefined;
+    let cancelled = false;
+    void getVersion()
+      .then((current) => checkForUpdate(current))
+      .then((update) => {
+        if (cancelled || !update) return;
+        pushWarning(`JARVIS ${update.version} is available.`, {
+          label: "Get it",
+          run: () => void invoke("plugin:phone|open_url", { url: update.url }).catch(() => {}),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pushWarning]);
 
   // Credentials are hydrated only into React memory. A first launch after upgrade
   // migrates the already-purged legacy values into Android Keystore; React Strict

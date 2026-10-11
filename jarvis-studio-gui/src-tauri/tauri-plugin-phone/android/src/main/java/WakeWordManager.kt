@@ -35,17 +35,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * On-device "Hey Jarvis" — same openWakeWord stack as the desktop Python backend,
  * running locally with no cloud calls until a wake is detected. Same model, audio format,
- * chunking, threshold and cooldown as the library's WakeWordEngine it replaced; the one
- * addition is [PreRollRing], so each detection hands over the seconds that fired it.
+ * chunking, threshold and cooldown as the library's WakeWordEngine it replaced. Additions:
+ * [PreRollRing] and [CommandCapture] — each detection keeps recording until the command
+ * ends and hands over one clip, wake and command, without ever giving up the microphone.
  */
 class WakeWordManager(
     private val context: Context,
     private val onDetected: (score: Float) -> Unit,
-    /** The latest detection's audio: up to 3 s before it plus what followed, until
-     *  [POST_ROLL_MS] passed or [stop] — the model often fires before "Jarvis" has ended
-     *  (live 2026-09-27: scores climbed 0.37 → 0.99 over the next frames, and a clip cut at
-     *  the first one read "You're on surface"). */
-    private val onPreRoll: (ShortArray) -> Unit,
+    /** The latest detection's clip: up to 3 s before it plus the command that followed,
+     *  until [CommandCapture] heard it end or [stop]. `speech` is false when nothing past
+     *  the wake word sounded like speech. */
+    private val onClip: (audio: ShortArray, speech: Boolean) -> Unit,
 ) {
     companion object {
         private const val TAG = "JarvisWW"
@@ -61,8 +61,6 @@ class WakeWordManager(
         private const val COOLDOWN_MS = 3_000L
         /** 3 s of history: "Hey Jarvis" plus room for a slow speaker. */
         private const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 3
-        /** How long a detection's audio keeps recording past the frame that fired it. */
-        private const val POST_ROLL_MS = 400L
 
         /** Outlives any one manager: release() cancels [scope] right after stop(). */
         private val reaper = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -74,20 +72,33 @@ class WakeWordManager(
     private var processor: AudioProcessor? = null
     private var runner: OnnxModelRunner? = null
     private val ring = PreRollRing(PRE_ROLL_SAMPLES)
-    /** When the detection whose audio isn't handed over yet fired (0 = none). */
-    private var pendingAt = 0L
+    private val noise = NoiseFloor()
+    /** The command being recorded after a detection (null = idle-listening). */
+    private var capture: CommandCapture? = null
 
-    /** The pending detection's audio, once its post-roll is done (or [force]d by stop). */
+    /** True while a detection's command is still being recorded. */
+    val capturing: Boolean
+        @Synchronized get() = capture != null
+
     @Synchronized
-    private fun takePending(now: Long, force: Boolean): ShortArray? {
-        if (pendingAt == 0L || (!force && now - pendingAt < POST_ROLL_MS)) return null
-        pendingAt = 0L
-        return ring.snapshot()
+    private fun beginCapture() {
+        capture = CommandCapture(ring.snapshot(), SAMPLE_RATE)
+        noise.hold()
     }
 
+    /** Feed the capture; the finished one once its command is over (or [force]d by stop). */
     @Synchronized
-    private fun markPending(now: Long) {
-        pendingAt = now
+    private fun advanceCapture(chunk: ShortArray?, loud: Boolean, force: Boolean): CommandCapture? {
+        val c = capture ?: return null
+        val done = (chunk != null && c.add(chunk, loud)) || force
+        if (!done) return null
+        capture = null
+        noise.release()
+        android.util.Log.i(
+            TAG,
+            "command end speech=${c.speech} rms=${"%.4f".format(noise.lastRms)} floor=${"%.4f".format(noise.floor)}",
+        )
+        return c
     }
 
     /** Set right before returning false from [start] — the real reason the engine
@@ -124,8 +135,9 @@ class WakeWordManager(
                         mic().collect { chunk ->
                             ring.write(chunk)
                             val now = System.currentTimeMillis()
-                            takePending(now, force = false)?.let { audio ->
-                                withContext(Dispatchers.Main) { onPreRoll(audio) }
+                            val loud = noise.loud(chunk)
+                            advanceCapture(chunk, loud, force = false)?.let { c ->
+                                withContext(Dispatchers.Main) { onClip(c.audio(), c.speech) }
                             }
                             val score = try {
                                 p.predictWakeWord(FloatArray(chunk.size) { chunk[it] / 32768f })
@@ -133,10 +145,10 @@ class WakeWordManager(
                                 android.util.Log.w(TAG, "inference failed: ${e.message}")
                                 return@collect
                             }
-                            if (score > THRESHOLD && now - lastFire >= COOLDOWN_MS) {
+                            if (score > THRESHOLD && now - lastFire >= COOLDOWN_MS && !capturing) {
                                 lastFire = now
                                 android.util.Log.i(TAG, "DETECTION score=${"%.3f".format(score)}")
-                                markPending(now)
+                                beginCapture()
                                 withContext(Dispatchers.Main) { onDetected(score) }
                             }
                         }
@@ -184,9 +196,9 @@ class WakeWordManager(
     }.flowOn(Dispatchers.IO)
 
     fun stop() {
-        // JS stops the engine ~0.1–0.4 s after a wake to take the microphone: hand over the
-        // detection's audio as it stands rather than lose it with the loop.
-        takePending(System.currentTimeMillis(), force = true)?.let(onPreRoll)
+        // Stopped mid-command (the toggle, a recycle): hand over what was heard rather than
+        // lose it with the loop.
+        advanceCapture(null, loud = false, force = true)?.let { onClip(it.audio(), it.speech) }
         val j = job
         val p = processor
         val r = runner

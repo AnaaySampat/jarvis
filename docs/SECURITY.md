@@ -238,6 +238,13 @@ operator step, **phone screen contents** — to that provider; OpenRouter's free
 served by third parties, and Mistral's free tier trains on what it's sent. Settings says so
 next to the fields. No key, no data sent.
 
+**Changed 2026-10-11 — Tavily search backup and an update check.** `tavilyKey` joins the
+Keystore-backed secrets (same allowlist and posture). With a key set, a web search Gemini
+grounding couldn't answer sends **the search query** to Tavily; no key, nothing sent. On
+launch, at most once a day, the app GETs
+`https://api.github.com/repos/AnaaySampat/jarvis/releases/latest` — no credentials and no
+user data, but GitHub sees the phone's IP. The HTTP scope allows exactly that URL.
+
 **Changed 2026-09-23 — the phone operator loop is native** (`OperatorCore.kt`). Two
 consequences worth knowing:
 

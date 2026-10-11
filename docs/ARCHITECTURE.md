@@ -529,16 +529,22 @@ fired native event silently never arrives. Confirmed live. The plain request/res
 Two features already work around it the same way — **poll a monotonic sequence counter**:
 
 - Wake word: `platform/wakeword.ts` polls `poll_wake_word` every 140 ms for a rising `seq`,
-  **one poll in flight at a time** (with overlap, a later tiny reply overtook the ~140 KB
-  one carrying the audio). A poll also carries `preRoll`, sent once, when the engine has
-  it: a base64 WAV of the 3 s before the detection plus up to 0.4 s after — the model often
-  fires before "Jarvis" has ended — handed over when the 0.4 s pass or the engine stops,
-  whichever is first. The listener stops the engine, starts recording the command, and
-  meanwhile fetches that audio and has Whisper transcribe it with the name alone as the
-  hint (never the command prompt's "Hey JARVIS": Whisper can echo its prompt, and an echo
-  of "Jarvis" has no greeting). The command counts only if a greeting precedes the name
-  (`heardWakePhrase`, which also takes Whisper's "Kay"/"A." for "Hey"); a rejected wake
-  cancels the recording. A check that can't run (no audio, offline) lets the wake through.
+  **one poll in flight at a time** (with overlap, a later tiny reply overtook the one
+  carrying the audio). **The command is recorded natively** (2026-10-11): after a
+  detection the engine keeps its own mic loop going (`CommandCapture` in `WakePreRoll.kt`,
+  energy VAD — loud is 2× the room level (30th-percentile chunk of the 4 s before the wake,
+  held for the command), speech is a run of ≥2 loud 80 ms chunks;
+  ends 1 s after speech, at 4 s with none, or at 10 s) and a later poll
+  carries `preRoll` — one base64 WAV of the 3 s before the detection plus the command —
+  and `speech` (false when nothing past the wake sounded like speech; JS then skips the
+  recogniser). The engine is never stopped for a command, so "Hey Jarvis, open X" in one
+  breath keeps its first words (the old engine-stop → 250 ms → `getUserMedia` handoff lost
+  ~0.5–1 s). JS transcribes the clip once, with the name alone as the hint (never the
+  command prompt's "Hey JARVIS": Whisper can echo its prompt, and an echo of "Jarvis" has
+  no greeting). That one transcript is also the wake check: the command counts only if a
+  greeting precedes the name (`heardWakePhrase`, which also takes Whisper's "Kay"/"A." for
+  "Hey"), and is whatever follows the last one (`commandAfterWake`). A failed
+  transcription now drops the command — there's no separate recording to fall back on.
 - Cross-app STOP: `platform/stopOverlay.ts` polls `poll_stop_overlay` every 250 ms.
 
 If you add a new native→JS async signal, use this same pattern. Don't reach for the event
@@ -558,7 +564,7 @@ Settings 2026-09-25.
 |---|---|
 | `OperatorCore.kt` / `NativeOperator.kt` | The on-phone operator loop (§4) and its Android glue |
 | `JarvisAccessibilityService.kt` | Reads the screen's node tree; taps, types, scrolls (a scroll only reports ok if the screen actually moved), gestures, back/home; screenshot; the STOP overlay |
-| `WakeWordManager.kt` / `WakeWordService.kt` / `WakePreRoll.kt` | On-device "Hey Jarvis" (openWakeWord ONNX) as a foreground service. The mic loop is ours (2026-09-27): same model, 80 ms chunks, 0.35 threshold and 3 s cooldown as the library's `WakeWordEngine`, driving its `internal` `AudioProcessor` via a file-level suppression (Kotlin 1.9), so a ring buffer can keep the 3 s pre-roll (+ up to 0.4 s after the detection) |
+| `WakeWordManager.kt` / `WakeWordService.kt` / `WakePreRoll.kt` | On-device "Hey Jarvis" (openWakeWord ONNX) as a foreground service. The mic loop is ours (2026-09-27): same model, 80 ms chunks, 0.35 threshold and 3 s cooldown as the library's `WakeWordEngine`, driving its `internal` `AudioProcessor` via a file-level suppression (Kotlin 1.9), so a ring buffer keeps the 3 s pre-roll and `CommandCapture` records the command after it from the same stream (2026-10-11) |
 | `SecureSecretStore.kt` | Provider credentials encrypted by a **non-exportable Android Keystore key**. SharedPreferences holds only ciphertext + IV; plaintext crosses the bridge for the life of one call and is never written to WebView storage |
 | `DeviceIdentityManager.kt` | The phone's EC identity key (Keystore, non-exportable). Only the public key, fingerprint, a monotonic counter and signatures cross the bridge — this is what authenticates the phone to the PC |
 | `AutonomyTaskStore.kt` | A **Room** database: the task journal. Goals, receipts, screenshots and results stay here, not in WebView storage, so a WebView backup can't become a second unredacted audit log |

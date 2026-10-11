@@ -646,10 +646,12 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         val seq = WakeWordService.wakeSeq.get()
         res.put("seq", seq)
         res.put("listening", WakeWordService.isListening)
-        // Once it's ready (~0.4 s after the wake, or when the engine stops) a poll also
-        // carries the latest detection's audio (~140 KB, sent once), for the wake check in
-        // wakeword.ts.
-        WakeWordService.takePreRoll(seq)?.let { res.put("preRoll", it) }
+        // Once the command after the wake has ended, a poll also carries the clip (wake +
+        // command, up to ~13 s / ~550 KB, sent once) for wakeword.ts to transcribe.
+        WakeWordService.takePreRoll(seq)?.let {
+            res.put("preRoll", it.wavBase64)
+            res.put("speech", it.speech)
+        }
         invoke.resolve(res)
     }
 

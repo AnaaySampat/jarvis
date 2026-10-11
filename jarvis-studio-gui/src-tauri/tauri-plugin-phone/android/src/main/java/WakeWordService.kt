@@ -41,9 +41,7 @@ class WakeWordService : Service() {
         // fires. Rather than chase an exact repro, bound the outage: tear down and
         // recreate the engine on a fixed cadence so a silent stall self-recovers
         // within minutes instead of requiring a full app restart. Only runs while a
-        // manager exists — i.e. while genuinely idle-listening, never mid-command
-        // capture (JS fully stops this service before recording a command and
-        // restarts it after, so there's no window where a recycle could race that).
+        // manager exists, and skipped while it is recording a command (see recycleEngine).
         private const val RECYCLE_INTERVAL_MS = 8 * 60 * 1000L
 
         @Volatile
@@ -81,9 +79,10 @@ class WakeWordService : Service() {
          *  polls it every second without loss). Survives engine stop/start (companion). */
         val wakeSeq = java.util.concurrent.atomic.AtomicInteger(0)
 
-        /** The audio that fired detection [seq], as a base64 WAV, for the pre-roll check in
-         *  wakeword.ts. In memory only; handed out once, or replaced by the next detection. */
-        class PreRoll(val seq: Int, val wavBase64: String)
+        /** Detection [seq]'s clip — the wake plus the command after it — as a base64 WAV,
+         *  for wakeword.ts to transcribe. [speech] is false when nothing past the wake word
+         *  sounded like speech. In memory only; handed out once, or replaced by the next. */
+        class PreRoll(val seq: Int, val wavBase64: String, val speech: Boolean)
 
         private var lastPreRoll: PreRoll? = null
 
@@ -94,8 +93,8 @@ class WakeWordService : Service() {
 
         /** Detection [seq]'s audio, handed out once (and only while [seq] is the latest). */
         @Synchronized
-        fun takePreRoll(seq: Int): String? =
-            lastPreRoll?.takeIf { it.seq == seq }?.also { lastPreRoll = null }?.wavBase64
+        fun takePreRoll(seq: Int): PreRoll? =
+            lastPreRoll?.takeIf { it.seq == seq }?.also { lastPreRoll = null }
 
         /** One-shot: fired from onStartCommand once we KNOW whether listening
          *  actually started. PhonePlugin sets this instead of blocking its own
@@ -184,11 +183,15 @@ class WakeWordService : Service() {
             playWakeCue(applicationContext)
             onDetected?.invoke()
         },
-        // Arrives up to 0.4 s after its detection (or when JS stops the engine), for the
-        // wake that detection counted — one detection at a time, both on the main thread.
-        onPreRoll = { audio ->
+        // Arrives once the command after its detection has ended (or the engine stops), for
+        // the wake that detection counted — one detection at a time, both on the main thread.
+        onClip = { audio, speech ->
             offerPreRoll(
-                PreRoll(wakeSeq.get(), android.util.Base64.encodeToString(pcm16Wav(audio, 16_000), android.util.Base64.NO_WRAP)),
+                PreRoll(
+                    wakeSeq.get(),
+                    android.util.Base64.encodeToString(pcm16Wav(audio, 16_000), android.util.Base64.NO_WRAP),
+                    speech,
+                ),
             )
         },
     )
@@ -200,10 +203,13 @@ class WakeWordService : Service() {
 
     /** Proactive self-heal: tear down and recreate the engine on a fixed cadence
      *  (see RECYCLE_INTERVAL_MS) so a silent engine stall can't outlive a few
-     *  minutes. Safe to call any time `manager` is non-null — that only happens
-     *  while idle-listening, never mid-command-capture. */
+     *  minutes. Never mid-command: that waits a few seconds and tries again. */
     private fun recycleEngine() {
-        if (manager == null) return // already torn down (stopping/capturing) — nothing to do
+        if (manager == null) return // already torn down (stopping) — nothing to do
+        if (manager?.capturing == true) {
+            recycleHandler.postDelayed(recycleRunnable, 5_000L)
+            return
+        }
         android.util.Log.i(TAG, "watchdog: proactive engine recycle (every ${RECYCLE_INTERVAL_MS / 60000}min)")
         manager?.release()
         manager = null

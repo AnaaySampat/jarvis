@@ -1,15 +1,17 @@
 /* Wake word ("Hey Jarvis") — ANDROID FORK.
  *
- * Matches the desktop flow: openWakeWord listens on-device (free, instant, always
- * running). When "Hey Jarvis" is heard, we release the wake mic, capture your command
- * with Groq Whisper Large v3, and send it to the brain — same as the laptop — once
- * Whisper has also heard "Hey Jarvis" in the audio that fired the wake (heardWake).
+ * openWakeWord listens on-device (free, instant, always running). On a detection the
+ * native engine keeps recording until the command ends and hands over ONE clip — the
+ * seconds before the wake plus the command (CommandCapture in WakePreRoll.kt). It is
+ * transcribed once; the command counts only if the recogniser also heard "Hey Jarvis" in
+ * it, and is whatever follows that. The mic is never handed over, so "Hey Jarvis, open X"
+ * in one breath keeps its first words (the old WebView-mic handoff lost ~0.5–1 s).
  *
  * The old Whisper-in-a-loop hack (record 3.5s → API → regex → repeat) is gone.
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { MicRecorder, transcribe, isNoiseTranscript } from "./stt";
+import { transcribe, isNoiseTranscript } from "./stt";
 import { inTauri } from "../tools/httpClient";
 import { base64ToBytes } from "../tools/base64";
 
@@ -26,9 +28,8 @@ export function heardWakePhrase(text: string): boolean {
   return WAKE_PHRASE.test(text);
 }
 
-// Ceiling only: capture ends ~0.9s after you stop talking (MicRecorder.untilSilence).
-// Was a fixed 6s window — every command waited the full 6s, and longer ones got cut.
-const COMMAND_MS = 10000;
+// How long to wait for the clip: the native capture's 10 s ceiling plus slack.
+const CLIP_WAIT_MS = 14000;
 const POLL_MS = 140; // how often JS asks the native engine "any new detection?" — low
 // enough that a wake is picked up almost immediately (the poll is a cheap atomic read).
 const POLL_STUCK_MS = 3000; // a poll unanswered this long is presumed dropped
@@ -40,6 +41,14 @@ function stripWake(text: string): string {
     .replace(WAKE, "")
     .replace(/^[\s,.:;!?-]+/, "")
     .trim();
+}
+
+/** The command in a clip's transcript: what follows its LAST "Hey Jarvis" (the pre-roll
+ *  can hold talk from before it). null when no wake phrase was heard — a false wake. */
+export function commandAfterWake(text: string): string | null {
+  let end = -1;
+  for (const m of text.matchAll(new RegExp(WAKE_PHRASE.source, "gi"))) end = m.index + m[0].length;
+  return end < 0 ? null : stripWake(text.slice(end));
 }
 
 export interface WakeWordOpts {
@@ -64,15 +73,13 @@ export interface WakeWordOpts {
 //
 // What IS certain from the code is that this listener had two ways to wedge
 // permanently, both of which present exactly as "the wake word just stopped":
-//   1. `handling` is set before an unbounded `await capture()`. getUserMedia
-//      hanging (rather than rejecting) means the finally never runs, so
-//      `handling` stays true, poll() early-returns forever, and the engine is
-//      left stopped by onWake's own stop_wake_word.
+//   1. `handling` was set before an unbounded await (then getUserMedia; the mic is
+//      no longer handed over, but a dropped poll reply would do the same): the
+//      finally never runs, `handling` stays true and poll() early-returns forever.
 //   2. a failed resume was swallowed by an empty catch, so nothing recovered and
 //      nothing was reported.
 // So rather than guess at the trigger, bound every wait and supervise the state:
 // whatever wedges it, it un-wedges itself within HANDLING_MAX_MS and says so.
-const CAPTURE_TIMEOUT_MS = COMMAND_MS + 6000; // record window + mic start/stop slack
 const HANDLING_MAX_MS = 45000; // ceiling on one wake→command→resume cycle
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -91,11 +98,17 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+/** A detection's clip: base64 WAV of the wake plus the command, and whether anything past
+ *  the wake word sounded like speech. */
+interface Clip {
+  wav: string;
+  speech: boolean;
+}
+
 export class WakeWordListener {
   private on = false;
   private handling = false;
   private handlingSince = 0;
-  private rec = new MicRecorder();
   private bootTimer?: ReturnType<typeof setTimeout>;
   private pollTimer?: ReturnType<typeof setInterval>;
   private lastSeq = -1; // baseline set on first poll so we ignore prior detections
@@ -139,7 +152,6 @@ export class WakeWordListener {
       document.removeEventListener("visibilitychange", this.onVisible);
       this.onVisible = undefined;
     }
-    this.rec.cancel();
     this.opts.onStatus?.("idle");
     void invoke("plugin:phone|stop_wake_word").catch(() => {});
   }
@@ -190,21 +202,19 @@ export class WakeWordListener {
   }
 
   private async pollOnce(): Promise<void> {
-    // Skip while onWake() is capturing a command — it intentionally stops the engine,
-    // and we must neither re-fire nor auto-restart underneath it. But never trust
+    // Skip while onWake() is handling a command — it polls for the clip itself. But never trust
     // that flag indefinitely: if it has been set longer than a whole cycle could
     // possibly take, something wedged and this is the only code left running that
     // can notice (see the stuck-listener note above).
     if (this.handling) {
       if (Date.now() - this.handlingSince < HANDLING_MAX_MS) return;
       this.handling = false;
-      this.rec.cancel();
       this.opts.onStatus?.("idle");
       this.opts.onError?.("Wake word got stuck mid-command — restarting the listener.");
       void invoke("plugin:phone|start_wake_word").catch(() => {});
       return;
     }
-    type WakeState = { seq?: number; listening?: boolean; preRoll?: string };
+    type WakeState = { seq?: number; listening?: boolean; preRoll?: string; speech?: boolean };
     let st: WakeState | null = null;
     try {
       st = (await invoke("plugin:phone|poll_wake_word")) as WakeState;
@@ -217,7 +227,7 @@ export class WakeWordListener {
       this.lastSeq = seq; // first poll: baseline, don't react to pre-existing detections
     } else if (seq > this.lastSeq) {
       this.lastSeq = seq;
-      void this.onWake(st.preRoll);
+      void this.onWake(st.preRoll ? { wav: st.preRoll, speech: st.speech !== false } : undefined);
       return;
     }
     if (st.listening) {
@@ -236,57 +246,49 @@ export class WakeWordListener {
     }
   }
 
-  private async onWake(preRoll?: string): Promise<void> {
+  private async onWake(clip?: Clip): Promise<void> {
     if (!this.on || this.opts.isBusy() || this.handling) return;
     this.handling = true;
     this.handlingSince = Date.now();
-    // Light the HUD "listening" state the INSTANT we pick up the wake, before the mic
-    // handoff below — otherwise the user gets no feedback for ~½ second after saying
-    // "Hey Jarvis" and it feels dead. Reset to idle on any early bail-out.
+    // Light the HUD "listening" state the INSTANT we pick up the wake — the command is
+    // still being recorded natively, and silence here would feel dead.
     this.opts.onStatus?.("listening");
-    let verdict = Promise.resolve(true);
     try {
-      await invoke("plugin:phone|stop_wake_word").catch(() => {});
-      // Let the wake-word AudioRecord release before MediaRecorder opens. Kept short so
-      // capture starts promptly after the wake; too low risks the mic still being held.
-      await sleep(250);
-      if (!this.on || this.opts.isBusy()) {
-        this.opts.onStatus?.("idle");
-        return;
-      }
-      // The engine hands the wake audio over once it stops (the audio runs a little past
-      // the detection, which often fires before "Jarvis" has ended). It's fetched and
-      // checked while the command records — recording starts no later than before — and a
-      // false wake is dropped, its recording cut short, once the verdict is in.
-      verdict = (preRoll ? Promise.resolve(preRoll) : this.fetchPreRoll()).then((audio) => {
-        if (audio) return this.heardWake(audio);
-        console.info("[wake] no wake audio came with this detection; unchecked");
-        return true;
-      });
-      void verdict.then((ok) => ok || this.rec.cancel());
-
-      const blob = await this.capture(COMMAND_MS);
+      const c = clip ?? (await this.fetchClip());
       this.opts.onStatus?.("idle");
-      if (!(await verdict) || !blob || !this.on) return;
+      // No clip (a lost reply), or nothing said after the wake: don't pay the recogniser
+      // to invent a phantom command.
+      if (!c || !c.speech || !this.on) return;
 
       let text = "";
       try {
-        text = await this.transcribeBlob(blob);
+        const wav = new Blob([base64ToBytes(c.wav)], { type: "audio/wav" });
+        // The hint is the name alone, never the command prompt's "Hey JARVIS": Whisper can
+        // echo its prompt, and an echo of "Jarvis" has no greeting, so it can't pass the
+        // wake check on its own.
+        text = await this.transcribeBlob(wav, { prompt: "Jarvis" });
       } catch (e) {
         this.opts.onError?.((e as Error)?.message || String(e));
         return;
       }
 
-      const clean = stripWake(text);
-      // Drop empty/near-silent captures and Whisper's stock silence hallucinations
-      // ("thank you", "thanks for watching", …) so a wake with no real command doesn't
-      // fire a phantom turn. `clean` has the wake word already stripped.
+      // The on-device model also fires on conversation that only sounds close (live
+      // 2026-09-26), and its scores can't tell them apart: genuine wakes on this phone
+      // scored as low as 0.37. So a command counts only if "Hey Jarvis" is in the clip.
+      const clean = commandAfterWake(text);
+      if (clean === null) {
+        console.info(`[wake] ignored — no "Hey Jarvis" in the clip: "${text.slice(0, 60)}"`);
+        return;
+      }
+      // Drop empty commands and Whisper's stock silence hallucinations ("thank you",
+      // "thanks for watching", …) so a wake with no real command doesn't fire a phantom turn.
       if (clean && !isNoiseTranscript(clean) && this.on) {
         this.opts.onCommand(clean);
         await this.settle();
       }
     } finally {
       this.handling = false;
+      // The engine keeps running through a command; this only revives one that died.
       if (this.on) {
         try {
           await invoke("plugin:phone|start_wake_word");
@@ -318,65 +320,25 @@ export class WakeWordListener {
     return transcribe(blob, { groqKey: key, ...o });
   }
 
-  /** The wake audio, which the engine hands over as it stops (a few polls at most). */
-  private async fetchPreRoll(): Promise<string | undefined> {
-    for (let i = 0; i < 5; i++) {
+  /** The clip, which the engine hands over once the command has ended. */
+  private async fetchClip(): Promise<Clip | undefined> {
+    const until = Date.now() + CLIP_WAIT_MS;
+    while (this.on && Date.now() < until) {
       try {
-        const st = (await invoke("plugin:phone|poll_wake_word")) as { preRoll?: string } | null;
-        if (st?.preRoll) return st.preRoll;
+        // Bounded: the bridge can drop a reply, and an unanswered await would wedge us.
+        const st = (await withTimeout(
+          invoke("plugin:phone|poll_wake_word"),
+          POLL_STUCK_MS,
+          "wake poll",
+        )) as { preRoll?: string; speech?: boolean } | null;
+        if (st?.preRoll) return { wav: st.preRoll, speech: st.speech !== false };
       } catch {
         // try again
       }
-      await sleep(100);
+      await sleep(POLL_MS);
     }
+    console.warn("[wake] the command clip never arrived");
     return undefined;
-  }
-
-  /**
-   * Did a real recogniser hear "Hey Jarvis" in the audio that fired the wake? The on-device
-   * model also fires on conversation that only sounds close (live 2026-09-26), and its
-   * scores can't tell them apart: genuine wakes on this phone scored as low as 0.37. The
-   * hint is the name alone, never the command prompt's "Hey JARVIS": Whisper can echo its
-   * prompt, and an echo of "Jarvis" has no greeting, so it can't pass on its own.
-   * A check that can't run (no audio, a failed call) lets the wake through, as before.
-   */
-  private async heardWake(preRollB64: string): Promise<boolean> {
-    try {
-      const wav = new Blob([base64ToBytes(preRollB64)], { type: "audio/wav" });
-      const text = await this.transcribeBlob(wav, { prompt: "Jarvis" });
-      const heard = WAKE_PHRASE.exec(text);
-      if (heard) {
-        console.info(`[wake] confirmed: "${heard[0]}"`);
-        return true;
-      }
-      console.info(`[wake] ignored — no "Hey Jarvis" in the wake audio: "${text.slice(0, 60)}"`);
-      return false;
-    } catch (e) {
-      console.warn("[wake] couldn't check the wake audio; accepting the wake:", e);
-      return true;
-    }
-  }
-
-  /** Record for `ms`. Bounded: an unbounded await here is what let a hung
-   *  getUserMedia wedge `handling` (and with it the whole listener) forever. */
-  private async capture(ms: number): Promise<Blob | null> {
-    try {
-      return await withTimeout(
-        (async () => {
-          await this.rec.start();
-          const heard = await this.rec.untilSilence(ms);
-          const blob = await this.rec.stop();
-          // Nothing said after the wake: don't pay Whisper to invent a phantom command.
-          return heard ? blob : null;
-        })(),
-        CAPTURE_TIMEOUT_MS,
-        "mic capture",
-      );
-    } catch (e) {
-      this.rec.cancel();
-      this.opts.onError?.(`Microphone capture failed: ${String((e as Error)?.message ?? e)}`);
-      return null;
-    }
   }
 
   private async settle(): Promise<void> {

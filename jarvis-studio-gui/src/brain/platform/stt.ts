@@ -81,68 +81,6 @@ export class MicRecorder {
     });
   }
 
-  /**
-   * Resolves once the speaker is done: `silenceMs` of quiet after speech, `noSpeechMs`
-   * with no speech at all, or `maxMs` regardless. Replaces a fixed record window that
-   * made every wake-word command wait the full 6s. Resolves true if speech was heard.
-   * ponytail: plain energy VAD with a tracked noise floor — swap for a model VAD
-   * (Silero) if loud rooms keep it from ending early.
-   */
-  async untilSilence(maxMs: number, silenceMs = 900, noSpeechMs = 4000): Promise<boolean> {
-    const Ctx =
-      typeof window !== "undefined"
-        ? (window.AudioContext ??
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
-        : undefined;
-    const stream = this.stream;
-    let ctx: AudioContext | null = null;
-    try {
-      if (!Ctx || !stream) throw new Error("no Web Audio");
-      ctx = new Ctx();
-      await ctx.resume().catch(() => {});
-      const an = ctx.createAnalyser();
-      an.fftSize = 1024;
-      ctx.createMediaStreamSource(stream).connect(an);
-      const buf = new Float32Array(an.fftSize);
-      return await new Promise<boolean>((resolve) => {
-        const t0 = Date.now();
-        let floor = Infinity;
-        let heard = false;
-        let anySignal = false; // a suspended/broken analyser reads all zeros
-        let lastLoud = t0;
-        const timer = setInterval(() => {
-          an.getFloatTimeDomainData(buf);
-          let sum = 0;
-          for (const v of buf) sum += v * v;
-          const rms = Math.sqrt(sum / buf.length);
-          if (rms > 0) anySignal = true;
-          // Floor drops instantly, rises slowly, so speech barely moves it.
-          floor = rms < floor ? rms : floor + (rms - floor) * 0.01;
-          const now = Date.now();
-          if (rms > Math.max(0.01, floor * 3)) {
-            heard = true;
-            lastLoud = now;
-          }
-          const done =
-            now - t0 >= maxMs ||
-            (heard ? now - lastLoud >= silenceMs : anySignal && now - t0 >= noSpeechMs) ||
-            !this.recording;
-          if (done) {
-            clearInterval(timer);
-            // An all-zero analyser can't tell silence from speech: say heard, so a
-            // caller that drops "no speech" captures never drops a real command.
-            resolve(heard || !anySignal);
-          }
-        }, 50);
-      });
-    } catch {
-      await new Promise((r) => setTimeout(r, maxMs)); // no Web Audio: old fixed window
-      return true;
-    } finally {
-      void ctx?.close().catch(() => {});
-    }
-  }
-
   cancel(): void {
     try {
       this.recorder?.stop();

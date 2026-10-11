@@ -722,6 +722,11 @@ export default function App() {
               <span>
                 <Icon name="alert" size={15} /> {w.text}
               </span>
+              {w.action && (
+                <button className="hud-warn-act" onClick={w.action.run}>
+                  {w.action.label}
+                </button>
+              )}
               <button aria-label="Dismiss" onClick={() => dismissWarning(w.id)}>
                 <Icon name="close" size={14} />
               </button>
