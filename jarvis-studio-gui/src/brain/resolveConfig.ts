@@ -31,6 +31,7 @@ export interface StoredKeys {
   openrouterKey?: string;
   mistralKey?: string;
   nvidiaKey?: string;
+  tavilyKey?: string;
   model?: string;
   pinnedLocation?: string;
   /** auto | vertex | gemini | groq | openrouter | nvidia | mistral */
@@ -94,11 +95,13 @@ export function resolveBrainConfig(stored: StoredKeys): BrainConfig {
   const groqKeys = splitKeys(stored.groqKey);
   if (geminiKeys.length) keys.gemini = geminiKeys;
   if (groqKeys.length) keys.groq = groqKeys;
-  // The pooled free providers only ever add fallback routes (routes.ts).
+  // The pooled free providers only ever add fallback routes (routes.ts); Tavily is
+  // web search only, never a route.
   for (const [id, raw] of [
     ["openrouter", stored.openrouterKey],
     ["mistral", stored.mistralKey],
     ["nvidia", stored.nvidiaKey],
+    ["tavily", stored.tavilyKey],
   ] as const) {
     const split = splitKeys(raw);
     if (split.length) keys[id] = split;

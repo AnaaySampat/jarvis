@@ -1283,6 +1283,7 @@ export function useBrain() {
       has_openrouter_key: Boolean(stored.openrouterKey),
       has_mistral_key: Boolean(stored.mistralKey),
       has_nvidia_key: Boolean(stored.nvidiaKey),
+      has_tavily_key: Boolean(stored.tavilyKey),
       storage_dir: "device",
       model_override: stored.model || "",
       // The provider the user scoped routing to ("auto" or an id). Resolved, not
@@ -1441,6 +1442,7 @@ export function useBrain() {
         ["openrouterKey", "openrouter_api_key"],
         ["mistralKey", "mistral_api_key"],
         ["nvidiaKey", "nvidia_api_key"],
+        ["tavilyKey", "tavily_api_key"],
       ]
         .filter(([, wireName]) => typeof cfg[wireName] === "string")
         .map(([name, wireName]) => [name, cfg[wireName].trim()]);

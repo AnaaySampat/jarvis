@@ -155,3 +155,54 @@ describe("webSearch — grounds only where the free tier allows it", () => {
     expect(postJson).toHaveBeenCalledTimes(4);
   });
 });
+
+describe("webSearch — Tavily backs up Gemini grounding", () => {
+  const withTavily = (gemini: string[]): HttpToolCtx => {
+    const c = ctx();
+    c.config.keys.gemini = gemini;
+    c.config.keys.tavily = ["tvly-1"];
+    return c;
+  };
+  const tavilyAnswer = {
+    answer: "Spain won.",
+    results: [{ title: "Final report", url: "https://ex.com/a", content: "Spain beat England 2-1." }],
+  };
+  const isTavily = (call: unknown[]) => String(call[0]).includes("api.tavily.com");
+
+  beforeEach(() => {
+    quota.setStorage(null);
+    quota.reset();
+  });
+
+  it("is never called while Gemini answers", async () => {
+    postJson.mockResolvedValue({ candidates: [{ content: { parts: [{ text: "42" }] } }] });
+    await webSearch("x", withTavily(["k"]));
+    expect(postJson.mock.calls.some(isTavily)).toBe(false);
+  });
+
+  it("answers when every Gemini key is rate-limited", async () => {
+    postJson.mockImplementation(async (url: string) => {
+      if (url.includes("api.tavily.com")) return tavilyAnswer;
+      throw new Error("HTTP 429: quota");
+    });
+    const r = await webSearch("who won", withTavily(["k"]));
+    expect(r.ok).toBe(true);
+    expect(r.summary).toMatch(/Spain won/);
+    expect(r.data).toEqual({ sources: [{ title: "Final report", uri: "https://ex.com/a" }] });
+    const tavilyCall = postJson.mock.calls.find(isTavily)!;
+    expect((tavilyCall[2] as { headers: Record<string, string> }).headers.Authorization).toBe("Bearer tvly-1");
+  });
+
+  it("answers with no Gemini key at all", async () => {
+    postJson.mockResolvedValue(tavilyAnswer);
+    expect((await webSearch("who won", withTavily([]))).ok).toBe(true);
+  });
+
+  it("reports both failures, never a success, when the backup fails too", async () => {
+    postJson.mockRejectedValue(new Error("HTTP 432"));
+    const r = await webSearch("who won", withTavily(["k"]));
+    expect(r.ok).toBe(false);
+    expect(r.summary).toMatch(/Tavily backup failed too/);
+    expect(r.summary).toMatch(/432/);
+  });
+});

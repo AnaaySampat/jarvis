@@ -353,6 +353,7 @@ export default function Settings({
   const [openrouterKey, setOpenrouterKey] = useState("");
   const [mistralKey, setMistralKey] = useState("");
   const [nvidiaKey, setNvidiaKey] = useState("");
+  const [tavilyKey, setTavilyKey] = useState("");
   const [elevenKey, setElevenKey] = useState("");
   const [mapsKey, setMapsKey] = useState("");
   const [sysAlerts, setSysAlerts] = useState(!!sysInfo.system_alerts);
@@ -417,6 +418,7 @@ export default function Settings({
     if (openrouterKey.trim()) cfg.openrouter_api_key = openrouterKey.trim();
     if (mistralKey.trim()) cfg.mistral_api_key = mistralKey.trim();
     if (nvidiaKey.trim()) cfg.nvidia_api_key = nvidiaKey.trim();
+    if (tavilyKey.trim()) cfg.tavily_api_key = tavilyKey.trim();
     if (elevenKey.trim()) cfg.elevenlabs_api_key = elevenKey.trim();
     if (mapsKey.trim()) cfg.google_maps_key = mapsKey.trim();
     return cfg;
@@ -810,6 +812,20 @@ export default function Settings({
           </div>
         </Group>
       )}
+      {IS_MOBILE && (
+        <Group title="Web search backup">
+          <KeyField
+            label="Tavily"
+            configured={sysInfo.has_tavily_key}
+            note="Used only when Gemini search can't answer — no key, or every key rate-limited."
+            value={tavilyKey}
+            onChange={setTavilyKey}
+            placeholder="tvly-…"
+            removeName="tavily_api_key"
+            onSave={onSave}
+          />
+        </Group>
+      )}
       {!IS_MOBILE && (
         <Group title="Voice and places">
           <KeyField
@@ -1170,7 +1186,15 @@ export default function Settings({
   /* ── Index: every page with its live readout ── */
 
   const keyFlags = IS_MOBILE
-    ? ["vertex_sa", "groq_key", "gemini_key", "openrouter_key", "nvidia_key", "mistral_key"]
+    ? [
+        "vertex_sa",
+        "groq_key",
+        "gemini_key",
+        "openrouter_key",
+        "nvidia_key",
+        "mistral_key",
+        "tavily_key",
+      ]
     : ["groq_key", "gemini_key", "elevenlabs_key", "google_maps_key"];
   const keyCount = keyFlags.filter((k) => sysInfo[`has_${k}`]).length;
   const rankedCount = sysInfo.routing?.models?.length ?? 0;

@@ -364,8 +364,10 @@ export class WakeWordListener {
       return await withTimeout(
         (async () => {
           await this.rec.start();
-          await this.rec.untilSilence(ms);
-          return this.rec.stop();
+          const heard = await this.rec.untilSilence(ms);
+          const blob = await this.rec.stop();
+          // Nothing said after the wake: don't pay Whisper to invent a phantom command.
+          return heard ? blob : null;
         })(),
         CAPTURE_TIMEOUT_MS,
         "mic capture",

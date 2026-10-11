@@ -99,7 +99,9 @@ garbage) — without a Gemini key an unknown model just gets a low guessed score
 "Not available" on the free tier for every 3.x model, and free on the 2.5 pair (500
 requests/day, shared) — pricing page, checked 2026-09-27. `web_search` walks both models ×
 every Gemini key, skipping routes `quota.ts` already has benched; it doesn't bench routes
-itself (a grounding limit isn't the chat quota).
+itself (a grounding limit isn't the chat quota). An optional Tavily key (Settings ▸ API
+keys ▸ Web search backup, Keystore name `tavilyKey`) is tried only when grounding can't
+answer — no Gemini key, every route failed, or an empty reply. Tavily is never a chat route.
 
 `routesFor()` maps the request class to a tier (dumb→fast, smart→mid, very-smart→flagship)
 and puts the ranked ladder first: that tier best-first, then stronger tiers, then weaker.

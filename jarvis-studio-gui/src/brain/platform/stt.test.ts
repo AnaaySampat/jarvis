@@ -48,8 +48,9 @@ describe("MicRecorder.untilSilence", () => {
 
   it("falls back to the full window when the analyser reads silence-zero (suspended)", async () => {
     vi.useFakeTimers();
-    const [ms] = await elapsedUntilDone([0], 6000);
+    const [ms, heard] = await elapsedUntilDone([0], 6000);
     expect(ms).toBeGreaterThanOrEqual(6000);
+    expect(heard).toBe(true); // can't tell, so the capture must not be dropped
   });
 });
 

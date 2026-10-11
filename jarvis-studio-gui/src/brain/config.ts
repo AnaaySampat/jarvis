@@ -30,6 +30,8 @@ export interface BrainConfig {
     openrouter?: string[];
     mistral?: string[];
     nvidia?: string[];
+    /** Web-search backup when Gemini grounding can't answer. Not a chat model. */
+    tavily?: string[];
   };
   pinnedLocation?: string;
   /** GCP project id for Vertex AI (mobile: paired with Gemini/Vertex API key). */

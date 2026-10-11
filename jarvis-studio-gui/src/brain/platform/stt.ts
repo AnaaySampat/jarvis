@@ -129,7 +129,9 @@ export class MicRecorder {
             !this.recording;
           if (done) {
             clearInterval(timer);
-            resolve(heard);
+            // An all-zero analyser can't tell silence from speech: say heard, so a
+            // caller that drops "no speech" captures never drops a real command.
+            resolve(heard || !anySignal);
           }
         }, 50);
       });

@@ -215,7 +215,8 @@ the APK to the phone and open it there, after allowing installs from that source
 JARVIS needs at least one free key — [Google AI Studio](https://aistudio.google.com/)
 (Gemini) or [Groq](https://console.groq.com/) — entered in the app's Settings. OpenRouter,
 NVIDIA and Mistral keys are optional extra fallbacks; a Vertex AI service-account JSON
-works too. Keys are stored on the phone encrypted with an Android Keystore key, are only
+works too. An optional [Tavily](https://tavily.com/) key backs up web search when Gemini
+can't answer. Keys are stored on the phone encrypted with an Android Keystore key, are only
 sent to the provider they belong to, and there are none in this repository.
 
 Giving an assistant control of your phone is a real trust decision. What the app does to

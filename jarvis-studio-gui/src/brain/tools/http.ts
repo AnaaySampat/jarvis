@@ -211,6 +211,52 @@ export const GROUNDING_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
 export async function webSearch(query: string, ctx: HttpToolCtx): Promise<ToolResult> {
   const q = (query ?? "").trim();
   if (!q) return { ok: false, summary: "What should I look up, sir?" };
+  // Gemini grounding first; Tavily only when it can't answer (no key, every key
+  // rate-limited — it shares the quota chat and phone tasks spend — or empty).
+  const grounded = await geminiSearch(q, ctx);
+  const tavilyKeys = ctx.config.keys.tavily ?? [];
+  if (grounded.ok || !tavilyKeys.length) return grounded;
+  const backup = await tavilySearch(q, tavilyKeys);
+  if (backup.ok) return backup;
+  return {
+    ok: false,
+    summary: `${grounded.summary} The Tavily backup failed too (${backup.summary}).`,
+  };
+}
+
+async function tavilySearch(q: string, keys: string[]): Promise<ToolResult> {
+  let lastErr = "";
+  for (const key of keys) {
+    try {
+      const json = await postJson<TavilyResponse>(
+        "https://api.tavily.com/search",
+        JSON.stringify({ query: q, search_depth: "basic", max_results: 5, include_answer: true }),
+        {
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          timeoutMs: 15000,
+        },
+      );
+      const results = (json.results ?? []).filter((r) => r.content || r.title);
+      const snippets = results.slice(0, 3).map((r) => `- ${r.title ?? ""}: ${r.content ?? ""}`);
+      const summary = [json.answer?.trim(), snippets.join("\n")].filter(Boolean).join("\n\n");
+      if (!summary) return { ok: false, summary: "no results" };
+      const sources = results
+        .filter((r) => r.url)
+        .map((r) => ({ title: r.title || r.url!, uri: r.url! }));
+      return { ok: true, summary, data: { sources } };
+    } catch (err) {
+      lastErr = String(err);
+    }
+  }
+  return { ok: false, summary: lastErr || "no key" };
+}
+
+interface TavilyResponse {
+  answer?: string;
+  results?: Array<{ title?: string; url?: string; content?: string }>;
+}
+
+async function geminiSearch(q: string, ctx: HttpToolCtx): Promise<ToolResult> {
   // Grounded search is a one-shot side call, not a chat turn: it walks its own short
   // ladder (both grounding models × every Gemini key) rather than the chat ladder.
   const keys = ctx.config.keys.gemini ?? [];

@@ -7,6 +7,7 @@ export const CONFIG_SECRET_FIELDS = [
   "openrouterKey",
   "mistralKey",
   "nvidiaKey",
+  "tavilyKey",
 ] as const;
 export type ConfigSecretName = (typeof CONFIG_SECRET_FIELDS)[number];
 export type ConfigSecrets = Partial<Record<ConfigSecretName, string>>;

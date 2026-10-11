@@ -21,6 +21,7 @@ vi.mock("../tools/httpClient", () => ({ inTauri: () => true, platformFetch: () =
 
 // MicRecorder.start() is the unbounded await that could wedge `handling`.
 let startBehaviour: () => Promise<void> = async () => {};
+let speechHeard = true;
 const cancelSpy = vi.fn();
 vi.mock("./stt", () => ({
   MicRecorder: class {
@@ -28,7 +29,7 @@ vi.mock("./stt", () => ({
       return startBehaviour();
     }
     untilSilence() {
-      return Promise.resolve(true);
+      return Promise.resolve(speechHeard);
     }
     stop() {
       return Promise.resolve(new Blob(["x"]));
@@ -68,6 +69,7 @@ beforeEach(() => {
   invokeMock.mockReset();
   cancelSpy.mockReset();
   startBehaviour = async () => {};
+  speechHeard = true;
   invokeMock.mockResolvedValue({ seq: 0, listening: true });
 });
 
@@ -177,6 +179,14 @@ describe("the wake audio check", () => {
     expect(onCommand).not.toHaveBeenCalled();
     expect(cancelSpy).toHaveBeenCalled();
     expect(transcribe).toHaveBeenCalledTimes(1); // the overheard command is never sent off
+  });
+
+  it("never sends a silent command capture to Whisper", async () => {
+    speechHeard = false; // woke, then nobody said anything
+    const { onWake, onCommand, transcribe } = listen("Hey Jarvis.");
+    await run(onWake, WAV);
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(transcribe).toHaveBeenCalledTimes(1); // the wake check only
   });
 
   it("lets the wake through when the check can't run", async () => {

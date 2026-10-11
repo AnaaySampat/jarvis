@@ -31,6 +31,7 @@ internal class SecureSecretStore(
         private const val GCM_TAG_BITS = 128
         private val ALLOWED_NAMES = setOf(
             "geminiKey", "groqKey", "vertexSaJson", "openrouterKey", "mistralKey", "nvidiaKey",
+            "tavilyKey",
         )
     }
 

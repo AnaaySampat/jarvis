@@ -30,6 +30,7 @@
         { "url": "https://openrouter.ai/*" },
         { "url": "https://api.mistral.ai/*" },
         { "url": "https://integrate.api.nvidia.com/*" },
+        { "url": "https://api.tavily.com/*" },
         { "url": "https://oauth2.googleapis.com/*" },
         { "url": "https://aiplatform.googleapis.com/*" },
         { "url": "https://*.aiplatform.googleapis.com/*" },
