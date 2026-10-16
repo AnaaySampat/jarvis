@@ -21,8 +21,8 @@ the app**, so the phone needs no server and no Python.
 | | |
 |---|---|
 | **What it is** | Tauri 2 (Rust shell) + React HUD + a TypeScript brain + a Kotlin Android plugin |
-| **App id / version** | `com.jarvis.app` / 0.1.0 |
-| **State** | Experimental. Debug APK runs on a real phone (Samsung, Android 16); unit tests green in CI. What is live-verified vs only built is tracked in [docs/STATUS.md](docs/STATUS.md) |
+| **App id / version** | `com.jarvis.app` / see the [latest release](https://github.com/AnaaySampat/jarvis/releases/latest) |
+| **State** | Experimental. Tested on one phone (Samsung, Android 16); unit tests green in CI. [Tell us how it runs on yours](https://github.com/AnaaySampat/jarvis/issues/new/choose). What is live-verified vs only built is tracked in [docs/STATUS.md](docs/STATUS.md) |
 | **Docs** | [Architecture](docs/ARCHITECTURE.md) · [Status](docs/STATUS.md) · [Security](docs/SECURITY.md) |
 
 ---
@@ -75,8 +75,7 @@ The quickest way to try it: download **`jarvis-release.apk`** from the
 phone and allow installing from that source. It's for 64-bit ARM phones (every modern
 Android phone), Android 7.0 or newer. Then follow [First run](#5-first-run) below.
 
-The release also has a debug APK. It's much bigger and only useful if you want to inspect
-the app with developer tools.
+Developers who want a debuggable build can make one with the steps below.
 
 > Early builds are signed with a development key. A later build signed with the final
 > key may need you to uninstall this one first, which clears the app's data.

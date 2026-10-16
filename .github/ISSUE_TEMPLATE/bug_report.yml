@@ -1,0 +1,58 @@
+name: Bug report
+description: Something didn't work on your phone
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying JARVIS. It has only been tested on one phone so far, so reports from other devices are the most useful thing you can send.
+        **Don't paste API keys, service-account JSON or pairing tokens.**
+  - type: input
+    id: phone
+    attributes:
+      label: Phone model
+      placeholder: e.g. Pixel 7, Galaxy S23, Redmi Note 12
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android version
+      placeholder: e.g. Android 14
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: JARVIS version
+      description: The release you downloaded, or Android Settings ▸ Apps ▸ JARVIS.
+      placeholder: e.g. 2.2.1
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it go wrong?
+      options:
+        - Installing the APK
+        - First-run setup / API keys
+        - Chat or voice replies
+        - '"Hey Jarvis" wake word'
+        - Phone control (driving other apps)
+        - Remote PC
+        - TV control
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: AI provider
+      placeholder: e.g. Gemini, Vertex AI, Groq, Auto
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you said or tapped, what you expected, and what JARVIS did instead. Screenshots help.
+    validations:
+      required: true
