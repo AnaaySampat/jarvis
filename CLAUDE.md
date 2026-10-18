@@ -46,6 +46,10 @@ adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-u
 adb shell am start -n com.jarvis.app/.MainActivity
 ```
 
+No phone? `.\scripts\emulator.ps1` (from the repo root) creates the `jarvis_test` AVD on
+first run, boots it, installs the debug APK and launches it. `-Build` rebuilds the APK for
+arm64 + x86_64 first (one APK for phone and emulator); `-Mic` passes the laptop mic in.
+
 **`tauri android dev` hangs after building — do not use it.** Use `tauri android build`
 (it exits cleanly), then `adb install` + `adb shell am start` manually.
 
@@ -53,9 +57,9 @@ adb shell am start -n com.jarvis.app/.MainActivity
 accessibility service and every phone task fails until the user re-enables it. Restart
 with `adb install -r` or `am start` instead.
 
-The emulator has no real mic and its software-GPU SystemUI ANRs under load (not an app
-bug) — it's boot/UI-only. Audio, wake word, accessibility control and remote-PC pairing
-all require a real device.
+The emulator is for UI, onboarding and chat. It renders on the host GPU now (the old
+software-GPU AVD is what made SystemUI ANR). Audio, wake word, accessibility control and
+remote-PC pairing are only verified on a real device; `-Mic` is untested with them.
 
 ## The rules that actually matter
 

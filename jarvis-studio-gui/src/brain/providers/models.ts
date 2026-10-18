@@ -9,6 +9,8 @@
 import { platformFetch } from "../tools/httpClient";
 import { modelClassFor } from "../modelPolicy";
 import { recordDiscovered } from "../modelRanker";
+import { splitKeys } from "../resolveConfig";
+import { getAccessToken, parseServiceAccountJson } from "./vertexAuth";
 
 export interface ModelOpt {
   value: string;
@@ -75,8 +77,13 @@ export async function discoverModels(keys: {
       kind: "auto",
     },
   ];
-  const hasGemini = Boolean((keys.gemini || "").trim());
-  const hasGroq = Boolean((keys.groq || "").trim());
+  // A stored key field can hold several keys, one per line. Listing with the whole
+  // string put a newline in the auth header, so discovery failed for anyone who
+  // pasted more than one; the first key is the user's primary.
+  const [gemini] = splitKeys(keys.gemini);
+  const [groqKey] = splitKeys(keys.groq);
+  const hasGemini = Boolean(gemini);
+  const hasGroq = Boolean(groqKey);
   const hasVertex = Boolean((keys.vertexSaJson || "").trim());
   // Vertex counts too — a Vertex-only user (SA JSON, no Gemini/Groq key) must still
   // get their model list. Returning here before the discovery below left the dropdown
@@ -91,8 +98,8 @@ export async function discoverModels(keys: {
     on ? fetch().catch(() => null) : Promise.resolve([] as ModelOpt[]);
   const [vtxR, gemR, groqR] = await Promise.all([
     list(hasVertex, () => vertexModels(keys.vertexSaJson!)),
-    list(hasGemini, () => geminiModels(keys.gemini!)),
-    list(hasGroq, () => groqModels(keys.groq!)),
+    list(hasGemini, () => geminiModels(gemini)),
+    list(hasGroq, () => groqModels(groqKey)),
   ]);
   const ids = (r: ModelOpt[] | null) => r && r.map((o) => o.value);
   recordDiscovered({ vertex: ids(vtxR), gemini: ids(gemR), groq: ids(groqR) });
@@ -157,6 +164,51 @@ async function groqModels(key: string): Promise<ModelOpt[]> {
   }
   out.sort((a, b) => a.value.localeCompare(b.value));
   return out.length ? out : GROQ_FREE_FALLBACK;
+}
+
+/** "rejected" only when the provider answered and refused the credential; a network
+ *  failure or an outage is "unverified", since the key may well be fine. */
+export type KeyCheck = "ok" | "rejected" | "unverified";
+
+/**
+ * First-run setup's live check of ONE credential: the listing call discovery makes
+ * (a token exchange for Vertex), without discovery's writes to smart routing.
+ * A 429 counts as ok — the provider recognised the key, it is just busy.
+ */
+export async function checkKey(
+  provider: "gemini" | "groq" | "vertex",
+  key: string,
+): Promise<KeyCheck> {
+  if (provider === "vertex") {
+    try {
+      parseServiceAccountJson(key);
+    } catch {
+      return "rejected"; // not JSON, or not a service-account file
+    }
+    try {
+      await getAccessToken(key);
+      return "ok";
+    } catch (e) {
+      // A refused JWT exchange, or a private key Web Crypto can't import.
+      return /access token: 4\d\d|DataError|InvalidCharacter/.test(String(e))
+        ? "rejected"
+        : "unverified";
+    }
+  }
+  try {
+    const res = await platformFetch(10000)(
+      provider === "gemini" ? `${GEMINI_MODELS_URL}?pageSize=1` : GROQ_MODELS_URL,
+      {
+        method: "GET",
+        headers:
+          provider === "gemini" ? { "x-goog-api-key": key } : { Authorization: `Bearer ${key}` },
+      },
+    );
+    if (res.ok || res.status === 429) return "ok";
+    return [400, 401, 403].includes(res.status) ? "rejected" : "unverified";
+  } catch {
+    return "unverified";
+  }
 }
 
 /**

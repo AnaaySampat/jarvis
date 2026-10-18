@@ -182,6 +182,38 @@ async function captureScreenshotBase64(): Promise<string | null> {
   }
 }
 
+// ── Timed routines: native alarm → notification → tap (RoutineAlarms.kt) ──
+
+/** One timed routine as the native scheduler takes it: days as getDay() numbers
+ *  (0 = Sunday), so Kotlin never parses a days spec. */
+export interface RoutineAlarm {
+  name: string;
+  hour: number;
+  minute: number;
+  days: number[];
+  lastRun: string;
+}
+
+/** The native scheduler's reply. `exact` false = Android may hold the alarm a few
+ *  minutes; `notifications` false = nothing will show. */
+export interface RoutineSchedule {
+  ok: boolean;
+  summary: string;
+  exact: boolean;
+  notifications: boolean;
+  nextAt: number;
+}
+
+/** Replace every native routine alarm with `list`. Null off-device or on no reply. */
+export function scheduleRoutineAlarms(list: RoutineAlarm[]): Promise<RoutineSchedule | null> {
+  return phoneJson<RoutineSchedule>("schedule_routines", { routinesJson: JSON.stringify(list) });
+}
+
+/** The last routine notification tapped; `seq` bumps once per tap (polled, §5). */
+export function pollRoutineTap(): Promise<{ seq: number; name: string; date: string } | null> {
+  return phoneJson("poll_routine_tap", {});
+}
+
 // ── Read-only file access (Storage Access Framework) ──
 // Scoped to ONE user-granted folder tree at a time. The tree URI is persisted here
 // (not natively) so Settings can show/change it and every read_file/list_directory

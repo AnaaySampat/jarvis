@@ -1,6 +1,9 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.jarvis_studio_gui" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- The app's own dark base colour, so launch isn't a white flash before
+             the WebView paints. -->
+        <item name="android:windowBackground">#04070D</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#04070D</item>
     </style>
 </resources>

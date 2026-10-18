@@ -291,7 +291,7 @@ const BOOT_LINES = [
 // so: quicker, and tappable to cut straight through.
 const BOOT_STEP_MS = 190;
 const BOOT_HOLD_MS = 320;
-export function BootSequence({ onDone, name = "REACTOR CORE" }) {
+export function BootSequence({ onDone, name = "JARVIS" }) {
   const [line, setLine] = useState(0);
   const [gone, setGone] = useState(false);
   const finish = () => {

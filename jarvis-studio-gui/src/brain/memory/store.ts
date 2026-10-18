@@ -345,7 +345,7 @@ export class PersistentStore implements MemoryStore {
     if (turns.length) {
       const recents = readJson<ArchivedThread[]>(this.kv, RECENTS_KEY, []);
       const firstUser = turns.find((t) => t.role === "user");
-      const title = (firstUser?.content ?? "Conversation").slice(0, 60);
+      const title = (firstUser?.display ?? firstUser?.content ?? "Conversation").slice(0, 60);
       recents.push({ id: threadId(), title, savedAt: Date.now(), turns });
       writeJson(this.kv, RECENTS_KEY, recents.slice(-MAX_RECENTS));
     }

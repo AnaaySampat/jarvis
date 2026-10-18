@@ -94,6 +94,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::identity_verify_host_challenge,
             commands::identity_verify_host_envelope,
             commands::tv_shell,
+            commands::schedule_routines,
+            commands::poll_routine_tap,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

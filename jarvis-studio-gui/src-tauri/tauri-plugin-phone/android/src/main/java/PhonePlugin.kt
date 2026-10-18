@@ -177,6 +177,12 @@ internal class TaskIdArgs {
 }
 
 @InvokeArg
+internal class ScheduleRoutinesArgs {
+    /** [{name, hour, minute, days: [0-6, 0 = Sunday], lastRun}] — see RoutineAlarms. */
+    var routinesJson: String = "[]"
+}
+
+@InvokeArg
 internal class OperatorStartArgs {
     var taskId: String = ""
     var goal: String = ""
@@ -769,6 +775,36 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     fun pollStopOverlay(invoke: Invoke) {
         invoke.resolve(JSObject().apply {
             put("seq", JarvisAccessibilityService.stopTapSeq.get())
+        })
+    }
+
+    // ── Timed routines: native alarm → notification → tap (RoutineAlarms.kt) ──
+
+    /** JS hands over every timed routine whenever the list changes. The reply says what
+     *  the phone can actually do, so JS never promises a notification it can't post. */
+    @Command
+    fun scheduleRoutines(invoke: Invoke) {
+        val args = invoke.parseArgs(ScheduleRoutinesArgs::class.java)
+        try {
+            val s = RoutineAlarms.sync(activity.applicationContext, args.routinesJson)
+            invoke.resolve(result(true, "${s.count} timed routine(s) scheduled.").apply {
+                put("exact", s.exact)
+                put("notifications", s.notifications)
+                put("nextAt", s.nextAt)
+            })
+        } catch (e: Exception) {
+            invoke.resolve(result(false, "Couldn't schedule routines: ${e.message}"))
+        }
+    }
+
+    /** Polled by JS (same pattern as pollWakeWord): the last routine notification tapped. */
+    @Command
+    fun pollRoutineTap(invoke: Invoke) {
+        val t = RoutineAlarms.tap
+        invoke.resolve(JSObject().apply {
+            put("seq", t.seq)
+            put("name", t.name)
+            put("date", t.date)
         })
     }
 
@@ -1402,6 +1438,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                     put("ok", true)
                     put("summary", row.state)
                     put("taskId", row.taskId)
+                    put("goal", row.goal)
                     put("state", row.state)
                     put("step", row.step)
                     put("receipt", row.receipt)

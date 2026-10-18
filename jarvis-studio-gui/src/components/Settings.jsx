@@ -276,6 +276,7 @@ function RoutingSection({ routing, onRerank }) {
 /* ── Settings ──────────────────────────────────────────────────────────────── */
 
 export default function Settings({
+  initialPage, // open on this page (the home screen's Status rows link straight in)
   sysInfo,
   onClose,
   onSave,
@@ -293,7 +294,7 @@ export default function Settings({
 
   // ponytail: read once on open; resizing across the breakpoint mid-session keeps the first layout.
   const [wide] = useState(() => window.matchMedia?.(WIDE_QUERY).matches ?? false);
-  const [page, setPage] = useState(wide ? "models" : null);
+  const [page, setPage] = useState(initialPage || (wide ? "models" : null));
 
   // Android back: leave the page first, then close Settings.
   useAndroidBack(true, () => (!wide && page ? setPage(null) : onClose()));

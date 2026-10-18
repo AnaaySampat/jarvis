@@ -3,7 +3,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "J.A.R.V.I.S"
+        "title": "J.A.R.V.I.S",
+        "backgroundColor": "#04070d"
       }
     ]
   }

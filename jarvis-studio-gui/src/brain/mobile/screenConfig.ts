@@ -52,6 +52,27 @@ const DEFAULT_PANELS = {
 };
 
 /**
+ * Move a panel one place up (-1) or down (+1) in the phone's single column: the
+ * left rail, then the right. Each rail keeps its length so the desktop layout stays
+ * balanced, which means a panel crossing the boundary trades rails with its
+ * neighbour. Past either end it's a no-op.
+ */
+export function moveInColumn(
+  order: ScreenConfig["order"],
+  panel: string,
+  delta: number,
+): { left: string[]; right: string[] } {
+  const left = [...(order?.left ?? DEFAULT_PANELS.left)];
+  const right = [...(order?.right ?? DEFAULT_PANELS.right)];
+  const all = [...left, ...right];
+  const i = all.indexOf(panel);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= all.length) return { left, right };
+  [all[i], all[j]] = [all[j], all[i]];
+  return { left: all.slice(0, left.length), right: all.slice(left.length) };
+}
+
+/**
  * The tool schema advertises verbs to the model; this function branches on short
  * internal names. They shared no value, so EVERY customize_screen call fell to the
  * "I didn't understand that" branch. Translate here rather than renaming either
@@ -115,7 +136,10 @@ export function applyScreenAction(
   else if (a === "density" && value) patch.density = value;
   else if (a === "hide" && panel) patch.panels = { [panel]: false };
   else if (a === "show" && panel) patch.panels = { [panel]: true };
-  else if (a === "move" && panel && direction) {
+  else if (a === "move" && panel && (direction === "up" || direction === "down")) {
+    // Advertised, but only left/right had a branch: up/down indexed order["up"] and threw.
+    patch.order = moveInColumn(loadScreenConfig()?.order, panel, direction === "up" ? -1 : 1);
+  } else if (a === "move" && panel && (direction === "left" || direction === "right")) {
     const cfg = loadScreenConfig() ?? {};
     const order = {
       left: [...(cfg.order?.left ?? ["system", "power", "agenda"])],

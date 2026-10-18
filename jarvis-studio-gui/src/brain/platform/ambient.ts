@@ -12,7 +12,7 @@
 
 import { getJson } from "../tools/httpClient";
 import { ipGeoLookup } from "../tools/location";
-import { wmo } from "../wmoCodes";
+import { windUnit, wmo } from "../wmoCodes";
 
 export interface NetInfo {
   publicIp: string;
@@ -29,6 +29,9 @@ export interface AmbientLocation {
 export interface PanelWeather {
   temp: number | null;
   condition: string;
+  /** Glyph for the current condition. The hourly strip's first entry is a forecast
+   *  for this hour, which can disagree with it (rain beside "Overcast"). */
+  icon: string;
   location: string;
   humidity: number | null;
   wind: string;
@@ -64,6 +67,7 @@ interface OpenMeteo {
 
 /** Current conditions + next-hours strip for the Weather panel. */
 export async function fetchPanelWeather(loc: AmbientLocation): Promise<PanelWeather | null> {
+  const wind = windUnit();
   const url =
     "https://api.open-meteo.com/v1/forecast?" +
     new URLSearchParams({
@@ -73,7 +77,7 @@ export async function fetchPanelWeather(loc: AmbientLocation): Promise<PanelWeat
       hourly: "temperature_2m,weather_code",
       forecast_days: "2",
       timezone: "auto",
-      wind_speed_unit: "mph",
+      wind_speed_unit: wind.param,
     }).toString();
 
   let d: OpenMeteo;
@@ -83,7 +87,7 @@ export async function fetchPanelWeather(loc: AmbientLocation): Promise<PanelWeat
     return null;
   }
   const cur = d.current ?? {};
-  const [cond] = wmo(cur.weather_code);
+  const [cond, icon] = wmo(cur.weather_code);
 
   // Next 6 hours starting at the current hour.
   const hours: PanelWeather["hours"] = [];
@@ -102,9 +106,13 @@ export async function fetchPanelWeather(loc: AmbientLocation): Promise<PanelWeat
   return {
     temp: typeof cur.temperature_2m === "number" ? cur.temperature_2m : null,
     condition: cond,
+    icon,
     location: loc.place || "—",
     humidity: typeof cur.relative_humidity_2m === "number" ? cur.relative_humidity_2m : null,
-    wind: typeof cur.wind_speed_10m === "number" ? `${Math.round(cur.wind_speed_10m)} mph` : "—",
+    wind:
+      typeof cur.wind_speed_10m === "number"
+        ? `${Math.round(cur.wind_speed_10m)} ${wind.label}`
+        : "—",
     aqi: null,
     hours,
   };

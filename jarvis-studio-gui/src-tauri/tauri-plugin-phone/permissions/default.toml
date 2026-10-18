@@ -56,4 +56,6 @@ permissions = [
     "allow-identity-verify-host-challenge",
     "allow-identity-verify-host-envelope",
     "allow-tv-shell",
+    "allow-schedule-routines",
+    "allow-poll-routine-tap",
 ]

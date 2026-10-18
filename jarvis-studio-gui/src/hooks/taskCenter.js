@@ -15,10 +15,12 @@ export const TERMINAL_TASK_STATES = new Set([
   "done",
   "stopped",
 ]);
+// No "recovering": a recovered shell's state is unknown until the native journal or
+// the PC host answers, and this set drives the STOP pill and overlay. With the PC
+// offline, five old PC cursors held "PC task active" up indefinitely (2026-10-17).
 export const ACTIVE_TASK_STATES = new Set([
   "accepted",
   "queued",
-  "recovering",
   "planning",
   "policy_check",
   "executing",
@@ -65,7 +67,10 @@ function replaceTask(tasks, task) {
 }
 
 function appendReceipt(items, receipt, key, ok = true) {
-  if (!receipt) return items || [];
+  // "claim:…" is the operator's marker for the checkpoint before its completion check
+  // (OperatorCore.kt). Room keeps it as the row's receipt even after success, so it is
+  // neither a step nor evidence.
+  if (!receipt || receipt.startsWith("claim:")) return items || [];
   if ((items || []).some((item) => item.receiptKey === key)) return items || [];
   return [...(items || []), { kind: "step", line: receipt, ok, receiptKey: key }];
 }
@@ -232,7 +237,8 @@ export function reduceNativeStatus(prev, status, { recovered = false } = {}) {
     durable: true,
     source: "phone",
     kind: "phone",
-    goal: existing?.goal || "Recovered phone task",
+    // The journal's goal wins: a recovered shell's goal is only a placeholder.
+    goal: textOf(status.goal, existing?.goal) || "Recovered phone task",
     status: state,
     state,
     currentStep: Math.max(0, numeric(status.step, existing?.currentStep || 0)),

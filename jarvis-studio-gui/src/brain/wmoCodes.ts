@@ -1,6 +1,6 @@
 /**
- * WMO weather-code → [text, glyph]. Shared by tools/http.ts (spoken text only) and
- * platform/ambient.ts (text + HUD glyph). Port of weather.py's `_WMO` table.
+ * WMO weather-code → [text, glyph], and the wind unit. Shared by tools/http.ts (spoken
+ * text only) and platform/ambient.ts (text + HUD glyph). Port of weather.py's `_WMO` table.
  */
 export const WMO: Record<number, [string, string]> = {
   0: ["clear", "☀"],
@@ -35,4 +35,26 @@ export const WMO: Record<number, [string, string]> = {
 export function wmo(code: unknown): [string, string] {
   const n = Number(code);
   return Number.isFinite(n) && WMO[n] ? WMO[n] : ["—", "•"];
+}
+
+/** Regions whose road signs are in mph (plus US territories and the Crown dependencies).
+ *  Everywhere else reads wind in km/h. */
+const MPH_REGIONS = new Set("US GB LR MM PR GU VI AS MP IM JE GG".split(" "));
+
+/** Open-Meteo's `wind_speed_unit` and the label to print, from the phone's locale. A
+ *  locale without a region ("en") gets km/h: most of the world, and the phone's own
+ *  locale (en-IN) always carries one. */
+export function windUnit(locale: string = globalThis.navigator?.language ?? ""): {
+  param: "mph" | "kmh";
+  label: "mph" | "km/h";
+} {
+  let region: string | undefined;
+  try {
+    region = new Intl.Locale(locale).region;
+  } catch {
+    // empty or malformed locale → the default
+  }
+  return region && MPH_REGIONS.has(region)
+    ? { param: "mph", label: "mph" }
+    : { param: "kmh", label: "km/h" };
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import ViewportScale from "./hud/ViewportScale";
 import { JarvisHUD } from "./hud/HudApp";
-import { DEFAULT_DIRECTION } from "./hud/hudConstants";
+import { DEFAULT_DIRECTION, STATUS_META } from "./hud/hudConstants";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
@@ -12,6 +12,7 @@ import SetupProgress from "./components/SetupProgress";
 import BootOverlay from "./components/BootOverlay";
 import Customize from "./components/Customize";
 import AgentActivity from "./components/AgentActivity";
+import { ACTIVE_TASK_STATES } from "./hooks/taskCenter";
 import { syncBrowserPanel } from "./components/browserPanelWindow";
 import { syncControlOverlay } from "./components/controlOverlayWindow";
 import Icon from "./components/Icon";
@@ -28,18 +29,6 @@ const SECTION_KEY = {
   terminal: "terminal",
 };
 
-const TASK_ACTIVE_STATES = new Set([
-  "accepted",
-  "queued",
-  "recovering",
-  "planning",
-  "policy_check",
-  "executing",
-  "verifying",
-  "running",
-  "cancelling",
-]);
-
 // Mid-task clarify dialog: the autopilot hit genuine ambiguity and asked ONE
 // question. Holds its own input state so typing doesn't re-render the whole app.
 function ClarifyPrompt({ request, onRespond }) {
@@ -52,7 +41,7 @@ function ClarifyPrompt({ request, onRespond }) {
         <div className="perm-icon">
           <Icon name="help" size={26} />
         </div>
-        <div className="perm-kicker">JARVIS NEEDS YOUR INPUT</div>
+        <div className="perm-kicker">JARVIS needs an answer</div>
         <div className="perm-desc">{request.question}</div>
         <input
           className="clarify-input"
@@ -66,10 +55,10 @@ function ClarifyPrompt({ request, onRespond }) {
         />
         <div className="perm-actions">
           <button className="perm-deny" onClick={() => onRespond(request.id, "", request.taskId)}>
-            SKIP
+            Skip
           </button>
           <button className="perm-approve" disabled={!answer.trim()} onClick={submit}>
-            SEND
+            Send
           </button>
         </div>
       </div>
@@ -84,6 +73,7 @@ export default function App() {
     warnings,
     sysInfo,
     isConnected,
+    appControlOn,
     telemetry,
     netInfo,
     weather,
@@ -166,11 +156,16 @@ export default function App() {
 
   const unifiedTasks = taskCenterTasks || agentTasks || [];
   const anyTaskActive =
-    taskCenterActive ?? unifiedTasks.some((task) => TASK_ACTIVE_STATES.has(task.status));
+    taskCenterActive ?? unifiedTasks.some((task) => ACTIVE_TASK_STATES.has(task.status));
 
   // App owns the overlay state so JARVIS can drive them via ui_action too.
   const [chatOpen, setChatOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsPage, setSettingsPage] = useState(null); // a page to open Settings on
+  const openSettings = useCallback((page = null) => {
+    setSettingsPage(page);
+    setShowSettings(true);
+  }, []);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
   const [powerOpen, setPowerOpen] = useState(false);
@@ -178,6 +173,7 @@ export default function App() {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false); // Remote-PC pairing (mobile)
+  const openRemote = useCallback(() => setRemoteOpen(true), []);
   const [screenOpen, setScreenOpen] = useState(false); // Remote-desktop live view (mobile)
 
   // Effective HUD config: the base preset recolored by the user/JARVIS screen
@@ -395,7 +391,7 @@ export default function App() {
         break;
       case "open_settings":
       case "settings":
-        setShowSettings(true);
+        openSettings();
         break;
       case "close_settings":
         setShowSettings(false);
@@ -531,6 +527,16 @@ export default function App() {
           onDeleteConversation={deleteConversation}
           onRefreshConversations={listConversations}
           onClearConversations={clearConversations}
+          sysInfo={sysInfo}
+          appControlOn={appControlOn}
+          pcConfig={pcConfig}
+          pcState={pcState}
+          tvConfig={tvConfig}
+          onOpenSettings={openSettings}
+          onOpenRemote={openRemote}
+          onListen={triggerListen}
+          conversationMode={conversationMode}
+          onConversationMode={setConversationModeOn}
         />
       </ViewportScale>
 
@@ -539,8 +545,21 @@ export default function App() {
           on top of the chat header. */}
       {!chatOpen && !memoryOpen && (
         <div className="hud-fixed-controls">
-          {/* Tap-to-cut: stop whatever JARVIS is saying right now (only while speaking) */}
-          {status === "speaking" && (
+          {/* Phone: what JARVIS is doing stays in view once the core scrolls away. */}
+          {IS_MOBILE && (
+            <div className="hud-appbar-status" role="status">
+              <span
+                className="hud-appbar-dot"
+                style={{ background: (STATUS_META[status] ?? STATUS_META.idle).col }}
+              />
+              <span className="hud-appbar-state">
+                {(STATUS_META[status] ?? STATUS_META.idle).short}
+              </span>
+            </div>
+          )}
+          {/* Tap-to-cut: stop whatever JARVIS is saying right now (only while speaking).
+              The phone has the STOP pill for this, so a second stop here was clutter. */}
+          {status === "speaking" && !IS_MOBILE && (
             <button
               className="hud-fixed-btn hud-fixed-btn--silence"
               title="Stop speaking now"
@@ -558,28 +577,32 @@ export default function App() {
           >
             <Icon name={muted ? "volumeOff" : "volume"} />
           </button>
-          {/* Natural conversation mode (shorter, chattier replies) */}
-          <button
-            className={`hud-fixed-btn ${conversationMode ? "hud-fixed-btn--listening" : ""}`}
-            title={
-              conversationMode
-                ? "Conversation mode ON"
-                : "Conversation mode (natural, brief replies)"
-            }
-            aria-pressed={conversationMode}
-            onClick={() => setConversationModeOn(!conversationMode)}
-          >
-            <Icon name="chat" />
-          </button>
-          {/* Conversation log — always reachable on mobile (dock is far down the scroll) */}
-          <button
-            className={`hud-fixed-btn ${chatOpen ? "hud-fixed-btn--armed" : ""}`}
-            title="Open conversation log"
-            aria-pressed={chatOpen}
-            onClick={() => setChatOpen(true)}
-          >
-            <Icon name="terminal" />
-          </button>
+          {/* Natural conversation mode (shorter, chattier replies). The phone has it in
+              the chat header, and the dock's Chat for the log, so neither is up here. */}
+          {!IS_MOBILE && (
+            <button
+              className={`hud-fixed-btn ${conversationMode ? "hud-fixed-btn--listening" : ""}`}
+              title={
+                conversationMode
+                  ? "Conversation mode ON"
+                  : "Conversation mode (natural, brief replies)"
+              }
+              aria-pressed={conversationMode}
+              onClick={() => setConversationModeOn(!conversationMode)}
+            >
+              <Icon name="chat" />
+            </button>
+          )}
+          {!IS_MOBILE && (
+            <button
+              className={`hud-fixed-btn ${chatOpen ? "hud-fixed-btn--armed" : ""}`}
+              title="Open conversation log"
+              aria-pressed={chatOpen}
+              onClick={() => setChatOpen(true)}
+            >
+              <Icon name="terminal" />
+            </button>
+          )}
           {/* JARVIS's own web browser: open / close */}
           {browserState.available && (
             <button
@@ -598,7 +621,8 @@ export default function App() {
           {/* Agent Activity — JARVIS's autopilot steps + the screenshots it saw */}
           <button
             className={`hud-fixed-btn ${anyTaskActive ? "hud-fixed-btn--armed" : ""}`}
-            title="Task Center — durable progress, recovery, proof, and STOP"
+            title={anyTaskActive ? "Tasks — one is running" : "Tasks"}
+            aria-label={anyTaskActive ? "Tasks, one running" : "Tasks"}
             aria-pressed={activityOpen}
             onClick={() => setActivityOpen(true)}
           >
@@ -624,11 +648,17 @@ export default function App() {
           <button
             className="hud-fixed-btn"
             title="Customize the home screen"
+            aria-label="Customize the home screen"
             onClick={() => setCustomizeOpen(true)}
           >
             <Icon name="palette" />
           </button>
-          <button className="hud-fixed-btn" title="Settings" onClick={() => setShowSettings(true)}>
+          <button
+            className="hud-fixed-btn"
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => openSettings()}
+          >
             <Icon name="settings" />
           </button>
         </div>
@@ -737,6 +767,7 @@ export default function App() {
 
       {showSettings && (
         <Settings
+          initialPage={settingsPage}
           sysInfo={sysInfo}
           onClose={() => setShowSettings(false)}
           onSave={(cfg) => sendConfig(cfg)}
@@ -816,7 +847,7 @@ export default function App() {
       {isConnected &&
         sysInfo.needs_setup &&
         (IS_MOBILE ? (
-          <MobileOnboarding sysInfo={sysInfo} onSave={(cfg) => sendConfig(cfg)} />
+          <MobileOnboarding onSave={sendConfig} />
         ) : (
           <Onboarding sysInfo={sysInfo} onSave={(cfg) => sendConfig(cfg)} />
         ))}
@@ -834,7 +865,7 @@ export default function App() {
             <div className="perm-icon">
               <Icon name="alert" size={26} />
             </div>
-            <div className="perm-kicker">AUTHORISATION REQUIRED</div>
+            <div className="perm-kicker">Needs your approval</div>
             <div className="perm-desc">
               JARVIS wants to <strong>{permissionRequest.description}</strong>.
             </div>
@@ -853,13 +884,13 @@ export default function App() {
                     className="perm-deny"
                     onClick={() => respondPermission(permissionRequest.id, false)}
                   >
-                    DENY
+                    Deny
                   </button>
                   <button
                     className="perm-approve"
                     onClick={() => respondPermission(permissionRequest.id, true)}
                   >
-                    APPROVE
+                    Approve
                   </button>
                 </div>
               </>
@@ -879,7 +910,7 @@ export default function App() {
               <Icon name={phoneApproval.risk === "R3" ? "shield" : "alert"} size={26} />
             </div>
             <div className="perm-kicker">
-              {phoneApproval.risk === "R3" ? "CRITICAL ACTION" : "CONFIRM ACTION"}
+              {phoneApproval.risk === "R3" ? "Critical action" : "Confirm this action"}
             </div>
             <div className="perm-desc">
               JARVIS wants to <strong>{phoneApproval.reason}</strong>.
@@ -891,10 +922,10 @@ export default function App() {
             </div>
             <div className="perm-actions">
               <button className="perm-deny" onClick={() => resolvePhoneApproval("deny")}>
-                DENY
+                Deny
               </button>
               <button className="perm-approve" onClick={() => resolvePhoneApproval("allow")}>
-                ALLOW ONCE
+                Allow once
               </button>
             </div>
             {/* Never offered for R3 — a payment/credential/deletion step re-asks
@@ -902,7 +933,7 @@ export default function App() {
             {phoneApproval.risk === "R2" && (
               <div className="perm-actions">
                 <button className="perm-approve" onClick={() => resolvePhoneApproval("allow_task")}>
-                  ALLOW FOR THIS TASK
+                  Allow for this task
                 </button>
               </div>
             )}

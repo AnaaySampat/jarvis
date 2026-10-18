@@ -1,0 +1,464 @@
+/* First-run setup (MobileOnboarding.jsx). A full page, not a card over the HUD: on a
+   phone the HUD behind it only showed through as noise. */
+
+.ob {
+  --ob-bad: #ff7b7b;
+  --ob-warn: var(--warning, #ffb648);
+  --ob-line: color-mix(in srgb, var(--accent) 18%, transparent);
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: flex;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The WebView reports a 0px bottom inset under Android's gesture bar (emulator,
+     API 36), so keep a floor that clears the handle. */
+  padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px
+    calc(max(env(safe-area-inset-bottom, 0px), 16px) + 18px);
+  background:
+    radial-gradient(
+      110% 55% at 50% -12%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 62%
+    ),
+    var(--bg-base);
+  color: var(--text-pri);
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+.ob-inner {
+  width: 100%;
+  max-width: 440px;
+  min-height: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: ob-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes ob-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* ── Intro ── */
+.ob-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 6px;
+}
+.ob-word {
+  margin: 4px 0 18px;
+  padding-left: 0.34em; /* balances the trailing letter-spacing */
+  font-family: "Orbitron", "Inter", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  color: var(--accent);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.ob-title {
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.ob-lede {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--text-sec);
+}
+.ob-hero .ob-lede {
+  margin-top: 8px;
+  max-width: 34ch;
+}
+
+.ob-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.ob-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 14px 16px 16px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  border: 1px solid var(--ob-line);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.09s ease;
+}
+.ob-choice:first-child {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated));
+}
+.ob-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.ob-choice:active {
+  transform: scale(0.985);
+}
+.ob-choice:focus-visible,
+.ob-back:focus-visible,
+.ob-start:focus-visible,
+.ob-link:focus-visible,
+.ob-link:has(.ob-file:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ob-choice-ic {
+  flex: 0 0 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ob-choice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ob-choice-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ob-choice-desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-sec);
+}
+.ob-choice-go {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.ob-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--bg-base);
+  background: var(--accent);
+}
+
+/* ── Keys step ── */
+.ob-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+}
+.ob-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -8px;
+  padding: 8px 10px 8px 6px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.ob-back:active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ob-crumb {
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ob-nav + .ob-title {
+  margin-top: 4px;
+}
+
+.ob-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ob-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 80%, transparent);
+  transition: border-color 0.2s;
+}
+.ob-field--ok {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.ob-field--rejected,
+.ob-field--partial {
+  border-color: color-mix(in srgb, var(--ob-bad) 55%, transparent);
+}
+.ob-field-hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ob-field-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ob-field-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ob-opt {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.ob-field-purpose {
+  font-size: 12.5px;
+  color: var(--text-sec);
+}
+
+.ob-lamp {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.ob-lamp::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+.ob-lamp--checking::before {
+  border-color: var(--accent);
+  border-right-color: transparent;
+  width: 9px;
+  height: 9px;
+  animation: ob-spin 0.7s linear infinite;
+}
+.ob-lamp--ok {
+  color: var(--accent);
+}
+.ob-lamp--ok::before {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.ob-lamp--unverified {
+  color: var(--ob-warn);
+}
+.ob-lamp--unverified::before {
+  background: var(--ob-warn);
+}
+.ob-lamp--rejected,
+.ob-lamp--partial {
+  color: var(--ob-bad);
+}
+.ob-lamp--rejected::before,
+.ob-lamp--partial::before {
+  background: var(--ob-bad);
+}
+@keyframes ob-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ob-input {
+  width: 100%;
+  min-height: 46px;
+  max-height: 120px;
+  padding: 12px 13px;
+  resize: none;
+  field-sizing: content; /* grows with a second pasted key; fixed rows where unsupported */
+  border: 1px solid var(--ob-line);
+  border-radius: 10px;
+  background: var(--bg-base);
+  color: var(--text-pri);
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.ob-input--json {
+  min-height: 104px;
+  max-height: 180px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.ob-input::placeholder {
+  color: var(--text-muted);
+}
+.ob-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.ob-note {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ob-bad);
+}
+.ob-field--unverified .ob-note {
+  color: var(--ob-warn);
+}
+
+.ob-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.ob-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border-radius: 6px;
+  color: var(--accent-soft);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ob-link:active {
+  opacity: 0.7;
+}
+.ob-file {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ob-how {
+  margin-top: -4px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--text-sec);
+}
+.ob-how summary {
+  cursor: pointer;
+  color: var(--accent-soft);
+  padding: 4px 0;
+}
+.ob-how ol {
+  margin: 6px 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  line-height: 1.45;
+}
+
+.ob-hint {
+  display: flex;
+  gap: 9px;
+  padding: 0 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-sec);
+}
+.ob-hint .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+
+/* ── Footer ── */
+.ob-foot {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ob-start {
+  min-height: 52px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-dim));
+  color: var(--bg-base);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition:
+    filter 0.15s,
+    transform 0.09s ease,
+    opacity 0.15s;
+}
+.ob-start:active:not(:disabled) {
+  transform: scale(0.985);
+}
+.ob-start:disabled {
+  cursor: default;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+  color: var(--text-sec);
+  box-shadow: none;
+}
+.ob-error {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ob-bad);
+  text-align: center;
+}
+.ob-privacy {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-align: center;
+}
+.ob-privacy .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ob-inner--intro .ob-privacy {
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-inner,
+  .ob-lamp--checking::before {
+    animation: none;
+  }
+}

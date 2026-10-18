@@ -4,6 +4,10 @@
 // edit the same live state. Mirrors the named themes in actions/__init__.py.
 
 import ModalPanel from "./ModalPanel";
+import Sheet, { Group } from "./Sheet";
+import Icon from "./Icon";
+import { IS_MOBILE } from "../hooks/useAssistant";
+import { moveInColumn } from "../brain/mobile/screenConfig";
 
 const THEMES = {
   cyan: ["#00e5ff", "#6fe9ff", [0, 229, 255]],
@@ -29,7 +33,119 @@ const PANEL_LABELS = {
   terminal: "Terminal",
 };
 
+// The phone's names for the same panels (its cards are titled these).
+const CARD_LABELS = { ...PANEL_LABELS, system: "Device", power: "Battery", terminal: "Action log" };
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/* Phone: the same sheet as Settings and the dock's menus. The desktop's two rails
+   are one column here, so cards are one list (left rail, then right) moved with
+   explicit order patches; the merge-only phone store can't apply `move` verbs. */
+function PhoneCustomize({ screen, onClose, onPatch }) {
+  const s = screen || {};
+  const panels = s.panels || {};
+  const accent = (s.accent || "#00e5ff").toLowerCase();
+  const background = s.background || "grid";
+  const density = s.density || "normal";
+  const column = [
+    ...(s.order?.left ?? ["system", "power", "agenda"]),
+    ...(s.order?.right ?? ["weather", "network", "terminal"]),
+  ];
+  const choice = (value, options, key) => (
+    <div className="cz-seg" role="group">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          className={`cz-seg-btn ${value === o ? "is-on" : ""}`}
+          aria-pressed={value === o}
+          onClick={() => onPatch({ [key]: o })}
+        >
+          {cap(o)}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <Sheet open title="Home screen" onClose={onClose}>
+      <div className="sp-sheet">
+        <p className="sp-lede">Or just say it: “make the accent amber”, “hide the network card”.</p>
+        <Group title="Accent colour">
+          <div className="sp-field">
+            <div className="cz-swatches">
+              {Object.entries(THEMES).map(([name, [a, a2, rgb]]) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={`cz-swatch ${accent === a.toLowerCase() ? "cz-swatch--on" : ""}`}
+                  style={{ background: a }}
+                  aria-label={cap(name)}
+                  aria-pressed={accent === a.toLowerCase()}
+                  onClick={() => onPatch({ accent: a, accent2: a2, rgb })}
+                />
+              ))}
+            </div>
+          </div>
+        </Group>
+        <Group title="Background">
+          <div className="sp-field">{choice(background, BACKGROUNDS, "background")}</div>
+        </Group>
+        <Group title="Density">
+          <div className="sp-field">{choice(density, ["normal", "compact"], "density")}</div>
+        </Group>
+        <Group title="Cards">
+          {column.map((key, i) => {
+            const label = CARD_LABELS[key] || key;
+            const move = (delta) => onPatch({ order: moveInColumn(s.order, key, delta) });
+            return (
+              <div key={key} className="sp-field cz-card">
+                <span className="sp-label cz-card-name">{label}</span>
+                <button
+                  type="button"
+                  className="cz-move"
+                  disabled={i === 0}
+                  aria-label={`Move ${label} up`}
+                  onClick={() => move(-1)}
+                >
+                  <Icon name="chevronUp" size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="cz-move"
+                  disabled={i === column.length - 1}
+                  aria-label={`Move ${label} down`}
+                  onClick={() => move(1)}
+                >
+                  <Icon name="chevronDown" size={18} />
+                </button>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="sp-switch cz-card-switch"
+                  checked={panels[key] !== false}
+                  onChange={(e) => onPatch({ panels: { [key]: e.target.checked } })}
+                  aria-label={`Show ${label}`}
+                />
+              </div>
+            );
+          })}
+          <div className="sp-field">
+            <span className="sp-desc">The clock, Status and Routines always stay at the top.</span>
+          </div>
+        </Group>
+        <button
+          type="button"
+          className="sp-btn sp-btn--quiet"
+          onClick={() => onPatch({ reset: true })}
+        >
+          Reset to defaults
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 export default function Customize({ screen, onClose, onPatch }) {
+  if (IS_MOBILE) return <PhoneCustomize screen={screen} onClose={onClose} onPatch={onPatch} />;
   const s = screen || {};
   const panels = s.panels || {};
   const order = s.order || {

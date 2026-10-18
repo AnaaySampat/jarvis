@@ -19,7 +19,13 @@ import type { MemoryStore } from "../memory/store";
 import type { LocationService } from "./location";
 import { agendaStartMillis, runSchedule } from "../schedule/store";
 import { parseReminderDetail } from "../schedule/reminderTime";
-import { addRoutine, claimRoutine, describeRoutines, removeRoutine } from "../schedule/routines";
+import {
+  addRoutine,
+  claimRoutine,
+  describeRoutines,
+  removeRoutine,
+  timedRoutineNote,
+} from "../schedule/routines";
 import { addPlaybook, describePlaybooks, removePlaybook } from "../memory/playbooks";
 import { applyScreenAction } from "../mobile/screenConfig";
 import { benchFromNative } from "../ask";
@@ -339,13 +345,18 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
     // out through the normal tools, so each one still reports its own real result. ──
     case "routine": {
       switch (String(spec.do ?? "list").toLowerCase()) {
-        case "add":
-          return addRoutine({
+        case "add": {
+          const res = addRoutine({
             name: String(spec.name ?? ""),
             prompt: String(spec.prompt ?? ""),
             time: String(spec.time ?? ""),
             days: String(spec.days ?? ""),
           });
+          // When it'll run comes from the native scheduler's real reply, not a promise.
+          return res.ok && res.routine?.time
+            ? { ...res, summary: `${res.summary} ${await timedRoutineNote(res.routine)}` }
+            : res;
+        }
         case "remove":
           return removeRoutine(String(spec.match ?? spec.name ?? ""));
         case "run":

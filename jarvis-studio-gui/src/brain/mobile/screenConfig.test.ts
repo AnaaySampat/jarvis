@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { applyScreenAction } from "./screenConfig";
+import { applyScreenAction, moveInColumn } from "./screenConfig";
 import { toolPalette } from "../tools/registry";
 
 /** Minimal Storage stub — this suite runs in node, which has no localStorage.
@@ -80,7 +80,9 @@ describe("customize_screen", () => {
   });
 
   it("toggle_panel flips a visible panel off, then back on", () => {
-    expect(applyScreenAction("toggle_panel", "", "weather", "").config?.panels?.weather).toBe(false);
+    expect(applyScreenAction("toggle_panel", "", "weather", "").config?.panels?.weather).toBe(
+      false,
+    );
     expect(applyScreenAction("toggle_panel", "", "weather", "").config?.panels?.weather).toBe(true);
   });
 
@@ -98,7 +100,43 @@ describe("customize_screen", () => {
     expect(applyScreenAction("get", "", "", "").config).toBeUndefined();
   });
 
+  it("move_panel up/down reorders instead of throwing", () => {
+    const down = applyScreenAction("move_panel", "", "system", "down").config?.order;
+    expect(down?.left).toEqual(["power", "system", "agenda"]);
+    const up = applyScreenAction("move_panel", "", "system", "up").config?.order;
+    expect(up?.left).toEqual(["system", "power", "agenda"]);
+    expect(applyScreenAction("move_panel", "", "weather", "sideways").ok).toBe(false);
+  });
+
   it("still rejects an action it genuinely does not know", () => {
     expect(applyScreenAction("make_it_sparkle", "", "", "").ok).toBe(false);
+  });
+});
+
+describe("moveInColumn (the phone's one-column order)", () => {
+  const base = { left: ["system", "power", "agenda"], right: ["weather", "network", "terminal"] };
+
+  it("moves within a rail", () => {
+    expect(moveInColumn(base, "power", -1)).toEqual({
+      left: ["power", "system", "agenda"],
+      right: base.right,
+    });
+  });
+
+  it("crosses the rail boundary by trading with the neighbour, keeping rail sizes", () => {
+    expect(moveInColumn(base, "agenda", 1)).toEqual({
+      left: ["system", "power", "weather"],
+      right: ["agenda", "network", "terminal"],
+    });
+  });
+
+  it("is a no-op past either end or for an unknown panel", () => {
+    expect(moveInColumn(base, "system", -1)).toEqual(base);
+    expect(moveInColumn(base, "terminal", 1)).toEqual(base);
+    expect(moveInColumn(base, "nope", 1)).toEqual(base);
+  });
+
+  it("falls back to the default layout when nothing is stored", () => {
+    expect(moveInColumn(undefined, "system", 1).left).toEqual(["power", "system", "agenda"]);
   });
 });

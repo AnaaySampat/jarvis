@@ -30,12 +30,13 @@ export const DEFAULT_TELEMETRY = {
 // recoloured HUD moved, which reads as a rendering bug rather than a theme.
 // thinking/speaking/working keep their own hues: those distinguish *what JARVIS is
 // doing* at a glance, and collapsing them into one accent would lose that.
+// `short` is the one-word form for the phone's top bar.
 export const STATUS_META = {
-  idle: { label: 'STANDBY — say "Hey Jarvis"', col: "var(--ac2, #00c8ff)" },
-  listening: { label: "LISTENING…", col: "var(--ac, #00e5ff)" },
-  thinking: { label: "PROCESSING REQUEST…", col: "#78b4ff" },
-  speaking: { label: "RESPONDING…", col: "#ffb648" },
-  working: { label: "EXECUTING TASK…", col: "#22e39a" },
+  idle: { label: 'STANDBY — say "Hey Jarvis"', short: "Standby", col: "var(--ac2, #00c8ff)" },
+  listening: { label: "LISTENING…", short: "Listening", col: "var(--ac, #00e5ff)" },
+  thinking: { label: "THINKING…", short: "Thinking", col: "#78b4ff" },
+  speaking: { label: "SPEAKING…", short: "Speaking", col: "#ffb648" },
+  working: { label: "WORKING ON IT…", short: "Working", col: "#22e39a" },
 };
 
 /* Default HUD look — recolored per-user by hudConfig in App.jsx */

@@ -14,12 +14,22 @@ import { createBrain } from "../brain";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
-import { androidPlatform } from "../brain/platform";
+import { androidPlatform, pollRoutineTap } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
-import { dueRoutines, markRoutineRan, routineTurn } from "../brain/schedule/routines";
-import { loadScreenConfig, patchScreenConfig } from "../brain/mobile/screenConfig";
+import {
+  dueRoutines,
+  markRoutineRan,
+  routineTurn,
+  syncRoutineAlarms,
+  tappedRoutine,
+} from "../brain/schedule/routines";
+import {
+  applyScreenAction,
+  loadScreenConfig,
+  patchScreenConfig,
+} from "../brain/mobile/screenConfig";
 import { RemotePC } from "../brain/remote/pc";
 import { nativeTvShell } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
@@ -326,7 +336,9 @@ export function useBrain() {
   const onDispatched = useCallback(
     (spec, result) => {
       logCommand(spec, result);
-      if (spec?.type === "screen" && result?.data) setScreen(result.data);
+      // Re-read rather than trust result.data: a reset returns no config, and the
+      // HUD kept the old look until the next launch.
+      if (spec?.type === "screen" && result?.ok) setScreen(loadScreenConfig());
       const imageUrl = result?.data?.imageUrl;
       if (imageUrl && (spec?.type === "generate_image" || spec?.type === "qr_code")) {
         pendingCardsRef.current.push({
@@ -1351,12 +1363,14 @@ export function useBrain() {
   // Hard ceiling on one push-to-talk recording (see startListen).
   const listenTimerRef = useRef(undefined);
   const finishListenRef = useRef(null);
+  // `display` is what the user's bubble shows when it isn't what the brain gets — a
+  // routine run sends its steps but reads "Run bedtime". It's saved with the turn.
   const sendMessage = useCallback(
-    async (text) => {
+    async (text, display) => {
       const t = (text || "").trim();
       if (!t || busyRef.current) return;
       userInteractedRef.current = true; // gates the one-time overlay-permission prompt
-      setMessages((prev) => [...prev, { role: "user", text: t, id: uid() }]);
+      setMessages((prev) => [...prev, { role: "user", text: display || t, id: uid() }]);
       if (pcCommandModeRef.current) {
         busyRef.current = true;
         setStatus("thinking");
@@ -1393,7 +1407,7 @@ export function useBrain() {
       const replyId = uid();
       let spoken = "";
       try {
-        const reply = await brainRef.current.ask(t);
+        const reply = await brainRef.current.ask(t, display);
         spoken = reply;
         setMessages((prev) => [
           ...prev,
@@ -1423,25 +1437,42 @@ export function useBrain() {
 
   // Timed routines. Fires from here because this is the only place a brain turn can
   // run; the trade-off is it only happens while the WebView is awake (see routines.ts).
-  // Skips while a turn or recording is in flight and retries on the next tick, so a
-  // due routine never talks over the user.
+  // While JARVIS is closed a native alarm posts a notification instead, and a tap on it
+  // lands here too (each tap's seq handled once). Skips while a turn or recording is in
+  // flight and retries on the next tick, so a due routine never talks over the user.
+  // Waits for the Keystore keys: a cold start from the notification ticks at once, and a
+  // keyless turn would fail the routine and still count it as run.
+  useEffect(() => syncRoutineAlarms(), []);
+  const routineTapSeqRef = useRef(0);
   useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState !== "visible") return;
-      if (busyRef.current || listeningRef.current || !brainRef.current) return;
-      const due = dueRoutines()[0];
+    if (!secretsReady) return undefined;
+    const idle = () =>
+      document.visibilityState === "visible" &&
+      !busyRef.current &&
+      !listeningRef.current &&
+      brainRef.current;
+    const tick = async () => {
+      if (!idle()) return;
+      const tap = await pollRoutineTap();
+      if (!idle()) return;
+      let due;
+      if (tap && tap.seq !== routineTapSeqRef.current) {
+        routineTapSeqRef.current = tap.seq;
+        due = tappedRoutine(tap.name, tap.date);
+      }
+      due ??= dueRoutines()[0];
       if (!due) return;
       markRoutineRan(due.name);
-      void sendMessage(routineTurn(due));
+      void sendMessage(routineTurn(due), `Run ${due.name}`);
     };
-    tick();
+    void tick();
     const id = setInterval(tick, 30_000);
     document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [sendMessage]);
+  }, [sendMessage, secretsReady]);
 
   // Quick-action buttons fire a command without echoing a user bubble. On mobile we
   // just treat it as a normal turn (the brain decides whether to act/answer).
@@ -1536,12 +1567,15 @@ export function useBrain() {
   const listConversationsInner = async () => {
     const recents = await memoryRef.current.listRecents();
     setConversations(
-      recents.map((r) => ({
-        id: r.id,
-        title: r.title,
-        saved_at: r.savedAt,
-        preview: (r.turns.find((t) => t.role === "user")?.content ?? "").slice(0, 80),
-      })),
+      recents.map((r) => {
+        const first = r.turns.find((t) => t.role === "user");
+        return {
+          id: r.id,
+          title: r.title,
+          saved_at: r.savedAt,
+          preview: (first?.display ?? first?.content ?? "").slice(0, 80),
+        };
+      }),
     );
   };
   const newConversation = useCallback(async () => {
@@ -1553,7 +1587,7 @@ export function useBrain() {
   const turnsToMessages = (turns) =>
     turns.map((t) => ({
       role: t.role === "user" ? "user" : "jarvis",
-      text: t.content,
+      text: t.display ?? t.content,
       actions: [],
       finalized: true,
       id: uid(),
@@ -1835,6 +1869,20 @@ export function useBrain() {
   // ── Live HUD panels (battery / network / weather) ────────────────────────────
   // Real device signals so the Power, Network and Weather panels aren't dead zeros.
   useEffect(() => subscribeTelemetry(setTelemetry), []);
+
+  // Is the accessibility service on (the operator's hands)? Read on launch and each
+  // time JARVIS comes back to the front — turning it on happens in Android Settings.
+  const [appControlOn, setAppControlOn] = useState(null);
+  useEffect(() => {
+    const read = () => {
+      if (document.visibilityState === "visible") {
+        void androidPlatform.phone.isEnabled().then(setAppControlOn);
+      }
+    };
+    read();
+    document.addEventListener("visibilitychange", read);
+    return () => document.removeEventListener("visibilitychange", read);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -1984,8 +2032,14 @@ export function useBrain() {
   );
 
   const sendScreen = useCallback((patch) => {
-    const next = patchScreenConfig(patch || {});
-    setScreen(next);
+    // Customize's Reset sends the voice tool's verb; merging it stored a dead
+    // `reset` key and nothing changed.
+    if (patch?.reset) {
+      applyScreenAction("reset", "", "", "");
+      setScreen(loadScreenConfig());
+      return;
+    }
+    setScreen(patchScreenConfig(patch || {}));
   }, []);
 
   const runAction = useCallback(
@@ -2087,6 +2141,7 @@ export function useBrain() {
     sysInfo,
     isConnected: true, // in-app brain — always "connected" → boot overlay clears
     wakeTriggered,
+    appControlOn,
     telemetry,
     netInfo,
     weather,

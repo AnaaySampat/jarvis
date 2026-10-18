@@ -6,6 +6,7 @@
 
 import { platformFetch, withRetry } from "../tools/httpClient";
 import { bytesToBase64 } from "../tools/base64";
+import { splitKeys } from "../resolveConfig";
 
 const GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 // Full v3, not turbo: Groq lists 10.3% vs 12% WER, and both return a few-second
@@ -200,7 +201,9 @@ export async function transcribe(
   blob: Blob,
   keys: { groqKey?: string; vertexSaJson?: string; prompt?: string },
 ): Promise<string> {
-  const groqKey = (keys.groqKey || "").trim();
+  // The Groq field may hold several keys, one per line; the whole string in the
+  // Bearer header broke voice for anyone who pasted more than one.
+  const [groqKey] = splitKeys(keys.groqKey);
   const saJson = (keys.vertexSaJson || "").trim();
   if (!groqKey && !saJson) {
     throw new Error(

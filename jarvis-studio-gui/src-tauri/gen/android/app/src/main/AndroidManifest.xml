@@ -68,8 +68,10 @@
         android:theme="@style/Theme.jarvis_studio_gui"
         android:allowBackup="false"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- Every config change, so Android never relaunches the activity: tao ends the whole
+             process when it's destroyed. assetsPaths = an overlay changed (fonts, theme colours). -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"

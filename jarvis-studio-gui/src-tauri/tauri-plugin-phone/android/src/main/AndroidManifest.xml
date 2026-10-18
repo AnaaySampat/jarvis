@@ -14,6 +14,14 @@
          their other devices instead of living only inside JARVIS. Both are runtime
          permissions, requested on first use; if the user declines, the code falls
          back to an ACTION_INSERT picker that needs no permission at all. -->
+    <!-- Timed routines (RoutineAlarms.kt) are the one in-app AlarmManager alarm: what
+         fires is JARVIS itself, which the Clock app can't do. Exact, so a 19:21 routine
+         says so at 19:21 rather than whenever Doze lets an inexact alarm through.
+         USE_EXACT_ALARM is granted at install on Android 13+; SCHEDULE_EXACT_ALARM
+         covers 12 and older. Without either the code falls back to an inexact alarm. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -69,6 +77,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-requested accessibility automation with persistent Pause and Stop controls" />
         </service>
+
+        <!-- The routine alarm, and a time zone change (routine times are wall-clock). -->
+        <receiver
+            android:name="com.jarvis.phone.RoutineAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name="com.jarvis.phone.AutonomyBootReceiver"

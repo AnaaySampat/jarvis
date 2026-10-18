@@ -2,15 +2,16 @@ import { useState } from "react";
 import StateMessage from "./StateMessage";
 import ModalPanel from "./ModalPanel";
 import { stepIcon } from "../hooks/agentActivity";
+import { ACTIVE_TASK_STATES, TERMINAL_TASK_STATES } from "../hooks/taskCenter";
 
 const STATUS = {
   accepted: { label: "accepted", cls: "activity-pill--run" },
   queued: { label: "queued", cls: "activity-pill--run" },
   recovering: { label: "recovering…", cls: "activity-pill--run" },
   planning: { label: "planning…", cls: "activity-pill--run" },
-  policy_check: { label: "policy check…", cls: "activity-pill--run" },
-  executing: { label: "executing…", cls: "activity-pill--run" },
-  verifying: { label: "verifying…", cls: "activity-pill--run" },
+  policy_check: { label: "safety check…", cls: "activity-pill--run" },
+  executing: { label: "working…", cls: "activity-pill--run" },
+  verifying: { label: "checking…", cls: "activity-pill--run" },
   waiting_for_unlock: { label: "waiting for unlock", cls: "activity-pill--wait" },
   waiting_for_approval: { label: "approval needed", cls: "activity-pill--wait" },
   suspended: { label: "suspended safely", cls: "activity-pill--wait" },
@@ -22,19 +23,6 @@ const STATUS = {
   failed: { label: "failed ✕", cls: "activity-pill--fail" },
   stopped: { label: "stopped", cls: "activity-pill--fail" },
 };
-
-const TERMINAL = new Set(["succeeded", "failed", "cancelled", "done", "stopped"]);
-const ACTUATING = new Set([
-  "accepted",
-  "queued",
-  "recovering",
-  "planning",
-  "policy_check",
-  "executing",
-  "verifying",
-  "running",
-  "cancelling",
-]);
 
 function taskIcon(task) {
   if (task.kind === "phone" || task.source === "phone") return "PH";
@@ -72,11 +60,11 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
   const ordered = [...(tasks || [])].sort(
     (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
   );
-  const hasActive = ordered.some((task) => ACTUATING.has(task.status));
+  const hasActive = ordered.some((task) => ACTIVE_TASK_STATES.has(task.status));
 
   return (
     <ModalPanel
-      title="Task Center"
+      title="Tasks"
       onClose={onClose}
       className="activity-panel"
       actions={
@@ -97,20 +85,20 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
       <>
         {ordered.length === 0 ? (
           <StateMessage variant="empty" icon="inbox" title="No tasks yet">
-            PC and phone work you hand to JARVIS appears here with live progress, recovery
-            details and the evidence it verified against.
+            PC and phone work you hand to JARVIS appears here with live progress, recovery details
+            and the evidence it verified against.
           </StateMessage>
         ) : (
           <div className="activity-list">
             {ordered.map((task) => {
               const status = STATUS[task.status] || STATUS.running;
               const plan = planLines(task.plan);
-              const canStop = !TERMINAL.has(task.status);
+              const canStop = !TERMINAL_TASK_STATES.has(task.status);
               return (
                 <article key={task.id} className="activity-task">
                   <div className="activity-task-hd">
                     <span className="activity-task-ico">{taskIcon(task)}</span>
-                    <span className="activity-task-goal">{task.goal || "Aura task"}</span>
+                    <span className="activity-task-goal">{task.goal || "Task"}</span>
                     <span className={`activity-pill ${status.cls}`}>{status.label}</span>
                     {canStop && onStopTask && (
                       <button
@@ -187,10 +175,18 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
                   {task.summary && task.status !== "running" && (
                     <div className="activity-summary">{task.summary}</div>
                   )}
+                  {/* The receipt is a 64-hex digest: proof, but noise to read. Say what
+                      it means and keep it one tap away. Only the phone's `verified` flag
+                      (receipt-checked in taskCenter) earns the plain claim. */}
                   {task.proof && (
                     <div className="activity-proof">
-                      <span>Verification evidence</span>
-                      {printable(task.proof)}
+                      <span>
+                        {task.verified ? "Verified against the screen" : "Verification evidence"}
+                      </span>
+                      <details className="activity-proof-details">
+                        <summary>Details</summary>
+                        <code>{printable(task.proof)}</code>
+                      </details>
                     </div>
                   )}
 
@@ -215,15 +211,15 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
                         </div>
                       ),
                     )}
-                    {ACTUATING.has(task.status) && (
+                    {ACTIVE_TASK_STATES.has(task.status) && (
                       <div className="activity-step activity-step--live">
                         <span className="activity-step-ico">⏳</span>
                         <span className="activity-step-txt">
                           {task.status === "verifying"
-                            ? "checking postconditions and collecting proof…"
+                            ? "Checking the result…"
                             : task.status === "cancelling"
-                              ? "invalidating actuator lease…"
-                              : "working from the last verified checkpoint…"}
+                              ? "Stopping…"
+                              : "Working…"}
                         </span>
                       </div>
                     )}
@@ -235,8 +231,8 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
         )}
 
         <div className="activity-foot">
-          Tasks survive interface recreation and reconnects. Aura reports success only after
-          verification. Approval cards are read-only until signed device approvals are available.
+          A task is marked done only after JARVIS has checked the result. Closing this screen
+          doesn&apos;t stop anything; use Stop for that.
         </div>
 
         {zoom && (

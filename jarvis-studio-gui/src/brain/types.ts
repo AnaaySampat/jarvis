@@ -23,6 +23,9 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   /** For multimodal input — array of base64 JPEG images. */
   images?: string[];
+  /** For role:"user" — what the chat shows when it isn't what the model got (a routine
+   *  run sends its steps but reads "Run bedtime"). Providers never send it. */
+  display?: string;
 }
 
 /** A function/tool call emitted by the model. */

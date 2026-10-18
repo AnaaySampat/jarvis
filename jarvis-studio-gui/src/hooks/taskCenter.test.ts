@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIVE_TASK_STATES,
   bindNativeTask,
   loadKnownNativeTaskIds,
   loadKnownRemoteTaskCursors,
@@ -91,6 +92,51 @@ describe("Android Task Center reducer", () => {
     const raw = JSON.stringify([...storage.values.values()]);
     expect(raw).not.toContain("private goal");
     expect(raw).not.toContain("proof");
+  });
+
+  it("doesn't count recovered shells as active until the journal or host answers", () => {
+    const storage = new MemoryStorage();
+    rememberNativeTaskId("native-1", storage as unknown as Storage);
+    rememberRemoteTaskCursor("pc-task-1", 3, storage as unknown as Storage);
+    const shells = loadRecoveredTaskShells(storage as unknown as Storage);
+
+    expect(shells).toHaveLength(2);
+    expect(shells.some((task) => ACTIVE_TASK_STATES.has(task.status))).toBe(false);
+    const live = reduceRemoteTaskEvent(shells, {
+      event: "task.status",
+      taskId: "pc-task-1",
+      seq: 0,
+      data: { state: "executing" },
+    });
+    expect(live.some((task) => ACTIVE_TASK_STATES.has(task.status))).toBe(true);
+  });
+
+  it("fills a recovered shell from the journal: its goal, and no claim marker as a step", () => {
+    const storage = new MemoryStorage();
+    rememberNativeTaskId("phone_1", storage as unknown as Storage);
+    // What task_status returns for a finished operator task: Room keeps the last
+    // checkpoint's receipt ("claim:pending-verification") after finishSucceeded.
+    const tasks = reduceNativeStatus(
+      loadRecoveredTaskShells(storage as unknown as Storage),
+      {
+        ok: true,
+        taskId: "phone_1",
+        goal: "Turn off Do Not Disturb",
+        state: "succeeded",
+        step: 3,
+        receipt: "claim:pending-verification",
+        result: "Do Not Disturb has been turned off.",
+        verified: true,
+        verificationDigest: "a".repeat(64),
+        eventSeq: 9,
+      },
+      { recovered: true },
+    );
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ goal: "Turn off Do Not Disturb", status: "succeeded" });
+    expect(tasks[0].items).toEqual([]);
+    expect(ACTIVE_TASK_STATES.has(tasks[0].status)).toBe(false);
   });
 
   it("reconciles a safely suspended native task and ignores stale status polls", () => {

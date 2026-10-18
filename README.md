@@ -34,7 +34,7 @@ the app**, so the phone needs no server and no Python.
 - **Chat + tools** — LLM chat with weather, news, web search, places/directions,
   reminders, alarms/timers, calendar, QR codes, image generation, clipboard and file
   reading.
-- **Providers** — Vertex AI (paste a Service Account JSON, runs on GCP credits), Google
+- **Providers** — Vertex AI (a Service Account JSON key, runs on GCP credits), Google
   Gemini, or Groq, plus optional free OpenRouter / NVIDIA / Mistral keys. Pick provider
   and model in Settings, or let Auto mode choose: **smart routing** ranks every model your
   keys reach by benchmark score and sends each request to the weakest one that can handle
@@ -187,6 +187,14 @@ adb shell am start -n com.jarvis.app/.MainActivity
 (Use the `release/app-universal-release.apk` path for a release build.) You can also copy
 the APK to the phone and open it there, after allowing installs from that source.
 
+No phone? From the repo root, this creates a `jarvis_test` emulator on first run, boots it,
+installs the debug APK and opens JARVIS. `-Build` rebuilds the APK for arm64 + x86_64 first,
+so the same file installs on the phone and the emulator:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/emulator.ps1 -Build
+```
+
 ### 5. First run
 
 1. Enter at least one key in the first-run screen — see [Keys and security](#keys-and-security).
@@ -199,9 +207,9 @@ the APK to the phone and open it there, after allowing installs from that source
 
 - **`tauri android dev` hangs after building — don't use it.** Use `tauri android build`
   (it exits cleanly), then `adb install` + `adb shell am start`.
-- **The emulator is boot-only.** It has no real microphone and its software GPU makes
-  SystemUI freeze under load (not an app bug). Audio, wake word, app control and PC
-  pairing all need a real phone.
+- **The emulator is for UI, onboarding and chat.** Audio, wake word, app control and PC
+  pairing have only been verified on a real phone. `-Mic` routes the laptop microphone in,
+  but nobody has tested voice through it yet.
 - **Don't `adb shell am force-stop com.jarvis.app`.** Android then turns JARVIS's
   accessibility service off and every phone task fails until you re-enable it in
   Settings ▸ Accessibility. Restart with `adb install -r` or `am start` instead.

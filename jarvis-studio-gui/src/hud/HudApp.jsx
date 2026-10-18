@@ -13,6 +13,8 @@ import { STATUS_META, DEFAULT_TELEMETRY } from "./hudConstants";
 import {
   ClockPanel,
   StatusPanel,
+  ReadinessPanel,
+  RoutinesPanel,
   SysStatsPanel,
   PowerPanel,
   WeatherPanel,
@@ -73,6 +75,17 @@ export function JarvisHUD({
   onDeleteConversation,
   onRefreshConversations,
   onClearConversations,
+  // phone: the Status panel's sources, and where its rows lead
+  sysInfo,
+  appControlOn,
+  pcConfig,
+  pcState,
+  tvConfig,
+  onOpenSettings,
+  onOpenRemote,
+  onListen,
+  conversationMode,
+  onConversationMode,
 }) {
   const c = config;
   const d = telemetry || DEFAULT_TELEMETRY;
@@ -90,6 +103,22 @@ export function JarvisHUD({
     [setCapsOpen, setChatOpen],
   );
   const endBoot = useCallback(() => setIsBoot(false), []); // stable: BootSequence's timer depends on it
+
+  // Unread = a turn ran while the chat was closed (usually a spoken one) and its
+  // reply is in. Keyed on the turn, not the message count: the restored
+  // conversation and the launch greeting both arrive after mount and aren't news.
+  const [missed, setMissed] = useState(false);
+  if (chatOpen && missed) setMissed(false);
+  if (!chatOpen && !missed && (status === "thinking" || status === "working")) setMissed(true);
+  const unread =
+    missed && status !== "thinking" && messages[messages.length - 1]?.role === "jarvis";
+
+  // The idle hint can't tell you to say "Hey Jarvis" when the wake word is off.
+  const meta = STATUS_META[status] ?? STATUS_META.idle;
+  const statusLabel =
+    IS_MOBILE && status === "idle" && sysInfo?.wake_word === false
+      ? "STANDBY — tap the mic"
+      : meta.label;
   const p = (k, def = true) => (panels[k] === undefined ? def : panels[k]);
   const tog = (k) => (v) => onTogglePanel && onTogglePanel(k, v);
 
@@ -179,20 +208,35 @@ export function JarvisHUD({
       <div className="hud-core-zone" data-slot="core">
         <ReactorCore status={status} size={IS_MOBILE ? 232 : 482} rgb={c.rgb} />
         <div className="core-readout">
-          <span className="core-name">{c.name}</span>
-          <span className="core-sub">{(STATUS_META[status] ?? STATUS_META.idle).label}</span>
+          {/* The assistant's name, not the theme's ("REACTOR CORE" read as its name). */}
+          <span className="core-name">JARVIS</span>
+          <span className="core-sub">{statusLabel}</span>
         </div>
       </div>
 
       {/* ── left rail: clock + the panels assigned to the left (user/JARVIS arrangeable) ── */}
       <div className="hud-rail hud-rail--left">
         <ClockPanel rgb={c.rgb} />
+        {IS_MOBILE && (
+          <ReadinessPanel
+            sysInfo={sysInfo}
+            appControlOn={appControlOn}
+            pcConfig={pcConfig}
+            pcState={pcState}
+            tvConfig={tvConfig}
+            onOpenSettings={onOpenSettings}
+            onOpenRemote={onOpenRemote}
+            onOpenAppControl={() => runAction({ type: "open_a11y_settings" })}
+          />
+        )}
+        {IS_MOBILE && <RoutinesPanel status={status} runAction={runAction} onSend={onSend} />}
         {railPanels("left")}
       </div>
 
-      {/* ── right rail: status + the panels assigned to the right ── */}
+      {/* ── right rail: status + the panels assigned to the right ──
+          (the phone shows status under the core and in the top bar already) */}
       <div className="hud-rail hud-rail--right">
-        <StatusPanel status={status} rgb={c.rgb} />
+        {!IS_MOBILE && <StatusPanel status={status} rgb={c.rgb} />}
         {railPanels("right")}
       </div>
 
@@ -203,7 +247,7 @@ export function JarvisHUD({
         onOpenPower={() => setPowerOpen(true)}
         onOpenMemory={() => setMemoryOpen(true)}
         onOpenChat={() => setChatOpen(true)}
-        chatCount={messages.length}
+        unread={unread}
       />
 
       {/* ── overlays ── */}
@@ -221,6 +265,7 @@ export function JarvisHUD({
         onClose={() => setPowerOpen(false)}
         runAction={runAction}
         d={d}
+        appControlOn={appControlOn}
       />
       <MemoryOverlay
         open={memoryOpen}
@@ -256,10 +301,13 @@ export function JarvisHUD({
         onRefreshConversations={onRefreshConversations}
         onClearConversations={onClearConversations}
         prefill={prefill}
+        onListen={onListen}
+        conversationMode={conversationMode}
+        onConversationMode={onConversationMode}
       />
 
       {/* boot overlay */}
-      {isBoot && <BootSequence name={c.name} onDone={endBoot} />}
+      {isBoot && <BootSequence name="JARVIS" onDone={endBoot} />}
     </div>
   );
 }

@@ -314,6 +314,10 @@ pub struct TaskStatusResponse {
     pub summary: String,
     #[serde(default, rename = "taskId")]
     pub task_id: String,
+    // Kotlin's taskStatus sends it; without this field serde dropped it on the way to
+    // JS and every recovered task read "Recovered phone task".
+    #[serde(default)]
+    pub goal: String,
     #[serde(default)]
     pub state: String,
     #[serde(default)]
@@ -367,6 +371,41 @@ pub struct ConfigSecretSetRequest {
 pub struct TvShellRequest {
     pub host: String,
     pub command: String,
+}
+
+/// Every timed routine, as JSON: `[{name, hour, minute, days: [0-6, 0 = Sunday], lastRun}]`
+/// (see RoutineAlarms.kt). Replaces whatever was scheduled before.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleRoutinesRequest {
+    #[serde(rename = "routinesJson")]
+    pub routines_json: String,
+}
+
+/// What the phone can really do for a timed routine: `exact` is false when Android may
+/// hold the alarm a few minutes; `notifications` false means nothing will show.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleRoutinesResponse {
+    pub ok: bool,
+    pub summary: String,
+    #[serde(default)]
+    pub exact: bool,
+    #[serde(default)]
+    pub notifications: bool,
+    /// Epoch ms of the next routine notification, -1 for none.
+    #[serde(default, rename = "nextAt")]
+    pub next_at: i64,
+}
+
+/// The last routine notification tapped; `seq` bumps once per tap (polled, §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutineTapResponse {
+    #[serde(default)]
+    pub seq: i32,
+    #[serde(default)]
+    pub name: String,
+    /// Local date (YYYY-MM-DD) the notification was for.
+    #[serde(default)]
+    pub date: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

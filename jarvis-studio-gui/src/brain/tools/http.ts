@@ -20,7 +20,7 @@ import type { ToolResult } from "../types";
 import type { BrainConfig } from "../config";
 import { getJson, getText, postJson, resilientFetch, isOffline } from "./httpClient";
 import { geocode, haversineM, prettyDist, type LocationService } from "./location";
-import { wmo } from "../wmoCodes";
+import { windUnit, wmo } from "../wmoCodes";
 import { liveModelId } from "../modelRemap";
 import * as quota from "../quota";
 
@@ -70,6 +70,7 @@ export async function getWeather(ctx: HttpToolCtx): Promise<ToolResult> {
     };
   }
   const days = 3;
+  const unit = windUnit();
   const url =
     "https://api.open-meteo.com/v1/forecast?" +
     new URLSearchParams({
@@ -80,7 +81,7 @@ export async function getWeather(ctx: HttpToolCtx): Promise<ToolResult> {
       daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
       forecast_days: String(days),
       timezone: "auto",
-      wind_speed_unit: "mph",
+      wind_speed_unit: unit.param,
     }).toString();
 
   let data: OpenMeteo;
@@ -103,7 +104,7 @@ export async function getWeather(ctx: HttpToolCtx): Promise<ToolResult> {
     const wind = Math.round(cur.wind_speed_10m ?? 0);
     parts.push(
       `Right now${where} it's ${Math.round(cur.temperature_2m)}°C${feels} and ${cond}, ` +
-        `humidity ${hum}%, wind ${wind} mph.`,
+        `humidity ${hum}%, wind ${wind} ${unit.label}.`,
     );
   }
   // Day labels anchored to the location's local date (timezone=auto), as in Python.

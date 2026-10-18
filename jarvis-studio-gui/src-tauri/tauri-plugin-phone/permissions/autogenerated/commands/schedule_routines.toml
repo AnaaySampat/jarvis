@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-schedule-routines"
+description = "Enables the schedule_routines command without any pre-configured scope."
+commands.allow = ["schedule_routines"]
+
+[[permission]]
+identifier = "deny-schedule-routines"
+description = "Denies the schedule_routines command without any pre-configured scope."
+commands.deny = ["schedule_routines"]

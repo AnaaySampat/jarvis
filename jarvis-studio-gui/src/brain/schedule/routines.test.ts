@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The native scheduler (RoutineAlarms.kt): null = off-device, as in the browser.
+const schedule = vi.hoisted(() => vi.fn(async (_list: unknown[]): Promise<unknown> => null));
+vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule }));
+
 import {
   addRoutine,
   claimRoutine,
@@ -7,6 +12,12 @@ import {
   listRoutines,
   markRoutineRan,
   removeRoutine,
+  routineAlarms,
+  routineWhen,
+  routinesPromptHint,
+  saveRoutine,
+  tappedRoutine,
+  timedRoutineNote,
 } from "./routines";
 
 // 2026-09-30 is a Wednesday.
@@ -29,11 +40,89 @@ describe("addRoutine", () => {
     expect(addRoutine({ name: "a", prompt: "x", days: "someday" }).ok).toBe(false);
     expect(listRoutines()).toHaveLength(0);
   });
-  it("replaces a routine of the same name and is honest that nothing wakes the phone", () => {
+  it("replaces a routine of the same name", () => {
     addRoutine({ name: "Gym", prompt: "one" });
-    const r = addRoutine({ name: "gym", prompt: "two", time: "07:00" });
+    addRoutine({ name: "gym", prompt: "two", time: "07:00" });
     expect(listRoutines()).toHaveLength(1);
-    expect(r.summary).toMatch(/can't wake the phone/);
+  });
+});
+
+describe("native routine alarms", () => {
+  beforeEach(() => schedule.mockReset().mockResolvedValue(null));
+
+  it("hands every save's timed routines to the native scheduler, days as getDay numbers", () => {
+    addRoutine({ name: "macro", prompt: "x" });
+    addRoutine({ name: "brief", prompt: "y", time: "07:30", days: "weekdays" });
+    expect(schedule).toHaveBeenLastCalledWith([
+      { name: "brief", hour: 7, minute: 30, days: [1, 2, 3, 4, 5], lastRun: "" },
+    ]);
+    claimRoutine("brief", at(9, 0));
+    expect(schedule.mock.lastCall?.[0]).toEqual([expect.objectContaining({ lastRun: "2026-09-30" })]);
+    removeRoutine("brief");
+    expect(schedule).toHaveBeenLastCalledWith([]);
+  });
+  it("maps day lists and skips untimed routines", () => {
+    expect(
+      routineAlarms([
+        { name: "a", prompt: "x", time: "18:05", days: "sun,sat" },
+        { name: "b", prompt: "x", days: "daily" },
+      ]),
+    ).toEqual([{ name: "a", hour: 18, minute: 5, days: [0, 6], lastRun: "" }]);
+  });
+  it("only promises a notification the phone said it can post", async () => {
+    const r = addRoutine({ name: "check", prompt: "say the time", time: "19:21" }).routine!;
+    expect(await timedRoutineNote(r)).toMatch(/can't schedule it on this device/);
+
+    schedule.mockResolvedValue({ ok: true, summary: "", exact: true, notifications: true, nextAt: 1 });
+    addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
+    expect(await timedRoutineNote(r)).toBe(
+      "At 19:21 I'll post a notification; tap it and I'll run the routine.",
+    );
+
+    schedule.mockResolvedValue({ ok: true, summary: "", exact: false, notifications: true, nextAt: 1 });
+    addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
+    expect(await timedRoutineNote(r)).toMatch(/may hold it a few minutes/);
+
+    schedule.mockResolvedValue({ ok: true, summary: "", exact: true, notifications: false, nextAt: 1 });
+    addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
+    expect(await timedRoutineNote(r)).toMatch(/notifications are off/);
+  });
+  it("a tapped notification runs its routine once, and never one that's gone", () => {
+    addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
+    expect(tappedRoutine("check", "2026-09-30")?.name).toBe("check");
+    markRoutineRan("check", at(19, 22));
+    expect(tappedRoutine("check", "2026-09-30")).toBeUndefined(); // same tap read again
+    expect(tappedRoutine("check", "2026-09-29")).toBeUndefined(); // yesterday's, after today's run
+    expect(tappedRoutine("check", "2026-10-01")?.name).toBe("check");
+    expect(tappedRoutine("gone", "2026-09-30")).toBeUndefined();
+  });
+});
+
+describe("saveRoutine (the on-screen form)", () => {
+  it("renames in place, keeps today's run, and never overwrites another routine", () => {
+    addRoutine({ name: "first", prompt: "a" });
+    addRoutine({ name: "gym", prompt: "b", time: "07:00" });
+    addRoutine({ name: "last", prompt: "c" });
+    markRoutineRan("gym", at(7, 0));
+
+    expect(saveRoutine({ name: "Last", prompt: "x" }, "gym").ok).toBe(false); // taken
+    expect(saveRoutine({ name: "workout", prompt: "" }, "gym").ok).toBe(false); // invalid
+    expect(listRoutines().map((r) => r.name)).toEqual(["first", "gym", "last"]);
+
+    const r = saveRoutine(
+      { name: "workout", prompt: "b2", time: "07:30", days: "weekdays" },
+      "gym",
+    );
+    expect(r.ok).toBe(true);
+    expect(listRoutines().map((x) => x.name)).toEqual(["first", "workout", "last"]);
+    expect(listRoutines()[1]).toMatchObject({ prompt: "b2", time: "07:30", lastRun: "2026-09-30" });
+    expect(dueRoutines(at(7, 45))).toHaveLength(0); // already ran today under its old name
+  });
+  it("adds a new one, and changing only a name's case is still an edit", () => {
+    expect(saveRoutine({ name: "first", prompt: "a" }).ok).toBe(true);
+    expect(saveRoutine({ name: "First", prompt: "x" }).ok).toBe(false);
+    expect(saveRoutine({ name: "First", prompt: "x" }, "first").ok).toBe(true);
+    expect(listRoutines()).toMatchObject([{ name: "First", prompt: "x" }]);
   });
 });
 
@@ -75,5 +164,53 @@ describe("dueRoutines", () => {
   it("never fires an untimed routine", () => {
     addRoutine({ name: "macro", prompt: "y" });
     expect(dueRoutines(at(8, 30)).map((r) => r.name)).toEqual(["brief"]);
+  });
+});
+
+describe("starter routines", () => {
+  // A fresh module = a fresh in-memory store, i.e. a first launch.
+  const firstLaunch = async () => {
+    vi.resetModules();
+    return import("./routines");
+  };
+
+  it("seeds movie night and bedtime once, and a removed starter stays removed", async () => {
+    const m = await firstLaunch();
+    expect(m.listRoutines().map((r) => r.name)).toEqual(["movie night", "bedtime"]);
+    expect(m.removeRoutine("bedtime").ok).toBe(true);
+    expect(m.listRoutines().map((r) => r.name)).toEqual(["movie night"]);
+  });
+  it("never overwrites the user's own routine of the same name", async () => {
+    const m = await firstLaunch();
+    expect(m.addRoutine({ name: "Movie Night", prompt: "mine" }).ok).toBe(true);
+    const mine = m.listRoutines().filter((r) => r.name.toLowerCase() === "movie night");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].prompt).toBe("mine");
+  });
+  it("claiming a starter doesn't mutate the built-in definition", async () => {
+    const m = await firstLaunch();
+    m.claimRoutine("movie night", at(20, 0));
+    expect(m.STARTER_ROUTINES[0].lastRun).toBeUndefined();
+  });
+});
+
+describe("routinesPromptHint", () => {
+  it("names the saved routines so saying one alone runs it", () => {
+    addRoutine({ name: "date night", prompt: "x" });
+    expect(routinesPromptHint()).toContain("“date night”");
+    expect(routinesPromptHint()).toContain("manage_routine");
+  });
+  it("is empty with no routines", () => {
+    expect(routinesPromptHint()).toBe("");
+  });
+});
+
+describe("routineWhen", () => {
+  it("says when each kind of routine runs", () => {
+    expect(routineWhen({ days: "daily" })).toBe("When you ask");
+    expect(routineWhen({ time: "08:00", days: "daily" })).toBe("Every day at 08:00");
+    expect(routineWhen({ time: "07:30", days: "weekdays" })).toBe("Weekdays at 07:30");
+    expect(routineWhen({ time: "10:00", days: "weekends" })).toBe("Weekends at 10:00");
+    expect(routineWhen({ time: "18:30", days: "fri,mon,wed" })).toBe("Mon, Wed, Fri at 18:30");
   });
 });

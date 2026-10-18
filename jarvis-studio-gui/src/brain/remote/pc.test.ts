@@ -316,9 +316,10 @@ describe("RemotePC — durable v2 transport", () => {
 
   it("drops a silent half-open link and redials, but only once the PC proved it pings", async () => {
     const events: string[] = [];
+    const identity = autoAuthenticatedIdentity();
     const pc = new RemotePC({
       host: "100.100.100.1",
-      ...autoAuthenticatedIdentity(),
+      ...identity,
       onEvent: (ev) => events.push(ev.event),
       WebSocketImpl: FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>,
     });
@@ -331,6 +332,14 @@ describe("RemotePC — durable v2 transport", () => {
 
     const ws1 = FakeWS.instances[0]!;
     ws1.receive("link.ping", { t: 1 });
+    // The ping is only accepted after a real WebCrypto digest that fake timers don't
+    // drive; on a slow runner the silence window used to elapse before it landed.
+    // Past the signature check, the rest is microtasks the next advance drains.
+    await vi.waitFor(() =>
+      expect(identity.identityBridge!.verifyHostEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({ messageType: "link.ping" }),
+      ),
+    );
     await vi.advanceTimersByTimeAsync(10);
     expect(events).not.toContain("link.ping");
     // Half-open: FakeWS.close never fires onclose, like a socket on a dead network.
@@ -365,10 +374,14 @@ describe("RemotePC — durable v2 transport", () => {
   });
 
   it("resubscribes an accepted task with its event cursor after reconnect", async () => {
+    const delivered: number[] = [];
     const pc = new RemotePC({
       host: "1.2.3.4",
       ...autoAuthenticatedIdentity(),
       reconnectMs: 100,
+      onEvent: (event) => {
+        if (event.event === "task.event" && event.seq) delivered.push(event.seq);
+      },
       WebSocketImpl: FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>,
     });
     pc.connect();
@@ -385,13 +398,17 @@ describe("RemotePC — durable v2 transport", () => {
     ws1.receive("task.accepted", { state: "executing" }, taskId, 0);
     ws1.receive("task.event", { kind: "step", data: { n: 1 } }, taskId, 1);
     await waitForWire(ws1, "task.subscribe");
-    await vi.advanceTimersByTimeAsync(0);
+    // Host-envelope verification awaits a real crypto.subtle digest that fake
+    // timers can't flush. Dropping before seq=1 is applied (as under CPU load)
+    // correctly loses it and resubscribes from 0, so wait for it to land.
+    await vi.waitFor(() => expect(delivered).toEqual([1]));
 
     ws1.drop();
     await vi.advanceTimersByTimeAsync(150);
     await waitForOnline(pc);
     const ws2 = FakeWS.instances.at(-1)!;
-    await waitForWire(ws2, "task.subscribe");
+    // task.status is signed after task.subscribe on the same serial chain.
+    await waitForWire(ws2, "task.status");
     expect(ws2).not.toBe(ws1);
     expect(ws2.sent).toContainEqual(
       expect.objectContaining({

@@ -1073,6 +1073,68 @@
   color: var(--ac2);
 }
 
+/* inline add/edit form */
+.sch-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--ac) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ac) 4%, rgba(2, 5, 9, 0.6));
+}
+.sch-form-row {
+  display: flex;
+  gap: 8px;
+}
+.sch-form input,
+.sch-form textarea {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-0);
+  color: var(--txt);
+  font-family: var(--body);
+  font-size: 14px;
+  color-scheme: dark;
+}
+.sch-form input:focus,
+.sch-form textarea:focus {
+  outline: none;
+  border-color: var(--ac);
+}
+.sch-form-time {
+  flex: 1;
+}
+.sch-form-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--txt-2);
+  font-family: var(--body);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.sch-form-btn--go {
+  border-color: var(--ac);
+  background: var(--ac);
+  color: #021018;
+  font-weight: 600;
+}
+.sch-form-btn--go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sch-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 /* ───────── actions ───────── */
 .acts {
   display: grid;
@@ -2155,6 +2217,7 @@
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 2.5px;
+  text-transform: uppercase;
 }
 .dock-btn--chat {
   min-width: 150px;
@@ -2162,20 +2225,13 @@
 }
 .dock-badge {
   position: absolute;
-  top: -7px;
-  right: -7px;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
   background: var(--ac);
-  color: #021018;
-  font-family: var(--disp);
-  font-weight: 700;
-  font-size: 11px;
-  min-width: 20px;
-  height: 20px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
+  box-shadow: 0 0 8px var(--ac);
 }
 
 /* directory allowlist (shared look with Settings) */

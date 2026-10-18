@@ -57,6 +57,8 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-verify-host-challenge`
 - `allow-identity-verify-host-envelope`
 - `allow-tv-shell`
+- `allow-schedule-routines`
+- `allow-poll-routine-tap`
 
 ## Permission Table
 
@@ -824,6 +826,32 @@ Denies the pick_folder command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-poll-routine-tap`
+
+</td>
+<td>
+
+Enables the poll_routine_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-poll-routine-tap`
+
+</td>
+<td>
+
+Denies the poll_routine_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-poll-speaking`
 
 </td>
@@ -973,6 +1001,32 @@ Enables the request_overlay_permission command without any pre-configured scope.
 <td>
 
 Denies the request_overlay_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-schedule-routines`
+
+</td>
+<td>
+
+Enables the schedule_routines command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-schedule-routines`
+
+</td>
+<td>
+
+Denies the schedule_routines command without any pre-configured scope.
 
 </td>
 </tr>

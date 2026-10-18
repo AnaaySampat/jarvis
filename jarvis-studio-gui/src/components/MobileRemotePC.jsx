@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import ModalPanel from "./ModalPanel";
-import Icon from "./Icon";
+import Sheet, { ActionRow, Field, Group, More, Warn } from "./Sheet";
 
 // jsQR is ~127 kB and is only reachable once the user actually taps "scan" during
 // pairing — a one-time action most sessions never perform. Loading it on demand
@@ -21,15 +21,16 @@ const QrScanner = lazy(() => import("./QrScanner"));
  * (if an altHost LAN address was included) silently upgrades to the faster direct LAN
  * link when it detects they're on the same Wi-Fi — nothing for the user to switch by hand.
  *
- * Reuses the shared settings-* styles so it matches the rest of the HUD with no new CSS.
+ * Built from the shared Sheet pieces, so it reads like Settings and the dock's menus.
  */
 
+// tone = the readout lamp (sp-readout--on/off/warn).
 const STATE_META = {
-  idle: { label: "Not paired", color: "#7a8aa0" },
-  connecting: { label: "Connecting…", color: "#e0a800" },
-  online: { label: "Online", color: "#36d399" },
-  offline: { label: "Offline — retrying", color: "#f06a4d" },
-  unauthorized: { label: "Identity rejected", color: "#f0455a" },
+  idle: { label: "Not paired", tone: "off" },
+  connecting: { label: "Connecting…", tone: "off" },
+  online: { label: "Online", tone: "on" },
+  offline: { label: "Offline, retrying", tone: "off" },
+  unauthorized: { label: "Identity rejected", tone: "warn" },
 };
 
 export default function MobileRemotePC({
@@ -61,6 +62,7 @@ export default function MobileRemotePC({
   // 6-digit PIN shown on the PC (which is deliberately NOT in the QR) before pairing.
   const [pendingPair, setPendingPair] = useState(null);
   const [pin, setPin] = useState("");
+  const [confirmUnpair, setConfirmUnpair] = useState(false); // two taps: re-pairing needs the PC
 
   const paired = Boolean(
     pcConfig?.host && pcConfig?.hostId && pcConfig?.hostFingerprint && pcConfig?.hostPublicKey,
@@ -139,177 +141,175 @@ export default function MobileRemotePC({
   }
 
   if (pendingPair) {
+    const ready = pin.replace(/\D/g, "").length === 6;
     return (
-      <ModalPanel title="Enter pairing PIN" onClose={() => setPendingPair(null)}>
-        <div className="settings-sec">
-          <div className="settings-hint">
-            On your PC, <b>Settings → Remote Access</b> shows a 6-digit PIN next to the code you
-            just scanned. Type it here to finish pairing. It expires in about two minutes.
-          </div>
-          <input
-            className="settings-model-id"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            placeholder="123456"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            style={{ fontSize: 24, letterSpacing: 6, textAlign: "center", marginTop: 10 }}
-          />
-          {scanError && <div className="settings-warn">{scanError}</div>}
+      <Sheet
+        open
+        title="Enter pairing PIN"
+        onClose={onClose}
+        onBack={() => setPendingPair(null)}
+        backLabel="Remote PC & TV"
+      >
+        <div className="sp-sheet">
+          <h2 className="sp-page-title">Enter the PIN</h2>
+          <p className="sp-lede">
+            Your PC shows a 6-digit PIN next to the code you just scanned. It expires in about two
+            minutes.
+          </p>
+          <Group>
+            <div className="sp-field">
+              <input
+                className="sp-input rpc-pin"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="123456"
+                aria-label="Pairing PIN"
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={(e) => e.key === "Enter" && ready && confirmPin()}
+              />
+            </div>
+          </Group>
+          {scanError && <Warn>{scanError}</Warn>}
           <button
-            className="settings-save"
-            style={{ marginTop: 12 }}
-            disabled={pin.replace(/\D/g, "").length !== 6}
+            type="button"
+            className="sp-btn sp-btn--primary rpc-wide"
+            disabled={!ready}
             onClick={confirmPin}
           >
             Pair this PC
           </button>
         </div>
-      </ModalPanel>
+      </Sheet>
     );
   }
 
+  const address = paired ? `${pcConfig.host}:${pcConfig.port || 8765}` : "";
   return (
-    <ModalPanel title="Remote PC & TV" onClose={onClose}>
-      <div className="settings-sec">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-            fontWeight: 600,
-            letterSpacing: 0.3,
-          }}
-        >
-          <span
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: "50%",
-              background: meta.color,
-              boxShadow: `0 0 8px ${meta.color}`,
-              flex: "0 0 auto",
+    <Sheet open title="Remote PC & TV" onClose={onClose}>
+      <div className="sp-sheet">
+        <p className="sp-lede">
+          Hand whole tasks to your Windows PC, and control an Android TV on this Wi-Fi, from here or
+          by voice.
+        </p>
+
+        <Group title="PC">
+          <div className="sp-field sp-row">
+            <span className="rpc-name">
+              <span className="sp-label">{paired ? "Windows PC" : "No PC paired"}</span>
+              {paired && <span className="sp-desc sp-mono">{address}</span>}
+            </span>
+            {paired && <span className={`sp-readout sp-readout--${meta.tone}`}>{meta.label}</span>}
+          </div>
+          {paired && (
+            <ActionRow
+              icon="monitor"
+              title="View and control the screen"
+              desc={
+                online
+                  ? "Live screen, driven by touch. You arm control on the PC first."
+                  : "Available once the PC is online."
+              }
+              disabled={!online}
+              onClick={onViewScreen}
+            />
+          )}
+          <ActionRow
+            icon="camera"
+            title={paired ? "Scan a new pairing code" : "Scan the code on your PC"}
+            desc="On the PC: JARVIS, Settings, Remote Access."
+            onClick={() => {
+              setScanError("");
+              setScanning(true);
             }}
           />
-          <span>{paired ? meta.label : "No PC paired"}</span>
-          {paired && (
-            <span style={{ marginLeft: "auto", opacity: 0.6, fontWeight: 400 }}>
-              {pcConfig.secure ? "wss" : "ws"}://{pcConfig.host}:{pcConfig.port || 8765}
-            </span>
+          {scanError && (
+            <div className="sp-field">
+              <Warn>{scanError}</Warn>
+            </div>
           )}
-        </div>
-        <div className="settings-hint">
-          Run whole tasks on your Windows PC from your phone. JARVIS forwards the goal to the
-          desktop app, which does the work and reports back here.
-        </div>
-        {paired && pcConfig.altHost && (
-          <div className="settings-hint">
-            <Icon name="globe" size={14} /> Works on any network — JARVIS connects over your Tailscale address ({pcConfig.altHost})
-            and switches to the faster direct link on its own when you're on the same Wi-Fi.
+          <div className="sp-field">
+            <More label="How pairing works">
+              The code carries the PC&apos;s address and an expiring identity challenge, never a
+              password. When Tailscale is set up it includes that address too, so JARVIS reaches the
+              PC from any network and switches to the faster direct link on the same Wi-Fi.
+              {paired && pcConfig.hostFingerprint && (
+                <> This PC&apos;s identity: {pcConfig.hostFingerprint.slice(0, 24)}…</>
+              )}
+            </More>
           </div>
-        )}
-        {paired && pcConfig.hostFingerprint && (
-          <div className="settings-hint">
-            Host identity: {pcConfig.hostFingerprint.slice(0, 24)}...
-          </div>
-        )}
-      </div>
-
-      <div className="settings-sec">
-        <button
-          className="settings-save"
-          onClick={() => {
-            setScanError("");
-            setScanning(true);
-          }}
-        >
-          <Icon name="camera" size={16} /> {paired ? "Re-scan the code on your PC" : "Scan the code on your PC"}
-        </button>
-        <div className="settings-hint">
-          Open JARVIS on your computer, go to <b>Settings → Remote Access</b>, and point your
-          camera at the code it shows. That's the whole setup — the code carries the address and
-          expiring identity challenge, including the Tailscale address when you've set it up.
-        </div>
-        {scanError && <div className="settings-warn">{scanError}</div>}
-      </div>
-
-      {paired && (
-        <div className="settings-sec">
+        </Group>
+        {paired && (
           <button
-            className="settings-save"
-            onClick={onViewScreen}
-            disabled={!online}
-            style={{ opacity: online ? 1 : 0.5 }}
+            type="button"
+            className={`sp-btn sp-btn--quiet rpc-wide ${confirmUnpair ? "is-armed" : ""}`}
+            onClick={() => {
+              if (!confirmUnpair) return setConfirmUnpair(true);
+              onUnpair();
+              onClose();
+            }}
+            onBlur={() => setConfirmUnpair(false)}
           >
-            <Icon name="monitor" size={16} /> View &amp; control screen
+            {confirmUnpair ? "Tap again to unpair" : "Unpair this PC"}
           </button>
-          <div className="settings-hint">
-            {online
-              ? "Live-stream your PC's screen here and drive it by touch. You'll arm control on the PC first."
-              : "Connect to your PC (status above must be Online) to start the live screen."}
+        )}
+
+        {/* The user's TV — network ADB from this phone; nothing is installed on the TV. */}
+        <Group title="TV">
+          <div className="sp-field sp-row">
+            <span className="sp-label">
+              {tvConfig ? tvConfig.model || "Android TV" : "No TV set up"}
+            </span>
+            {tvConfig && <span className="sp-readout sp-readout--on">{tvConfig.host}</span>}
           </div>
-        </div>
-      )}
-
-      {paired && (
-        <button
-          className="dirlist-addbtn"
-          style={{ marginTop: 8 }}
-          onClick={() => {
-            onUnpair();
-            onClose();
-          }}
-        >
-          Unpair this PC
-        </button>
-      )}
-
-      {/* The user's TV — network ADB from this phone; nothing is installed on the TV. */}
-      <div className="settings-sec" style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}>
-          <Icon name="monitor" size={14} />
-          <span>{tvConfig ? `TV — ${tvConfig.model || "connected"}` : "No TV set up"}</span>
-          {tvConfig && (
-            <span style={{ marginLeft: "auto", opacity: 0.6, fontWeight: 400 }}>{tvConfig.host}</span>
+          <Field label="TV's IP address" hint="On the TV: Settings, Network shows it.">
+            <div className="sp-inline">
+              <input
+                className="sp-input sp-mono"
+                type="text"
+                inputMode="decimal"
+                placeholder="192.168.0.50"
+                aria-label="TV's IP address"
+                value={tvHost}
+                onChange={(e) => setTvHost(e.target.value.trim())}
+              />
+              <button
+                type="button"
+                className="sp-btn"
+                disabled={tvBusy || !tvHost}
+                onClick={connectTv}
+              >
+                {tvBusy ? "Waiting…" : tvConfig ? "Reconnect" : "Connect"}
+              </button>
+            </div>
+          </Field>
+          {tvBusy && (
+            <div className="sp-field">
+              <span className="sp-desc">
+                If the TV asks “Allow USB debugging?”, tick Always allow and press OK.
+              </span>
+            </div>
           )}
-        </div>
-        <div className="settings-hint">
-          Control an Android TV on this Wi-Fi by voice — “open Netflix on the TV”. On the TV: Settings
-          → Device Preferences → About, click <b>Build</b> 7 times, then Developer options → turn on{" "}
-          <b>USB debugging</b>. Enter the TV&apos;s IP (Settings → Network) and tap Connect.
-        </div>
-        <input
-          className="settings-model-id"
-          type="text"
-          inputMode="decimal"
-          placeholder="192.168.0.50"
-          value={tvHost}
-          onChange={(e) => setTvHost(e.target.value.trim())}
-          style={{ marginTop: 10 }}
-        />
-        <button
-          className="settings-save"
-          style={{ marginTop: 10 }}
-          disabled={tvBusy || !tvHost}
-          onClick={connectTv}
-        >
-          {tvBusy ? "Waiting for the TV…" : tvConfig ? "Reconnect" : "Connect"}
-        </button>
-        {tvBusy && (
-          <div className="settings-hint">
-            If the TV asks “Allow USB debugging?”, tick <b>Always allow</b> and press OK.
+          {tvResult && (
+            <div className="sp-field">
+              <span className={`sp-desc ${tvResult.ok ? "skill-out" : "skill-err"}`}>
+                {tvResult.summary}
+              </span>
+            </div>
+          )}
+          <div className="sp-field">
+            <More label="First time on this TV">
+              On the TV: Settings, Device Preferences, About. Click Build 7 times, then turn on USB
+              debugging in Developer options. Then enter its IP above and tap Connect.
+            </More>
           </div>
-        )}
-        {tvResult && (
-          <div className={tvResult.ok ? "settings-hint" : "settings-warn"}>{tvResult.summary}</div>
-        )}
+        </Group>
         {tvConfig && (
           <button
-            className="dirlist-addbtn"
-            style={{ marginTop: 8 }}
+            type="button"
+            className="sp-btn sp-btn--quiet rpc-wide"
             onClick={() => {
               onTvUnpair();
               setTvResult(null);
@@ -319,6 +319,6 @@ export default function MobileRemotePC({
           </button>
         )}
       </div>
-    </ModalPanel>
+    </Sheet>
   );
 }

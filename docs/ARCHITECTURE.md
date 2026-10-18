@@ -54,7 +54,7 @@ blueprint; it is never edited, imported or shipped.
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
 | TV | `remote/tv.ts` → **Kotlin** `TvAdb.kt` | The user's Android TV over network ADB (see §6a) |
 | Native bridge | `platform/*.ts` | The JS side of the Kotlin plugin (see §5) |
-| Scheduling | `schedule/{store,reminderTime}.ts` | Reminders, alarms, timers |
+| Scheduling | `schedule/{store,reminderTime,routines}.ts` → **Kotlin** `RoutineAlarms.kt` for timed routines | Reminders, alarms, timers, routines (see §5) |
 
 ---
 
@@ -498,6 +498,12 @@ and Rust, camelCase in the Kotlin `@Command`, the `build.rs` `COMMANDS` list, an
 with nothing at compile time — `QrScanner.jsx` spent months invoking
 `request_camera_permission`, a command that existed in none of the four.
 
+**Response fields go through Rust too.** A command with a typed response (say
+`TaskStatusResponse` in `models.rs`) is deserialised in Rust before JS sees it, and serde
+drops any key the struct doesn't declare. A field added to the Kotlin `JSObject` alone
+never arrives: `goal` on `task_status` (2026-10-18) compiled, shipped and read as empty
+until the struct got the field. Add it in `models.rs` too (and to the `desktop.rs` stub).
+
 ### Every native call needs a timeout on the JS side
 
 Several `@Command`s resolve their `Invoke` from an **Android callback** rather than
@@ -546,6 +552,13 @@ Two features already work around it the same way — **poll a monotonic sequence
   "Hey"), and is whatever follows the last one (`commandAfterWake`). A failed
   transcription now drops the command — there's no separate recording to fall back on.
 - Cross-app STOP: `platform/stopOverlay.ts` polls `poll_stop_overlay` every 250 ms.
+- Routine notifications: the routine tick in `useBrain.js` (30 s, and on becoming visible)
+  polls `poll_routine_tap` for a new `seq`. The tap's intent is taken in **`MainActivity`**
+  (`onCreate` / `onNewIntent`), not the plugin: Tauri registers plugins only after the
+  WebView starts, and a tap that revives a killed JARVIS arrives as `onNewIntent` before
+  that, so the plugin never saw it (found live 2026-10-18). `tappedRoutine` refuses a
+  routine that already ran on or after the notification's day, so a WebView reload
+  reading the same `seq` again is safe.
 
 If you add a new native→JS async signal, use this same pattern. Don't reach for the event
 bridge; it will silently no-op on-device.
@@ -572,7 +585,8 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
-| `PhonePlugin.kt` / `ReminderReceiver.kt` | The `@TauriPlugin` command surface; the receiver for scheduled reminders |
+| `RoutineAlarms.kt` | Timed routines while the WebView is paused: JS hands it every timed routine on each save (`schedule_routines`); it keeps one exact `AlarmManager` alarm (`USE_EXACT_ALARM`) for the earliest, rolls each forward in SharedPreferences, re-works every time on a time zone change, and posts "Time for <name>". It never runs a routine — a tap opens JARVIS and the WebView runs it as an ordinary turn. The one in-app alarm: reminders and alarms go to the Clock app |
+| `PhonePlugin.kt` | The `@TauriPlugin` command surface |
 
 The current command surface, grouped: the native operator (`operator_start`,
 `operator_status`), single operator actions (`observe`, `tap`, `tap_xy`, `double_tap`,
@@ -588,10 +602,11 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 `identity_verify_host_challenge/envelope`), the task journal (`task_begin`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
-`capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), and the TV
-(`tv_shell`, §6a).
+`capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
+(`schedule_routines`, `poll_routine_tap`), and the TV (`tv_shell`, §6a).
 
-The operator loop is tested without a device on the JVM: `OperatorCoreTest.kt` drives
+The operator loop and the routine schedule (`RoutineAlarmsTest.kt`) are tested without a
+device on the JVM: `OperatorCoreTest.kt` drives
 `OperatorLoop` with a fake device, a scripted model and a fake journal
 (`./gradlew :tauri-plugin-phone:testDebugUnitTest` from `src-tauri/gen/android`).
 
@@ -778,8 +793,9 @@ mid-boot. Don't "tidy" it back into an effect.
   `src/hud/hudConstants.js`. Tests may use `any` to build deliberately bad input.
 - **`src-tauri/gen/android` is tracked, not generated-and-ignored.** It holds hand edits
   that matter: `allowBackup="false"`, the release build's cleartext rule (allowed only because PC pairing is
-  `ws://` inside the Tailscale tunnel — see `app/build.gradle.kts`), and the
-  signing config. Re-running `tauri android init` overwrites them — diff before you
+  `ws://` inside the Tailscale tunnel — see `app/build.gradle.kts`), the
+  signing config, and `MainActivity`'s full `configChanges` list (any config relaunch
+  destroys the activity, and tao ends the process with it). Re-running `tauri android init` overwrites them — diff before you
   commit. `tauri.settings.gradle` (absolute local paths) and keystores stay ignored.
 - **Check before you assume a feature is missing.** [STATUS.md](STATUS.md) records what's
   been verified on a real device; a lot of what looks unfinished has been tested live.

@@ -86,7 +86,9 @@
   max-height: none;
 }
 
-/* ── Bottom dock: sticky above the mic FAB so CONVERSATION is always reachable ── */
+/* ── Bottom dock: one row of tabs, sticky above the mic FAB so Chat is always
+   reachable. It was five bordered buttons wrapping onto three rows (~200px, a
+   quarter of the screen) that the panels scrolled underneath. ── */
 .hud-viewport--mobile [data-slot="dock"] {
   position: sticky !important;
   left: auto !important;
@@ -103,28 +105,109 @@
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
   overflow: visible;
 }
+/* The STOP pill (index.css .phone-control-banner) takes the dock's 104px slot above
+   the mic; lift the dock by the pill's height while it's up so it never covers
+   CONVERSATION. */
+html:has(.phone-control-banner) .hud-viewport--mobile [data-slot="dock"] {
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px)) !important;
+}
 .hud-viewport--mobile .dock {
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 4px;
 }
-.hud-viewport--mobile .dock-btn {
-  min-height: 44px;
-  padding: 8px 10px;
-}
+.hud-viewport--mobile .dock-btn,
 .hud-viewport--mobile .dock-btn--chat {
-  flex: 1 1 100%;
+  flex: 1 1 0;
   min-width: 0;
-  margin-top: 4px;
+  min-height: 52px;
+  padding: 7px 2px 6px;
+  gap: 4px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  box-shadow: none;
+}
+.hud-viewport--mobile .dock-btn:active {
+  background: color-mix(in oklab, var(--ac) 14%, transparent);
+  transform: none;
 }
 .hud-viewport--mobile .dock-l {
-  font-size: 10px;
-  letter-spacing: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--body);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--txt-2);
 }
-.hud-viewport--mobile .sys-mobile-note {
-  margin: 8px 0 0;
-  font-size: 10px;
-  opacity: 0.55;
-  line-height: 1.35;
+.hud-viewport--mobile .dock-badge {
+  top: 6px;
+  right: calc(50% - 17px);
+}
+
+/* No hover on a touch screen: the agenda's edit/remove buttons were invisible. */
+.hud-viewport--mobile .sch-row {
+  grid-template-columns: 52px 14px minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+.hud-viewport--mobile .sch-edit {
+  position: static;
+  opacity: 1;
+  gap: 6px;
+}
+.hud-viewport--mobile .sch-edit button {
+  width: 32px;
+  height: 32px;
+}
+
+/* ── Status panel (readiness): one tappable row per thing a request depends on ── */
+.rdy {
+  --sp-warn: var(--amber); /* the readout's warn colour is otherwise scoped to .sp */
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px;
+}
+.rdy-row {
+  display: grid;
+  grid-template-columns: 20px auto minmax(0, 1fr) 15px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 6px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--txt);
+  font-family: var(--body);
+  font-size: 14.5px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rdy-row:first-child {
+  border-top: none;
+}
+.rdy-row:active {
+  background: color-mix(in oklab, var(--ac) 10%, transparent);
+}
+.rdy-ico {
+  color: var(--ac2);
+}
+.rdy-val {
+  justify-self: end;
+  font-size: 12.5px;
+}
+.rdy-val-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rdy-chev {
+  color: var(--txt-3);
 }
 
 /* ── Full-screen overlays: pin to the visible viewport, not the tall .hud canvas.
@@ -161,6 +244,29 @@
   }
   .hud-fixed-controls::-webkit-scrollbar {
     display: none;
+  }
+  /* Left of the icons: what JARVIS is doing, in view once the core scrolls away. */
+  .hud-appbar-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-right: auto;
+    padding-left: 4px;
+    font-family: var(--body);
+  }
+  .hud-appbar-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .hud-appbar-state {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    color: var(--txt);
   }
   .hud-fixed-btn {
     width: 40px;
@@ -375,44 +481,388 @@ html.app-mobile--overlay-open .hud-viewport--mobile {
   gap: var(--sp-2);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE CARDS
+   ══════════════════════════════════════════════════════════════════════════
+   Below the clock the panels are cards, not instruments: a quiet surface, a
+   sentence-case title with its live summary on the right, label → value rows.
+   The reactor core above stays the one piece of theatre. These come after the
+   frame rules above, so they win where both set something. */
+.hud-viewport--mobile .cbox {
+  border: 1px solid color-mix(in oklab, var(--ac) 13%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  background: #0a1119;
+  box-shadow: none;
+}
+.hud-viewport--mobile .cbox-c {
+  display: none;
+}
+.hud-viewport--mobile .cbox-title {
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+  color: var(--txt);
+}
+.hud-viewport--mobile .cbox-hd--btn:hover .cbox-title {
+  text-shadow: none;
+}
+.hud-viewport--mobile .cbox-code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--body);
+  font-size: 13.5px;
+  letter-spacing: 0;
+  color: var(--txt-2);
+}
+.hud-viewport--mobile .cbox-hd-right {
+  flex-shrink: 1;
+  min-width: 0;
+}
+/* The summary is for a folded card; open, the body says the same thing larger. */
+.hud-viewport--mobile .cbox--collapsible:not(.cbox--collapsed) .cbox-code {
+  display: none;
+}
+.hud-viewport--mobile .cbox-chev {
+  color: var(--txt-3);
+  font-size: 11px;
+}
+.hud-viewport--mobile .cbox-hd {
+  align-items: center;
+  min-height: 28px;
+}
+.hud-viewport--mobile .cbox--collapsed {
+  padding-bottom: 14px;
+}
+
+/* label → value rows, with an optional thin bar under the pair */
+.ph-stats {
+  display: flex;
+  flex-direction: column;
+}
+.ph-stat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-family: var(--body);
+}
+.ph-stat:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+.ph-stat-k {
+  font-size: 14px;
+  color: var(--txt-2);
+}
+/* Long values (an IPv6 address) wrap inside their column instead of drawing over
+   the label. */
+.ph-stat-v {
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-size: 14.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt);
+}
+.ph-stat-v.is-warn {
+  color: var(--amber);
+}
+.ph-stat .ph-meter {
+  grid-column: 1 / -1;
+}
+.ph-meter {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--ac) 10%, transparent);
+}
+.ph-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ac);
+}
+.ph-meter--warn > span {
+  background: var(--amber);
+}
+.ph-meter--ok > span {
+  background: #36d399;
+}
+
+/* one big figure (battery %, temperature) */
+.ph-big {
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt);
+}
+.ph-big small {
+  margin-left: 2px;
+  font-size: 0.5em;
+  font-weight: 500;
+  color: var(--txt-2);
+}
+.ph-big.is-warn {
+  color: var(--amber);
+}
+
+/* Battery */
+.ph-batt {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ph-batt-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--body);
+  font-size: 14.5px;
+  color: var(--txt);
+}
+.ph-batt-state span {
+  font-size: 13px;
+  color: var(--txt-2);
+}
+.ph-batt + .ph-meter {
+  height: 8px;
+  border-radius: 4px;
+}
+
+/* Weather */
+.ph-wx {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+.ph-wx-ico {
+  color: var(--ac);
+}
+.ph-wx-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-family: var(--body);
+}
+.ph-wx-cond {
+  font-size: 15px;
+  color: var(--txt);
+}
+.ph-wx-loc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--txt-2);
+}
+.ph-hours {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ph-hour {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--body);
+  color: var(--ac2);
+}
+.ph-hour-t {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt-2);
+}
+.ph-hour-c {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt);
+}
+.ph-hour-gap {
+  height: 20px;
+}
+
+/* Agenda — the same body type as everything else, time in tabular figures */
+.hud-viewport--mobile .sch-row {
+  grid-template-columns: 46px 12px minmax(0, 1fr) auto auto;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.hud-viewport--mobile .sch-row:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+.hud-viewport--mobile .sch-t {
+  font-family: var(--body);
+  font-weight: 500;
+  font-size: 13.5px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt-2);
+}
+.hud-viewport--mobile .sch-dot {
+  width: 8px;
+  height: 8px;
+  border-width: 2px;
+}
+.hud-viewport--mobile .sch-task {
+  font-family: var(--body);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+.hud-viewport--mobile .sch-dur {
+  font-family: var(--body);
+  font-size: 12px;
+  letter-spacing: 0;
+  border-width: 1px;
+}
+.hud-viewport--mobile .sch-edit button {
+  border-radius: 8px;
+  background: none;
+}
+/* Empty agenda: one left-aligned row instead of a centred poster (icon on its own line,
+   18px of padding round it). It was most of a screen on the phone to say "nothing". */
+.hud-viewport--mobile [data-slot="schedule"] .state-msg--empty {
+  flex-direction: row;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0;
+}
+.hud-viewport--mobile [data-slot="schedule"] .state-msg--empty .state-msg-ico {
+  margin: 2px 0 0;
+}
+.hud-viewport--mobile [data-slot="schedule"] .state-msg-title {
+  margin-bottom: 2px;
+}
+.hud-viewport--mobile .sch-add {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: var(--body);
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--ac2);
+}
+
+/* Action log — body type, a lamp per line instead of a shell prompt */
+.hud-viewport--mobile .term {
+  font-family: var(--body);
+  font-size: 14px;
+}
+.hud-viewport--mobile .term-line {
+  padding: 10px 0;
+  border-top-color: var(--line);
+}
+.hud-viewport--mobile .term-cmd {
+  color: var(--txt);
+}
+.hud-viewport--mobile .term-t {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-viewport--mobile .term-out {
+  padding-left: 18px;
+  font-size: 13px;
+}
+
 /* ── Memory overlay: full-screen sheet; sections become a tab row ── */
 .hud-viewport--mobile .memx {
   position: fixed !important;
   inset: 0 !important;
   z-index: 260 !important;
 }
+/* Same shell as every other sheet: a 56px header with the place's name and a
+   borderless close, the sheet surface, no tick timeline (2px ticks aren't tappable
+   on a phone). */
 .hud-viewport--mobile .memx-panel {
   inset: 0;
   border-radius: 0;
   border: none;
-  border-top: 1px solid var(--ac);
+  box-shadow: none;
+  background: color-mix(in srgb, var(--ac) 2%, #070d15);
 }
 .hud-viewport--mobile .memx-hd {
-  padding: max(16px, env(safe-area-inset-top, 0px)) 16px 10px;
+  align-items: center;
+  min-height: 56px;
+  padding: env(safe-area-inset-top, 0px) 8px 0 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ac) 10%, transparent);
+}
+.hud-viewport--mobile .memx-kicker,
+.hud-viewport--mobile .memx-loc,
+.hud-viewport--mobile .memx-tl {
+  display: none;
 }
 .hud-viewport--mobile .memx-title {
-  font-size: 24px;
+  font-family: "Orbitron", "Inter", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
-.hud-viewport--mobile .memx-tl {
-  padding: 0 16px 12px;
+.hud-viewport--mobile .memx-close {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+}
+.memx-lede {
+  margin-bottom: 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--txt-2);
 }
 .hud-viewport--mobile .memx-body {
   display: flex;
   flex-direction: column;
 }
+/* Sections as a segmented control, like Customize's choices. */
 .hud-viewport--mobile .memx-nav {
   flex-direction: row;
-  padding: 10px 12px;
-  border-right: none;
-  border-bottom: 1px solid var(--line);
+  gap: 0;
+  margin: 12px 16px 0;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--ac) 20%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ac) 6%, #070d14);
 }
 .hud-viewport--mobile .memx-navbtn {
+  display: flex;
+  align-items: center;
   flex: 1 1 0;
+  justify-content: center;
   min-width: 0;
-  min-height: 44px;
-  padding: 10px 8px;
-  font-size: 13px;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-size: 13.5px;
   gap: 6px;
+}
+.hud-viewport--mobile .memx-navbtn.is-on {
+  background: color-mix(in srgb, var(--ac) 18%, transparent);
+  font-weight: 600;
+}
+.hud-viewport--mobile .memx-sw {
+  display: none;
 }
 .hud-viewport--mobile .memx-navl {
   overflow: hidden;
@@ -440,4 +890,156 @@ html.app-mobile--overlay-open .hud-viewport--mobile {
 }
 .hud-viewport--mobile .memx-open {
   min-height: 36px;
+}
+
+/* Memory rows sit in one rounded well, like every other sheet's lists. */
+.hud-viewport--mobile .memx-list:not(:empty) {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ac) 20%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ac) 3.5%, #0b131d);
+}
+.hud-viewport--mobile .memx-list > li {
+  border-radius: 0;
+  border-top-color: color-mix(in srgb, var(--ac) 10%, transparent);
+}
+.hud-viewport--mobile .memx-row {
+  padding: 12px 14px;
+}
+.hud-viewport--mobile .memx-meta {
+  font-family: var(--body);
+  font-size: 12.5px;
+}
+.hud-viewport--mobile .memx-forget {
+  margin-left: auto;
+}
+
+/* ── Routines card: name and when on the left, Run on the right; tap for the steps ── */
+.rt {
+  display: flex;
+  flex-direction: column;
+}
+.rt-item + .rt-item {
+  border-top: 1px solid var(--line);
+}
+.rt-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+.rt-item:first-child .rt-row {
+  padding-top: 2px;
+}
+.rt-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: var(--body);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rt-name {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--txt);
+}
+.rt-name::first-letter {
+  text-transform: uppercase;
+}
+.rt-when {
+  font-size: 13px;
+  color: var(--txt-2);
+}
+.rt-run {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in oklab, var(--ac) 45%, transparent);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--ac) 12%, transparent);
+  color: var(--ac2);
+  font-family: var(--body);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rt-run:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.rt-detail {
+  padding: 0 0 12px;
+}
+.rt-steps {
+  margin-bottom: 10px;
+  font-family: var(--body);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--txt-2);
+}
+.rt-remove {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--txt-2);
+  font-family: var(--body);
+  font-size: 13px;
+  cursor: pointer;
+}
+.rt-acts {
+  display: flex;
+  gap: 8px;
+}
+.rt-remove.is-armed {
+  color: #ff97a3;
+  border-color: rgba(255, 84, 104, 0.5);
+  background: rgba(255, 84, 104, 0.1);
+}
+.rt-hint {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-family: var(--body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--txt-3);
+}
+
+/* Add/edit form: the agenda's inline form, plus steps, days and refusals */
+.rt-form {
+  margin: 10px 0;
+}
+.rt-form textarea {
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.rt-form-note,
+.rt-form-err {
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--txt-2);
+}
+.rt-form-err {
+  color: #ff97a3;
+}
+.rt-form .cz-seg-btn {
+  min-width: 0;
+  font-size: 13.5px;
+}
+.rt-form-go > * {
+  flex: 1;
 }

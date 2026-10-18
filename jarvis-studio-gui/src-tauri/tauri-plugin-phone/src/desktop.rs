@@ -172,6 +172,7 @@ impl<R: Runtime> Phone<R> {
             ok: false,
             summary: "On-phone control is only available on Android.".into(),
             task_id: String::new(),
+            goal: String::new(),
             state: String::new(),
             step: 0,
             receipt: String::new(),
@@ -204,6 +205,18 @@ impl<R: Runtime> Phone<R> {
     unavailable_command!(config_secret_delete(ConfigSecretNameRequest));
     pub fn tv_shell(&self, _p: TvShellRequest) -> crate::Result<serde_json::Value> {
         Ok(serde_json::json!({ "ok": false, "output": "", "exitCode": -1, "summary": "TV control is only available on Android." }))
+    }
+    pub fn schedule_routines(&self, _p: ScheduleRoutinesRequest) -> crate::Result<ScheduleRoutinesResponse> {
+        Ok(ScheduleRoutinesResponse {
+            ok: false,
+            summary: "Routine notifications are only available on Android.".into(),
+            exact: false,
+            notifications: false,
+            next_at: -1,
+        })
+    }
+    pub fn poll_routine_tap(&self) -> crate::Result<RoutineTapResponse> {
+        Ok(RoutineTapResponse { seq: 0, name: String::new(), date: String::new() })
     }
     pub fn identity_info(&self) -> crate::Result<IdentityInfoResponse> {
         Ok(IdentityInfoResponse {
