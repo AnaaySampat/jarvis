@@ -256,6 +256,18 @@ same change, and don't advertise a capability the device doesn't have.** A coloc
 that walks the palette and asserts every advertised action is accepted is the cheap guard
 — `brain/mobile/screenConfig.test.ts` does exactly that.
 
+### A turn advertises part of the palette (2026-10-19)
+
+Every declaration is input tokens on every call, resent on each tool round: the whole
+palette is ~16k characters (~4k tokens), against free-tier per-minute token caps.
+`turnPalette()` sends **core** (every tool no group lists: the one-step phone actions,
+`phone_task`, `pc_task`, `tv_control`, web search, timers…) plus the `TOOL_GROUPS` whose
+cue words the request contains or that the last two turns called; `load_tools` brings in
+any other group. It is handled inside `runTurn` (it changes the palette for the rest of
+the turn and dispatches nothing), and a round spent only on it is free, once. A group's
+tools still go through `toSpec` → `dispatch` like any other: this decides what is
+*advertised*, never how a call runs. The desktop does the same in `live_tools.py`.
+
 Roughly what's dispatched today: `weather`, `news`, `search_web`, `places`, `directions`,
 `set_location`, `reminder`, `schedule`, `agenda`, `clock`, `time`, `day`, `remember`,
 `forget`, `playbook`, `routine`, `qr_code`, `generate_image`, `record`, `clipboard`,
@@ -727,9 +739,17 @@ forwards whole tasks to it.
 ## 6a. Controlling the TV
 
 The phone drives the user's Android TV over **network ADB**, the TV's own "USB
-debugging" on the home Wi-Fi (port 5555). Nothing is installed on the TV. The TV must be
-on the same LAN as the phone; it is never reached over Tailscale.
+debugging" on the home Wi-Fi (port 5555). Nothing is installed on the TV. The TV is
+reached on the same LAN as the phone, or — only if the user installs Tailscale on the TV
+and adds its address — over their tailnet.
 
+- **One TV, one or more addresses.** The saved host may be a comma list ("192.168.1.20,
+  100.101.1.2"): `nativeTvShell` tries each when the last was unreachable, and the one that
+  answered goes first next time. The second is meant for the TV's Tailscale address: a
+  home with two routers, the second in router mode, has two networks, and nothing on the
+  first can open a connection into the second (the PC timed out from a different subnet
+  in the 2026-09-30 spike). A refusal from the TV ends the attempt: another path to the
+  same TV won't change it. When nothing answers, the reply says that may be the cause.
 - **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
   `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
   enters a command through `shellQuote()` or as a validated package name or title id, so

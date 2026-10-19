@@ -264,12 +264,15 @@ export default function MobileRemotePC({
             </span>
             {tvConfig && <span className="sp-readout sp-readout--on">{tvConfig.host}</span>}
           </div>
-          <Field label="TV's IP address" hint="On the TV: Settings, Network shows it.">
+          <Field
+            label="TV's IP address"
+            hint="On the TV: Settings, Network shows it. Two routers at home? Add the TV's Tailscale address after a comma; JARVIS uses whichever answers."
+          >
             <div className="sp-inline">
               <input
                 className="sp-input sp-mono"
                 type="text"
-                inputMode="decimal"
+                inputMode="text"
                 placeholder="192.168.0.50"
                 aria-label="TV's IP address"
                 value={tvHost}

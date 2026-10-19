@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   findEpisode,
+  nativeTvShell,
+  OTHER_NETWORK_HINT,
   runTvControl,
   sameTitle,
   shellQuote,
   titleNameIn,
+  tvAddresses,
   type ShellReply,
   type TvEnv,
 } from "./tv";
@@ -254,5 +257,55 @@ describe("helpers", () => {
     expect(sameTitle("Stranger Things", "stranger things season 4")).toBe(true);
     expect(sameTitle("Amélie", "amelie")).toBe(true);
     expect(sameTitle("Money Heist", "La Casa de Papel")).toBe(false);
+  });
+});
+
+describe("nativeTvShell across networks", () => {
+  const reply = (ok: boolean, summary = "", output = "") => ({
+    ok,
+    output,
+    exitCode: ok ? 0 : -1,
+    summary,
+  });
+  const UNREACHABLE =
+    "I can't reach the TV at 192.168.1.20:5555. Check it's on, on the same Wi-Fi as this phone, with USB debugging on.";
+
+  it("reads every address in a saved host", () => {
+    expect(tvAddresses("192.168.1.20, 100.101.1.2:5555; bad!")).toEqual([
+      "192.168.1.20",
+      "100.101.1.2:5555",
+    ]);
+  });
+
+  it("falls through to the next address and goes there first after", async () => {
+    const tried: string[] = [];
+    const shell = nativeTvShell("192.168.1.20, 100.101.1.2", async (address) => {
+      tried.push(address);
+      return address === "100.101.1.2" ? reply(true, "", "BRAVIA") : reply(false, UNREACHABLE);
+    });
+    expect((await shell("getprop ro.product.model")).output).toBe("BRAVIA");
+    tried.length = 0;
+    await shell("echo");
+    expect(tried).toEqual(["100.101.1.2"]);
+  });
+
+  it("doesn't try another way when the TV refused the phone", async () => {
+    const tried: string[] = [];
+    const shell = nativeTvShell("192.168.1.20, 100.101.1.2", async (address) => {
+      tried.push(address);
+      return reply(
+        false,
+        'The TV didn\'t allow this phone. Accept "Allow USB debugging?" on the TV.',
+      );
+    });
+    const r = await shell("echo");
+    expect(tried).toEqual(["192.168.1.20"]);
+    expect(r.summary).not.toContain(OTHER_NETWORK_HINT);
+  });
+
+  it("says another router's network may be the cause when nothing answers", async () => {
+    const r = await nativeTvShell("192.168.1.20", async () => reply(false, UNREACHABLE))("echo");
+    expect(r.ok).toBe(false);
+    expect(r.summary).toContain("Access Point mode");
   });
 });

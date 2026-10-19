@@ -708,3 +708,91 @@ function upperTypes(schema: unknown): unknown {
   }
   return schema;
 }
+
+// ── Tool groups: what one chat turn advertises ────────────────────────────────
+// Every declaration is input tokens on every call — the whole palette is ~16k
+// characters (~4k tokens), resent on each tool round, against free-tier per-minute
+// token caps. A turn carries CORE (every tool no group lists), plus any group its
+// words or the last two turns point at; load_tools pulls in the rest for one extra
+// round trip. Mirrors the desktop's llm/live_tools.py GROUPS (2026-10-19).
+
+export const LOAD_TOOLS = "load_tools";
+
+export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: RegExp }> = {
+  files: {
+    blurb: "files and the clipboard: read a file, list a folder, open a saved file",
+    tools: ["read_file", "list_directory", "open_saved_file", "read_clipboard"],
+    cue: /\b(files?|folders?|director(?:y|ies)|documents?|downloads|clipboard|copied|paste|saved|read (?:the|my|this|that))\b/i,
+  },
+  places: {
+    blurb: "nearby places, directions and distances, pinning the user's location",
+    tools: ["find_places", "get_directions", "set_my_location"],
+    cue: /\b(near(?:by|est)?|closest|around here|directions?|how far|distance|route|restaurants?|caf[eé]s?|coffee|bakery|pharmacy|atm|hotels?|petrol|fuel|mall|airport|station|where am i|my location|i'?m (?:in|at|near)|i am (?:in|at|near)|pin)\b/i,
+  },
+  media: {
+    blurb: "recording, screenshots, QR codes, generating images",
+    tools: ["record", "take_screenshot", "make_qr_code", "generate_image"],
+    cue: /\b(record(?:ing)?|screenshot|screen ?shot|qr|image|picture|draw(?:ing)?|logo|wallpaper|illustration|generate)\b/i,
+  },
+  planner: {
+    blurb: "the agenda, routines, playbooks, and listing or cancelling alarms and timers",
+    tools: ["manage_schedule", "manage_routine", "manage_playbook", "manage_clock"],
+    cue: /\b(schedule|agenda|calendar|meeting|appointment|routines?|playbooks?|every (?:day|morning|evening|night|week|weekday)|each (?:day|morning)|daily|weekdays?|weekends?|teach|recipe|alarms|timers|cancel|delete|dismiss)\b/i,
+  },
+  hud: {
+    blurb: "JARVIS's own screen: theme, background, panels, opening its views, clearing the chat",
+    tools: ["customize_screen", "control_interface", "clear_conversation"],
+    cue: /\b(theme|colou?r|background|panels?|hud|layout|density|compact|interface|clear|reset|minimi[sz]e|expand|collapse|settings|memory|customi[sz]e|conversation mode|mute|unmute|new chat)\b/i,
+  },
+  system: {
+    blurb: "news headlines, the time or date, forgetting a remembered fact",
+    tools: ["get_news", "get_time", "get_day", "forget_fact"],
+    cue: /\b(news|headlines|time|date|what day|forget)\b/i,
+  },
+};
+
+const GROUP_OF = new Map(
+  Object.entries(TOOL_GROUPS).flatMap(([g, { tools }]) => tools.map((t) => [t, g] as const)),
+);
+
+/** The group a tool belongs to; undefined for a CORE tool. */
+export function groupOf(tool: string): string | undefined {
+  return GROUP_OF.get(tool);
+}
+
+/** The groups a request's own words point at. */
+export function groupsFor(text: string): Set<string> {
+  return new Set(Object.keys(TOOL_GROUPS).filter((g) => TOOL_GROUPS[g]!.cue.test(text ?? "")));
+}
+
+/** Group names out of a load_tools call: a list, or one name / a comma list. */
+export function requestedGroups(args: Record<string, unknown> | undefined): string[] {
+  const raw = args?.groups ?? args?.group;
+  const items = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+  return items.map((g) => String(g).trim().toLowerCase()).filter((g) => g in TOOL_GROUPS);
+}
+
+/** This turn's palette: CORE, the active groups, and load_tools for what's left out. */
+export function turnPalette(full: ToolDeclaration[], active: Set<string>): ToolDeclaration[] {
+  const out = full.filter((d) => {
+    const g = groupOf(d.name);
+    return !g || active.has(g);
+  });
+  const missing = Object.keys(TOOL_GROUPS).filter(
+    (g) => !active.has(g) && full.some((d) => groupOf(d.name) === g),
+  );
+  if (missing.length) {
+    out.push(
+      fn(
+        LOAD_TOOLS,
+        "Some of your tools aren't loaded this turn. If the request needs one, call this FIRST " +
+          "with its group, then use the tool. Groups: " +
+          missing.map((g) => `${g} = ${TOOL_GROUPS[g]!.blurb}`).join("; ") +
+          ".",
+        { groups: str("The group name(s), comma-separated: " + missing.join(", ") + ".") },
+        ["groups"],
+      ),
+    );
+  }
+  return out;
+}
