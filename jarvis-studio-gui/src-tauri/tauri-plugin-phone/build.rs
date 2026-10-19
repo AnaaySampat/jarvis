@@ -58,6 +58,9 @@ const COMMANDS: &[&str] = &[
     "tv_shell",
     "schedule_routines",
     "poll_routine_tap",
+    "device_action",
+    "comm_action",
+    "notification_action",
 ];
 
 fn main() {

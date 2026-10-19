@@ -58,4 +58,7 @@ permissions = [
     "allow-tv-shell",
     "allow-schedule-routines",
     "allow-poll-routine-tap",
+    "allow-device-action",
+    "allow-comm-action",
+    "allow-notification-action",
 ]

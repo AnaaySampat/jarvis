@@ -290,14 +290,36 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
           summary: "Power off and restart aren't available from the app on Android.",
         };
       }
-      if (cmd.includes("lock")) {
-        return {
-          ok: true,
-          summary: "Use your phone's power button to lock the screen, sir.",
-        };
-      }
+      if (cmd.includes("lock")) return platform.direct.device({ action: "lock_screen" });
       return platform.system.control(cmd || "settings");
     }
+
+    // ── One-step Android actions (DirectActions.kt) — no operator loop ──
+    case "device": {
+      const action = String(spec.do ?? "").trim().toLowerCase();
+      // Brightness: an omitted level means "auto", never a silent 0%.
+      const raw = spec.value;
+      const value =
+        action === "brightness" && (raw === undefined || raw === null || raw === "")
+          ? -1
+          : Number(raw ?? 0);
+      return platform.direct.device({ action, value: Number.isFinite(value) ? value : 0 });
+    }
+    case "navigate": {
+      const destination = String(spec.destination ?? "").trim();
+      if (!destination) return { ok: false, summary: "Where to, sir?" };
+      return platform.direct.device({ action: "navigate", query: destination, mode: String(spec.mode ?? "") });
+    }
+    case "play_media": {
+      const query = String(spec.query ?? "").trim();
+      if (!query) return { ok: false, summary: "What should I play, sir?" };
+      return platform.direct.device({ action: "play", query, app: String(spec.app ?? "") });
+    }
+    case "message":
+    case "call":
+      return runComm(deps, spec);
+    case "notifications":
+      return platform.direct.readNotifications(String(spec.app ?? ""), String(spec.from ?? ""));
 
     case "time":
       return { ok: true, summary: new Date().toLocaleTimeString() };
@@ -391,6 +413,57 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
 function notReady(msg: string): ToolResult {
   return { ok: false, summary: msg, error: "not_implemented" };
 }
+
+/**
+ * A message or a call, in one step instead of a phone_task. Native looks the person
+ * up first; the user approves exactly that person, number and text (a send can't be
+ * taken back, and a web page or message the model read could have asked for it —
+ * SECURITY M1); only then does native send to the approved number.
+ */
+async function runComm(deps: DispatchDeps, spec: ActionSpec): Promise<ToolResult> {
+  const calling = spec.type === "call";
+  const to = String(spec.to ?? "").trim();
+  const text = String(spec.text ?? "").trim();
+  if (!to) return { ok: false, summary: calling ? "Who should I call, sir?" : "Who should I message, sir?" };
+  if (!calling && !text) return { ok: false, summary: "What should the message say, sir?" };
+
+  const direct = deps.platform.direct;
+  const app = calling ? (spec.app === "whatsapp" ? "whatsapp" : "phone") : String(spec.app ?? "whatsapp");
+  const video = calling && app === "whatsapp" && spec.video === true;
+  const found = await direct.resolveContact(to, app);
+  if (!found.ok) return { ok: false, summary: found.summary, error: found.error };
+  const target = found.target;
+
+  const who = target.number && target.number !== target.name ? `${target.name} (${target.number})` : target.name;
+  const where = calling && app === "phone" ? "" : ` on ${COMM_APP_LABEL[target.app] ?? target.app}`;
+  if (!deps.authorizePhoneAction) {
+    return {
+      ok: false,
+      summary: "I can't send messages or place calls without asking you first, and I have no way to ask here.",
+      error: "approval_unavailable",
+    };
+  }
+  const decision = await deps.authorizePhoneAction({
+    taskId: `${spec.type}_${Date.now()}`,
+    risk: "R2",
+    action: calling ? "call" : "message",
+    target: `${who}${where}`,
+    reason: calling
+      ? `${video ? "video call" : "call"} ${who}${where}`
+      : `send “${text.slice(0, 200)}” to ${who}${where}`,
+    untrustedScreenText: "",
+  });
+  if (decision === "deny") {
+    return {
+      ok: false,
+      summary: `I didn't ${calling ? "call" : "send"} that, sir — you didn't approve it.`,
+      error: "approval_denied",
+    };
+  }
+  return calling ? direct.call(target, video) : direct.message(target, text);
+}
+
+const COMM_APP_LABEL: Record<string, string> = { whatsapp: "WhatsApp", sms: "SMS" };
 
 /**
  * JARVIS controlling its OWN interface. Unlike phone_task (which drives OTHER apps

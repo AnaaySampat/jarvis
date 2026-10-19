@@ -169,8 +169,9 @@ object NativeOperator {
         }
 
     /** Allowed from the background: a bound AccessibilityService exempts the app from
-     *  Android's background-activity-launch limits (the same reason open_app works). */
-    private suspend fun bringToFront(context: Context) = withContext(Dispatchers.Main) {
+     *  Android's background-activity-launch limits (the same reason open_app works).
+     *  Also used by DirectActions after a WhatsApp send. */
+    internal suspend fun bringToFront(context: Context) = withContext(Dispatchers.Main) {
         try {
             launchIntent(context)?.let(context::startActivity)
         } catch (e: RuntimeException) {

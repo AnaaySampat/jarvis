@@ -59,6 +59,29 @@ describe("runTurn — said it did it but didn't", () => {
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", false)).toBe(true);
     // Live 2026-09-30, no tool call and the wrong show named.
     expect(claimedWithoutActing("Resume", "Resumed — back to *Arcane* on Netflix.", false)).toBe(true);
+    // Live 2026-10-18: a bare acknowledgement, no tool call, volume unchanged.
+    expect(claimedWithoutActing("increase the volume", "OK.", false)).toBe(true);
+    expect(claimedWithoutActing("turn on the flashlight", "Sure thing, sir!", false)).toBe(true);
+    // An acknowledgement that goes on to say something real is not caught by this rule.
+    expect(claimedWithoutActing("set an alarm", "OK — for what time?", false)).toBe(false);
+    // Live 2026-10-18: claimed a WhatsApp reply was sent; no tool ran, nothing was sent.
+    expect(
+      claimedWithoutActing(
+        "can you reply to dad's notification by saying that this was a test",
+        "Yes, sir. I've sent the reply to Dad on WhatsApp.",
+        false,
+      ),
+    ).toBe(true);
+    expect(claimedWithoutActing("call mom", "Calling Mom now.", false)).toBe(true);
+    // Live 2026-10-18: no tool ran, Maps never opened.
+    expect(
+      claimedWithoutActing(
+        "can you set a route to the city library?",
+        "Got it — routing you to the city library by car.",
+        false,
+      ),
+    ).toBe(true);
+    expect(claimedWithoutActing("navigate to the airport", "Sure, which terminal?", false)).toBe(false);
   });
 });
 
@@ -106,7 +129,9 @@ describe("runTurn — answered about the phone without looking", () => {
   it("without the words 'on my phone'", () => {
     for (const q of ["what model is my phone?", "is this phone on silent?", "what's my battery at",
       "which wifi am I on? my wifi keeps dropping", "what android version am I running",
-      "how much storage does my device have left"]) {
+      "how much storage does my device have left",
+      // Live 2026-10-18: answered "none" from the previous turn without reading again.
+      "can you check my notifications?", "any new messages?", "do I have unread texts"]) {
       expect(answeredPhoneWithoutLooking(q, false), q).toBe(true);
     }
     for (const q of ["what's the capital of France?", "tell me a joke", "who won the match yesterday",

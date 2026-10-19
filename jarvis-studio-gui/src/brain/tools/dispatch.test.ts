@@ -69,3 +69,102 @@ describe("onDispatched", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+describe("one-step messages and calls", () => {
+  const target = { name: "Mom", number: "+91 98200 12345", route: "chat", app: "whatsapp" };
+
+  function commDeps(opts: {
+    lookup?: unknown;
+    decision?: "allow" | "deny" | "allow_task";
+    noApprover?: boolean;
+  }) {
+    const direct = {
+      device: vi.fn(async () => ({ ok: true, summary: "done" })),
+      resolveContact: vi.fn(async () => opts.lookup ?? { ok: true, target }),
+      message: vi.fn(async () => ({ ok: true, summary: "Sent to Mom on WhatsApp." })),
+      call: vi.fn(async () => ({ ok: true, summary: "Calling Mom." })),
+      readNotifications: vi.fn(async () => ({ ok: true, summary: "No notifications are showing." })),
+    };
+    const authorizePhoneAction = vi.fn(async () => opts.decision ?? "allow");
+    const deps = {
+      platform: { direct } as unknown as Platform,
+      config: { tier: "groq", model: "m", keys: { groq: ["k"] } },
+      ...(opts.noApprover ? {} : { authorizePhoneAction }),
+    } as unknown as DispatchDeps;
+    return { deps, direct, authorizePhoneAction };
+  }
+
+  it("looks the person up, asks about exactly that person and text, then sends", async () => {
+    const { deps, direct, authorizePhoneAction } = commDeps({});
+    const res = await dispatch({ type: "message", to: "mom", text: "on my way", app: "whatsapp" }, deps);
+    expect(direct.resolveContact).toHaveBeenCalledWith("mom", "whatsapp");
+    expect(authorizePhoneAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        risk: "R2",
+        action: "message",
+        target: "Mom (+91 98200 12345) on WhatsApp",
+        reason: "send “on my way” to Mom (+91 98200 12345) on WhatsApp",
+      }),
+    );
+    expect(direct.message).toHaveBeenCalledWith(target, "on my way");
+    expect(res).toEqual({ ok: true, summary: "Sent to Mom on WhatsApp." });
+  });
+
+  it("sends nothing when the user denies", async () => {
+    const { deps, direct } = commDeps({ decision: "deny" });
+    const res = await dispatch({ type: "message", to: "mom", text: "hi" }, deps);
+    expect(direct.message).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ ok: false, error: "approval_denied" });
+  });
+
+  it("refuses outright when there is no way to ask", async () => {
+    const { deps, direct } = commDeps({ noApprover: true });
+    const res = await dispatch({ type: "call", to: "dad" }, deps);
+    expect(direct.call).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ ok: false, error: "approval_unavailable" });
+  });
+
+  it("passes an ambiguous lookup back as a question, without asking to send", async () => {
+    const lookup = { ok: false, summary: "More than one contact matches \"Rahul\": Rahul M, Rahul S. Which one?", error: "ambiguous" };
+    const { deps, direct, authorizePhoneAction } = commDeps({ lookup });
+    const res = await dispatch({ type: "message", to: "Rahul", text: "hi" }, deps);
+    expect(authorizePhoneAction).not.toHaveBeenCalled();
+    expect(direct.message).not.toHaveBeenCalled();
+    expect(res).toEqual({ ok: false, summary: lookup.summary, error: "ambiguous" });
+  });
+
+  it("calls through the phone app with the approved target", async () => {
+    const { deps, direct, authorizePhoneAction } = commDeps({});
+    await dispatch({ type: "call", to: "mom" }, deps);
+    expect(direct.resolveContact).toHaveBeenCalledWith("mom", "phone");
+    expect(authorizePhoneAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "call", reason: "call Mom (+91 98200 12345)" }),
+    );
+    expect(direct.call).toHaveBeenCalledWith(target, false);
+  });
+
+  it("places a WhatsApp video call, saying so in the approval", async () => {
+    const { deps, direct, authorizePhoneAction } = commDeps({});
+    await dispatch({ type: "call", to: "mom", app: "whatsapp", video: true }, deps);
+    expect(direct.resolveContact).toHaveBeenCalledWith("mom", "whatsapp");
+    expect(authorizePhoneAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "call", reason: "video call Mom (+91 98200 12345) on WhatsApp" }),
+    );
+    expect(direct.call).toHaveBeenCalledWith(target, true);
+  });
+
+  it("asks for what's missing before touching the phone", async () => {
+    const { deps, direct } = commDeps({});
+    expect((await dispatch({ type: "message", to: "mom", text: " " }, deps)).ok).toBe(false);
+    expect((await dispatch({ type: "call", to: "" }, deps)).ok).toBe(false);
+    expect(direct.resolveContact).not.toHaveBeenCalled();
+  });
+
+  it("treats a brightness call with no level as auto, never 0%", async () => {
+    const { deps, direct } = commDeps({});
+    await dispatch({ type: "device", do: "brightness" }, deps);
+    expect(direct.device).toHaveBeenCalledWith({ action: "brightness", value: -1 });
+    await dispatch({ type: "device", do: "Flashlight_On" }, deps);
+    expect(direct.device).toHaveBeenLastCalledWith({ action: "flashlight_on", value: 0 });
+  });
+});

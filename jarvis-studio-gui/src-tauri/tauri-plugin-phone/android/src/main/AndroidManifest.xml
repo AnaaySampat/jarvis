@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Alarms and timers are set in the user's REAL Clock app via the public
          android.provider.AlarmClock intents (PhonePlugin.clockAction), never as an
@@ -42,6 +43,20 @@
          requires this manifest declaration or Vibrator calls silently no-op. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- One-step actions (DirectActions.kt). Each is asked for on first use, never at
+         install, and every send or call is approved by the user first (dispatch.ts).
+         Contacts: find "Mom" to message or call her. SMS / phone: send and dial
+         directly; without them JARVIS opens Messages / the dialer prefilled instead.
+         Notification policy: Do Not Disturb and silent mode (a Settings toggle the
+         user flips). WRITE_SETTINGS: brightness and auto-rotate (same). -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <application>
         <!-- The JARVIS accessibility service. Enabled by the user in Settings ▸
              Accessibility (it cannot be granted programmatically). The manifest
@@ -57,6 +72,20 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Notification access (JarvisNotificationListener.kt): read notifications on
+             request, and reply through a notification's own reply button so a WhatsApp
+             answer needs nothing on screen. Enabled by the user in Settings ▸
+             Notification access; it cannot be granted programmatically. -->
+        <service
+            android:name="com.jarvis.phone.JarvisNotificationListener"
+            android:exported="false"
+            android:label="JARVIS"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <!-- Keeps "Hey Jarvis" listening while backgrounded/screen-locked. Shows an

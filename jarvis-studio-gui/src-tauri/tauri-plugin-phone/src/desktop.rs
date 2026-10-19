@@ -218,6 +218,13 @@ impl<R: Runtime> Phone<R> {
     pub fn poll_routine_tap(&self) -> crate::Result<RoutineTapResponse> {
         Ok(RoutineTapResponse { seq: 0, name: String::new(), date: String::new() })
     }
+    unavailable_command!(device_action(DeviceActionRequest));
+    pub fn comm_action(&self, _p: CommActionRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "On-phone control is only available on Android.", "code": "not_on_device" }))
+    }
+    pub fn notification_action(&self, _p: NotificationActionRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "On-phone control is only available on Android.", "code": "not_on_device" }))
+    }
     pub fn identity_info(&self) -> crate::Result<IdentityInfoResponse> {
         Ok(IdentityInfoResponse {
             ok: false,

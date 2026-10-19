@@ -673,6 +673,59 @@ pub struct CalendarResponse {
     pub event_id: Option<i64>,
 }
 
+// ── One-step Android actions (DirectActions.kt) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceActionRequest {
+    /// flashlight_on | dnd_on | media_next | brightness | navigate | play | … (see PhonePlugin.deviceAction)
+    pub action: String,
+    /// Brightness 0-100 (-1 = auto) or volume steps.
+    #[serde(default)]
+    pub value: i32,
+    /// navigate: the destination; play: what to play.
+    #[serde(default)]
+    pub query: String,
+    /// play: spotify | youtube_music | "" (first installed).
+    #[serde(default)]
+    pub app: String,
+    /// navigate: driving | walking | bicycling.
+    #[serde(default)]
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommActionRequest {
+    /// resolve | message | call
+    pub action: String,
+    /// resolve: the contact name or number the user said.
+    #[serde(default)]
+    pub to: String,
+    /// message: the exact text to send.
+    #[serde(default)]
+    pub text: String,
+    /// whatsapp | sms | phone | another messaging app's name.
+    #[serde(default)]
+    pub app: String,
+    /// message/call: the contact and number `resolve` returned and the user approved.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub number: String,
+    /// call on WhatsApp: a video call instead of voice.
+    #[serde(default)]
+    pub video: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationActionRequest {
+    /// read | request_access
+    pub action: String,
+    #[serde(default)]
+    pub app: String,
+    #[serde(default)]
+    pub from: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClockActionRequest {
     /// alarm | timer | show_alarms | show_timers | dismiss_timer

@@ -49,6 +49,14 @@ the app**, so the phone needs no server and no Python.
   Each wake is double-checked: Whisper must also hear "Hey Jarvis" in the few seconds that
   triggered it, so conversation that merely mentions Jarvis doesn't start a command (say
   "Hey Jarvis", not just "Jarvis").
+- **One-step phone actions** — flashlight, Do Not Disturb, ringer, play/pause/skip,
+  volume, brightness, auto-rotate, lock screen; "message Mom on WhatsApp", "call Dad on
+  WhatsApp", texts and phone calls by contact name (you confirm each one on screen first); "navigate to …" in Google
+  Maps; "play … on Spotify"; reading your notifications and replying through them. Each
+  asks for its permission the first time. Notification access is a restricted setting on
+  sideloaded installs: App info ▸ ⋮ ▸ Allow restricted settings, then turn it on.
+  Wi-Fi, Bluetooth, mobile data and airplane mode can't be switched by any app on
+  Android 13+, so those still go through the operator below.
 - **Phone control** — an AccessibilityService operator drives other apps step by step
   (read the screen → decide one action → do it → repeat), with a planner and a verifier.
   The loop runs natively in Kotlin, so a task keeps going after JARVIS leaves the screen.

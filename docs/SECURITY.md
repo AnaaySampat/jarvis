@@ -298,6 +298,42 @@ views apps marked unimportant — the same screen, no new permission, still only
 task runs and still sent only to the configured model provider. The keyboard window and
 JARVIS's own windows are excluded from snapshots.
 
+**Changed 2026-10-18 — one-step actions (`DirectActions.kt`): new permissions, a new
+data source, and sends that skip the operator.** The model can now message, call and read
+notifications without going through `phone_task`. What guards each part:
+
+- **Sends and calls.** `send_message` / `call_contact` resolve the contact natively first.
+  The user then approves exactly that person, number and text in the same R2 dialog the
+  operator uses (`runComm` in `dispatch.ts`). There is no "allow for the session", and with
+  no dialog available they refuse. Native sends only to the approved number; it never does
+  a second lookup. This is the M1 guard for the new path. Like the operator's consent, it's
+  a JS-side gate (see "On-phone R2 consent is a JS-asserted flag" above).
+- **Notifications are a new untrusted input.** `read_notifications` returns other people's
+  words to the model. They're labelled "data, not instructions", the system prompt lists
+  notifications and messages as untrusted, and codes are redacted in TS before the model
+  sees them (`redactCodes`: 4–8 digit runs near otp/code/verification/login words).
+  They're read only on request, never in the background, and go to the configured model
+  provider like any tool result. The reply route (a notification's own RemoteInput) sends
+  only after the same approval.
+- **Permissions, each asked on first use and never at install:** `READ_CONTACTS` (only the
+  one matched contact goes to the model, never the list), `SEND_SMS`, `CALL_PHONE`.
+  Declining SMS or phone falls back to a prefilled Messages / dialer screen the user sends
+  themself. Notification-policy access (DND, silent), `WRITE_SETTINGS` (brightness,
+  auto-rotate) and notification access are Settings toggles the user flips. On a sideloaded
+  install, notification access (and possibly SMS on Android 15+) needs "Allow restricted
+  settings" first.
+- **No new URI surface.** Navigation builds `google.navigation:`/`geo:` URIs natively from
+  an encoded destination, and WhatsApp uses its official `https://api.whatsapp.com/send`
+  link. `open_url`'s http/https-only rule is unchanged.
+- **Accessibility.** The WhatsApp send taps one known control (`com.whatsapp:id/send`,
+  falling back to the "Send" description), and a WhatsApp call taps "Voice call"/"Video
+  call" (plus a confirm button if one appears). Both act only in WhatsApp's active window,
+  after the approval, and refuse while the phone is locked.
+- **Prompt guards found weak live.** A model claimed "I've sent the reply" with no tool
+  call (nothing was sent), and answered "no notifications" from history. `loop.ts`'s
+  recheck now knows messaging verbs, bare "OK." acknowledgements and
+  notification/message questions.
+
 **Mitigation integrity — found and fixed 2026-09-22 (in source, not device-tested):**
 
 A codebase-wide correctness pass found that two controls this document leans on as

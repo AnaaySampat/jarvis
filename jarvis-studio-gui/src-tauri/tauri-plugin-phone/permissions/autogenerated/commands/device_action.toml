@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-device-action"
+description = "Enables the device_action command without any pre-configured scope."
+commands.allow = ["device_action"]
+
+[[permission]]
+identifier = "deny-device-action"
+description = "Denies the device_action command without any pre-configured scope."
+commands.deny = ["device_action"]

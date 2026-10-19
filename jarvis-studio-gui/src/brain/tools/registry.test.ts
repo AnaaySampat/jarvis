@@ -1,5 +1,7 @@
+/// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import { toSpec, capabilitiesFor, toolPalette } from "./registry";
+import { toSpec, capabilitiesFor, toolPalette, DEVICE_ACTIONS } from "./registry";
+import kotlin from "../../../src-tauri/tauri-plugin-phone/android/src/main/java/DirectActions.kt?raw";
 
 describe("toSpec", () => {
   it("lowers a simple no-arg call", () => {
@@ -110,5 +112,64 @@ describe("toolPalette", () => {
       season: 0,
       episode: 0,
     });
+  });
+});
+
+describe("one-step phone tools", () => {
+  it("lowers each to its own spec", () => {
+    expect(toSpec("device_control", { action: "flashlight_on" })).toEqual({
+      type: "device",
+      do: "flashlight_on",
+      value: undefined,
+    });
+    expect(toSpec("send_message", { to: "Mom", text: "on my way" })).toEqual({
+      type: "message",
+      to: "Mom",
+      text: "on my way",
+      app: "whatsapp",
+    });
+    expect(toSpec("call_contact", { to: "Dad" })).toEqual({ type: "call", to: "Dad", app: "phone", video: false });
+    expect(toSpec("call_contact", { to: "Dad", app: "whatsapp", video: true })).toEqual({
+      type: "call",
+      to: "Dad",
+      app: "whatsapp",
+      video: true,
+    });
+    expect(toSpec("navigate_to", { destination: "Central Station" })).toEqual({
+      type: "navigate",
+      destination: "Central Station",
+      mode: "",
+    });
+    expect(toSpec("play_media", { query: "Back in Black", app: "spotify" })).toEqual({
+      type: "play_media",
+      query: "Back in Black",
+      app: "spotify",
+    });
+    expect(toSpec("read_notifications")).toEqual({ type: "notifications", app: "", from: "" });
+  });
+
+  it("replaces system_control, whose media actions had nothing behind them", () => {
+    const names = toolPalette({ tier: "groq", model: "m", keys: { groq: ["k"] } }).map((t) => t.name);
+    expect(names).not.toContain("system_control");
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "device_control",
+        "send_message",
+        "call_contact",
+        "navigate_to",
+        "play_media",
+        "read_notifications",
+      ]),
+    );
+  });
+
+  // ARCHITECTURE §3: an advertised enum value with no handler silently does nothing.
+  it("advertises only device actions DirectActions.kt has a branch for", () => {
+    const handled = new Set([...kotlin.matchAll(/^\s*"([a-z_]+)" ->/gm)].map((m) => m[1]));
+    expect(DEVICE_ACTIONS.filter((a) => !handled.has(a))).toEqual([]);
+    const tool = toolPalette({ tier: "groq", model: "m", keys: { groq: ["k"] } }).find(
+      (t) => t.name === "device_control",
+    );
+    expect(tool?.parameters?.properties.action?.enum).toEqual(DEVICE_ACTIONS);
   });
 });

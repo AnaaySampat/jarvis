@@ -50,7 +50,9 @@ Kotlin plugin), `mobile/screenConfig.ts`, `schedule/*`.
   `clear_conversation`, `get_time`, `get_day`, `manage_schedule`, `manage_clock`.
 - **Mapped to an Android API (native plugin):** `take_screenshot`,
   `open_application`/`close_application` (Intents/PackageManager), `open_website`,
-  `set_volume`/`system_control` (AudioManager), `record` (MediaRecorder),
+  `set_volume` (AudioManager), `record` (MediaRecorder),
+  `device_control`/`send_message`/`call_contact`/`navigate_to`/`play_media`/
+  `read_notifications` (one-step actions, `DirectActions.kt`),
   `read_clipboard`, `read_file`/`list_directory` (Storage Access Framework),
   `open_saved_file`, `customize_screen`.
 - **New on phone:** `phone_task` — the AccessibilityService operator (native Kotlin;

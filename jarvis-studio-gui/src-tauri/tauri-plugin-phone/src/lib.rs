@@ -96,6 +96,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::tv_shell,
             commands::schedule_routines,
             commands::poll_routine_tap,
+            commands::device_action,
+            commands::comm_action,
+            commands::notification_action,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

@@ -94,6 +94,9 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(tv_shell(payload: TvShellRequest) -> serde_json::Value, "tvShell");
     mobile_command!(schedule_routines(payload: ScheduleRoutinesRequest) -> ScheduleRoutinesResponse, "scheduleRoutines");
     mobile_command!(poll_routine_tap() -> RoutineTapResponse, "pollRoutineTap");
+    mobile_command!(device_action(payload: DeviceActionRequest) -> ActionResponse, "deviceAction");
+    mobile_command!(comm_action(payload: CommActionRequest) -> serde_json::Value, "commAction");
+    mobile_command!(notification_action(payload: NotificationActionRequest) -> serde_json::Value, "notificationAction");
     mobile_command!(identity_info() -> IdentityInfoResponse, "identityInfo");
     mobile_command!(identity_sign_auth(payload: IdentityAuthRequest) -> IdentitySignedResponse, "identitySignAuth");
     mobile_command!(identity_sign_envelope(payload: IdentityEnvelopeRequest) -> IdentitySignedResponse, "identitySignEnvelope");

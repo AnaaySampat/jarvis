@@ -124,6 +124,11 @@ phone_command!(config_secret_delete(name: String) -> ActionResponse, ConfigSecre
 phone_command!(tv_shell(host: String, command: String) -> serde_json::Value, TvShellRequest);
 phone_command!(schedule_routines(routines_json: String) -> ScheduleRoutinesResponse, ScheduleRoutinesRequest);
 phone_command!(poll_routine_tap() -> RoutineTapResponse);
+// One-step Android actions (DirectActions.kt). comm/notification replies carry
+// contact candidates and notification lists, passed through untouched.
+phone_command!(device_action(action: String, value: i32, query: String, app: String, mode: String) -> ActionResponse, DeviceActionRequest);
+phone_command!(comm_action(action: String, to: String, text: String, app: String, name: String, number: String, video: bool) -> serde_json::Value, CommActionRequest);
+phone_command!(notification_action(action: String, app: String, from: String) -> serde_json::Value, NotificationActionRequest);
 phone_command!(identity_info() -> IdentityInfoResponse);
 phone_command!(identity_sign_auth(host_id: String, nonce: String) -> IdentitySignedResponse, IdentityAuthRequest);
 phone_command!(identity_sign_envelope(connection_nonce: String, message_type: String, task_id: String, payload_digest: String) -> IdentitySignedResponse, IdentityEnvelopeRequest);

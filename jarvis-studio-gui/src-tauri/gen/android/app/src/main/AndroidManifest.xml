@@ -60,6 +60,19 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
         </intent>
+        <!-- One-step actions (DirectActions.kt): "play X on Spotify", and the prefilled
+             Messages / dialer fallbacks when SMS or phone permission is missing. -->
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
     </queries>
 
     <application

@@ -607,6 +607,48 @@ class JarvisAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
     }
 
+    /** Lock the screen (Android 9+). True when Android accepted it. */
+    fun lockScreen(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+
+    // ── One-shot control access for DirectActions (no model, no snapshot receipts) ──
+    // The caller names the exact app and view id (WhatsApp's Send), so there's nothing
+    // to disambiguate: only a node in that app, in the active window, is ever touched.
+
+    private fun nodeInApp(pkg: String, viewId: String, description: String): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        if (root.packageName?.toString() != pkg) return null
+        if (viewId.isNotEmpty()) {
+            // A full id ("android:id/button1", a dialog's OK) is used as given.
+            root.findAccessibilityNodeInfosByViewId(if (viewId.contains(':')) viewId else "$pkg:id/$viewId")
+                .firstOrNull { it.isVisibleToUser }
+                ?.let { return it }
+        }
+        if (description.isEmpty()) return null
+        return root.findAccessibilityNodeInfosByText(description).firstOrNull {
+            it.isVisibleToUser && it.contentDescription?.toString().equals(description, ignoreCase = true)
+        }
+    }
+
+    /** Wait up to [timeoutMs] for the control to appear, then click it (or its nearest
+     *  clickable parent). Blocking — call off the main thread. */
+    fun clickInApp(pkg: String, viewId: String, description: String, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            var node = nodeInApp(pkg, viewId, description)
+            while (node != null && !node.isClickable) node = node.parent
+            if (node != null && node.isEnabled) return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Thread.sleep(150)
+        }
+        return false
+    }
+
+    /** The text in a control of [pkg]'s active window; null when it isn't on screen. */
+    fun textInApp(pkg: String, viewId: String): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) clearCache()
+        return nodeInApp(pkg, viewId, "")?.text?.toString()
+    }
+
     private fun performGlobalNavigation(
         globalAction: Int,
         label: String,

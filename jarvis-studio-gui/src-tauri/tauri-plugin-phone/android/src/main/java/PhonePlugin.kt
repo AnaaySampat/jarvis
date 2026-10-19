@@ -296,6 +296,44 @@ internal class ClockArgs {
     var days: String = ""
 }
 
+/** One-step actions — see DirectActions.device for the action names. */
+@InvokeArg
+internal class DeviceActionArgs {
+    var action: String = ""
+    /** Brightness 0-100 (-1 = auto) or volume steps. */
+    var value: Int = 0
+    /** navigate: destination; play: what to play. */
+    var query: String = ""
+    /** play: spotify | youtube_music | "" */
+    var app: String = ""
+    /** navigate: driving | walking | bicycling */
+    var mode: String = ""
+}
+
+@InvokeArg
+internal class CommActionArgs {
+    /** resolve | message | call */
+    var action: String = ""
+    /** resolve: the name or number the user said. */
+    var to: String = ""
+    var text: String = ""
+    /** whatsapp | sms | phone | another messaging app's name */
+    var app: String = ""
+    /** message/call: what `resolve` returned and the user approved. */
+    var name: String = ""
+    var number: String = ""
+    /** call on WhatsApp: video instead of voice. */
+    var video: Boolean = false
+}
+
+@InvokeArg
+internal class NotificationActionArgs {
+    /** read | request_access */
+    var action: String = ""
+    var app: String = ""
+    var from: String = ""
+}
+
 /** Boundary validation for durable journal content.
  *
  * Room intentionally has no screenshot/blob/evidence-text column. Structured values
@@ -2073,6 +2111,27 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
             else -> result(false, "I don't know the calendar action '${args.action}'.")
         }
         invoke.resolve(response)
+    }
+
+    // ── One-step Android actions (DirectActions.kt) ─────────────────────────────
+    // Off the main thread: several wait for Android to report the new state back.
+
+    @Command
+    fun deviceAction(invoke: Invoke) {
+        val args = invoke.parseArgs(DeviceActionArgs::class.java)
+        autonomyScope.launch { invoke.resolve(DirectActions.device(activity, args)) }
+    }
+
+    @Command
+    fun commAction(invoke: Invoke) {
+        val args = invoke.parseArgs(CommActionArgs::class.java)
+        autonomyScope.launch { invoke.resolve(DirectActions.comm(activity, args)) }
+    }
+
+    @Command
+    fun notificationAction(invoke: Invoke) {
+        val args = invoke.parseArgs(NotificationActionArgs::class.java)
+        autonomyScope.launch { invoke.resolve(DirectActions.notifications(activity, args)) }
     }
 
     @Command

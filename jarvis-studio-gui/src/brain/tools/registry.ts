@@ -129,6 +129,30 @@ export const TV_ACTIONS = [
   "status",
 ];
 
+/** Every `device_control` action; each has its branch in DirectActions.device
+ *  (Kotlin) — registry.test.ts reads that file and fails on any that's missing. */
+export const DEVICE_ACTIONS = [
+  "flashlight_on",
+  "flashlight_off",
+  "dnd_on",
+  "dnd_off",
+  "ringer_normal",
+  "ringer_vibrate",
+  "ringer_silent",
+  "media_play",
+  "media_pause",
+  "media_play_pause",
+  "media_next",
+  "media_previous",
+  "volume_up",
+  "volume_down",
+  "mute",
+  "brightness",
+  "auto_rotate_on",
+  "auto_rotate_off",
+  "lock_screen",
+];
+
 /**
  * The full tool palette for the active config. A fresh array each call (callers
  * must not mutate a shared object) — mirrors `function_declarations()`.
@@ -154,17 +178,89 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
     fn("set_volume", "Set the media volume (0–100).", { level: int("Volume from 0 to 100.") }, [
       "level",
     ]),
+    // ── One-step phone actions (DirectActions.kt). Each reports the state Android
+    // reads back afterwards, so prefer these to phone_task whenever one fits. ──
     fn(
-      "system_control",
-      "Mute, or open the volume controls. To set a specific level use set_volume. " +
-        "Media playback (play/pause/skip) is NOT available on Android.",
+      "device_control",
+      "Control the phone directly, in one step: flashlight, Do Not Disturb, ringer " +
+        "(normal/vibrate/silent), media playback (play/pause/next/previous track in " +
+        "whatever app is playing), media volume steps or mute, screen brightness, " +
+        "auto-rotate, lock the screen. Wi-Fi, Bluetooth, mobile data, airplane mode, " +
+        "hotspot and battery saver are NOT here (Android doesn't let apps switch them): " +
+        "use phone_task for those.",
       {
-        // play_pause/next/previous were advertised here with no implementation behind
-        // them anywhere in Kotlin or Rust — the model called them and the action
-        // silently opened the Settings app. Don't offer what the device can't do.
-        command: str("The control.", ["mute", "volume_up", "volume_down"]),
+        action: str("What to do.", DEVICE_ACTIONS),
+        value: int(
+          "brightness: 0-100, or -1 for auto-brightness. volume_up/volume_down: how many " +
+            "steps (default 1). Otherwise omit.",
+        ),
       },
-      ["command"],
+      ["action"],
+    ),
+    fn(
+      "send_message",
+      "Send a message to someone, or reply to their message/notification, by contact " +
+        "name or number (a reply goes through the notification when one is showing, so " +
+        "nothing opens). WhatsApp unless the user " +
+        "says text/SMS or names another app. Call it straight away — don't ask in chat " +
+        "first: JARVIS shows its own on-screen confirmation with the exact person, number " +
+        "and text. Other apps (Telegram, Instagram…) only work as a reply to a " +
+        "notification from that person.",
+      {
+        to: str("Who: the contact's name as the user said it, or a phone number."),
+        text: str("The exact message to send."),
+        app: str("Which app: 'whatsapp' (default), 'sms', or another messaging app's name."),
+      },
+      ["to", "text"],
+    ),
+    fn(
+      "call_contact",
+      "Call a contact (by name) or a number: a phone call, or a WhatsApp voice/video " +
+        "call. Call it straight away: JARVIS shows its own on-screen confirmation first.",
+      {
+        to: str("Who: the contact's name, or a phone number."),
+        app: str("'phone' (default) or 'whatsapp'.", ["phone", "whatsapp"]),
+        video: {
+          type: "boolean" as const,
+          description: "WhatsApp only: true for a video call.",
+        },
+      },
+      ["to"],
+    ),
+    fn(
+      "navigate_to",
+      "Start turn-by-turn navigation in Google Maps to a place, in one step.",
+      {
+        destination: str("Where to: an address or place name."),
+        mode: str("How: driving (default), walking or bicycling.", [
+          "driving",
+          "walking",
+          "bicycling",
+        ]),
+      },
+      ["destination"],
+    ),
+    fn(
+      "play_media",
+      "Play a song, artist, album or playlist on Spotify or YouTube Music, in one step. " +
+        "Reports whether audio actually started.",
+      {
+        query: str("What to play, e.g. 'Back in Black by AC/DC'."),
+        app: str("Which app. Omit for whichever is installed (Spotify first).", [
+          "spotify",
+          "youtube_music",
+        ]),
+      },
+      ["query"],
+    ),
+    fn(
+      "read_notifications",
+      "Read the notifications showing on the phone (new messages, alerts), optionally " +
+        "only from one app or one person. Verification codes are hidden.",
+      {
+        app: str("Only this app, e.g. 'WhatsApp' (optional)."),
+        from: str("Only from this person or chat (optional)."),
+      },
     ),
     fn(
       "open_saved_file",
@@ -462,7 +558,22 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
   open_website: (a) => ({ type: "open_url", url: a.url ?? "" }),
   web_search: (a) => ({ type: "search_web", query: a.query ?? "" }),
   set_volume: (a) => ({ type: "set_volume", level: a.level }),
-  system_control: (a) => ({ type: "system", target: a.command ?? "" }),
+  device_control: (a) => ({ type: "device", do: a.action ?? "", value: a.value }),
+  send_message: (a) => ({
+    type: "message",
+    to: a.to ?? "",
+    text: a.text ?? "",
+    app: a.app ?? "whatsapp",
+  }),
+  call_contact: (a) => ({
+    type: "call",
+    to: a.to ?? "",
+    app: a.app === "whatsapp" ? "whatsapp" : "phone",
+    video: a.video === true,
+  }),
+  navigate_to: (a) => ({ type: "navigate", destination: a.destination ?? "", mode: a.mode ?? "" }),
+  play_media: (a) => ({ type: "play_media", query: a.query ?? "", app: a.app ?? "" }),
+  read_notifications: (a) => ({ type: "notifications", app: a.app ?? "", from: a.from ?? "" }),
   open_saved_file: (a) => ({ type: "open_file", target: a.name ?? "" }),
   make_qr_code: (a) => ({ type: "qr_code", text: a.text ?? "" }),
   generate_image: (a) => ({ type: "generate_image", prompt: a.prompt ?? "" }),

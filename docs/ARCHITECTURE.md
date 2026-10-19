@@ -260,8 +260,46 @@ Roughly what's dispatched today: `weather`, `news`, `search_web`, `places`, `dir
 `set_location`, `reminder`, `schedule`, `agenda`, `clock`, `time`, `day`, `remember`,
 `forget`, `playbook`, `routine`, `qr_code`, `generate_image`, `record`, `clipboard`,
 `read_file`, `list_dir`, `open_file`, `open_url`, `open_app`, `close_app`, `set_volume`,
-`system`, `power`, `screen`, `ui`, `screenshot`, `open_a11y_settings`, plus the two big
-ones: `phone_task` (§4) and `pc_task` (§6).
+`system`, `power`, `screen`, `ui`, `screenshot`, `open_a11y_settings`, the one-step phone
+actions (`device`, `navigate`, `play_media`, `message`, `call`, `notifications` — below),
+plus the two big ones: `phone_task` (§4) and `pc_task` (§6).
+
+### One-step phone actions go around the operator (2026-10-18)
+
+Gemini switches the flashlight or texts Mom in one call; JARVIS used to send all of that
+through `phone_task` (Quick Settings, a Settings search, typing into WhatsApp: 10–40 s and
+several model calls). `device_control`, `send_message`, `call_contact`, `navigate_to`,
+`play_media` and `read_notifications` now go straight to public Android APIs in
+`DirectActions.kt` (torch, interruption filter, ringer, media keys, `Settings.System`,
+navigation/play-from-search intents, `SmsManager`, `ACTION_CALL`, a notification's
+RemoteInput). Each reads the state back and reports that, under the rule above.
+`phone_task` stays for everything else, including what no app can switch on Android 13+
+(Wi-Fi, Bluetooth, mobile data, airplane mode, hotspot, battery saver).
+
+Messages and calls are two native calls with the user between them: `comm_action
+resolve` finds the contact (and whether a notification reply is possible), the R2 dialog
+shows exactly who, which number and what text, and only then does `comm_action
+message|call` run with that approved number. A WhatsApp message goes out through the
+person's notification reply when one is showing (nothing opens on screen), otherwise
+through WhatsApp's click-to-chat link plus one accessibility tap on Send, confirmed by the
+message box emptying. Gemini's own WhatsApp send is a private Google–WhatsApp integration,
+and Android 16's AppFunctions caller permission isn't open to sideloaded apps, so neither
+is available here. `DEVICE_ACTIONS` in `registry.ts` is checked against the Kotlin
+branches by `registry.test.ts`.
+
+Platform limits found live (2026-10-18), each handled by an honest reply:
+- **WhatsApp calls.** WhatsApp's Contacts "voice/video call" rows are what assistants use,
+  but WhatsApp refused that intent from JARVIS ("Permission Denial"). JARVIS opens the
+  chat by the official link and presses **Voice call** / **Video call** instead. It counts
+  only a change *into* `MODE_IN_COMMUNICATION`, because JARVIS's own mic sets that mode too.
+- **DND off.** On Android 15+ (targetSdk ≥ 35) `setInterruptionFilter` toggles an
+  app-owned rule, so JARVIS can turn DND on but can't end one the user started. That reply
+  points the model to `phone_task` (Quick Settings).
+- **Spotify** ignores `MEDIA_PLAY_FROM_SEARCH`, and its session's `playFromSearch` didn't
+  start anything either. With a visible session only the player's own PLAYING counts
+  (`isMusicActive` blipped true while it stayed idle).
+- **Paused apps** (parental controls, Digital Wellbeing). Starting one doesn't throw: Android
+  shows "App isn't available". Every app-targeted action checks `isPackageSuspended` first.
 
 > **The rule carried over from the Python brain: never claim a tool succeeded unless its
 > actual return value says so.** This shows up throughout dispatch, the operator loop and
@@ -585,6 +623,8 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
+| `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
+| `JarvisNotificationListener.kt` | Notification access: lists what's showing, and replies through a notification's own RemoteInput, confirmed only when the app updates or clears that notification |
 | `RoutineAlarms.kt` | Timed routines while the WebView is paused: JS hands it every timed routine on each save (`schedule_routines`); it keeps one exact `AlarmManager` alarm (`USE_EXACT_ALARM`) for the earliest, rolls each forward in SharedPreferences, re-works every time on a time zone change, and posts "Time for <name>". It never runs a routine — a tap opens JARVIS and the WebView runs it as an ordinary turn. The one in-app alarm: reminders and alarms go to the Clock app |
 | `PhonePlugin.kt` | The `@TauriPlugin` command surface |
 
@@ -603,7 +643,12 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
-(`schedule_routines`, `poll_routine_tap`), and the TV (`tv_shell`, §6a).
+(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), and one-step actions
+(`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
+`Option`, and Tauri rejects a call missing any of them ("missing required key"), so JS
+sends every key. `platform/index.test.ts` parses `commands.rs` and checks each call;
+clock `show_alarms` and calendar `remove`/`show`/`request_permission` failed that way
+until 2026-10-18.
 
 The operator loop and the routine schedule (`RoutineAlarmsTest.kt`) are tested without a
 device on the JVM: `OperatorCoreTest.kt` drives

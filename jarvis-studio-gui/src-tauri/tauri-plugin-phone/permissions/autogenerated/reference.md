@@ -59,6 +59,9 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-tv-shell`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
+- `allow-device-action`
+- `allow-comm-action`
+- `allow-notification-action`
 
 ## Permission Table
 
@@ -202,6 +205,32 @@ Denies the close_app command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-comm-action`
+
+</td>
+<td>
+
+Enables the comm_action command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-comm-action`
+
+</td>
+<td>
+
+Denies the comm_action command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-config-secret-delete`
 
 </td>
@@ -273,6 +302,32 @@ Enables the config_secret_set command without any pre-configured scope.
 <td>
 
 Denies the config_secret_set command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-device-action`
+
+</td>
+<td>
+
+Enables the device_action command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-device-action`
+
+</td>
+<td>
+
+Denies the device_action command without any pre-configured scope.
 
 </td>
 </tr>
@@ -611,6 +666,32 @@ Enables the long_press command without any pre-configured scope.
 <td>
 
 Denies the long_press command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-notification-action`
+
+</td>
+<td>
+
+Enables the notification_action command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-notification-action`
+
+</td>
+<td>
+
+Denies the notification_action command without any pre-configured scope.
 
 </td>
 </tr>

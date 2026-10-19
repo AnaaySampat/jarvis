@@ -57,7 +57,10 @@ const ACTIONY_RE = new RegExp(
     "rearrange|update|edit|apply|" +
     // Media follow-ups. Live 2026-09-30: "Resume" got "Resumed — back to Arcane on
     // Netflix" with no tool call (and the wrong show), and neither word was listed.
-    "resume|unpause|skip|rewind|fast\\s*forward|louder|quieter)\\b",
+    "resume|unpause|skip|rewind|fast\\s*forward|louder|quieter|" +
+    // Messaging and calls. Live 2026-10-18: "can you reply to <contact>'s notification by
+    // saying …" got "I've sent the reply" with no tool call — none of these were listed.
+    "send|message|text|reply|respond|answer|call|dial|ring|whatsapp|sms|email|forward|share|post)\\b",
   "i",
 );
 
@@ -73,7 +76,15 @@ const COMPLETION_CLAIM_RE = new RegExp(
     "unmuting|created|creating|made|making|generated|generating|enabled|enabling|" +
     "disabled|disabling|adjusted|adjusting|updated|updating|applied|applying|" +
     "recolou?red|recolou?ring|moved|moving|hidden|hiding|shown|showing|" +
-    "resumed|resuming|unpaused|skipped|skipping|rewound|rewinding)\\b)",
+    "resumed|resuming|unpaused|skipped|skipping|rewound|rewinding|" +
+    "sent|sending|messaged|messaging|texted|texting|replied|replying|calling|called|" +
+    "dial(?:l)?ing|dial(?:l)?ed|forwarded|forwarding|shared|sharing|posted|posting|" +
+    "routing|routed|navigating|navigated|heading)\\b|" +
+    // A reply that opens with an acknowledgement and asks nothing is a claim too.
+    // Live 2026-10-18: "increase the volume" → "OK." and "set a route to …" → "Got it —
+    // routing you to …", both with no tool call. "OK — for what time?" is a question.
+    "^\\s*(?:ok(?:ay)?|sure(?: thing)?|got it|will do|alright|certainly|of course|understood)" +
+    "\\b(?![^?]*\\?))",
   "i",
 );
 
@@ -98,7 +109,10 @@ const CLAIM_CHECK_NOTE =
 const PHONE_REF_RE = new RegExp(
   "\\b(?:my|this) (?:phone|device)\\b|\\b(?:on|in|from) the phone\\b|\\b(?:in|from) (?:the )?settings\\b|" +
     "\\bin the [\\w ]{1,20}? app\\b|\\bandroid version\\b|" +
-    "\\bmy (?:battery|storage|wi-?fi|bluetooth|ringtone|wallpaper|screen timeout|uptime|data usage)\\b",
+    "\\bmy (?:battery|storage|wi-?fi|bluetooth|ringtone|wallpaper|screen timeout|uptime|data usage)\\b|" +
+    // What's showing changes minute to minute. Live 2026-10-18: "can you check my
+    // notifications?" got "there are none" from the previous turn, with no tool call.
+    "\\b(?:my|any|new|unread) (?:notifications?|messages|texts|missed calls)\\b",
   "i",
 );
 
@@ -115,7 +129,8 @@ const PHONE_CHECK_NOTE =
   "(Automatic check, not from the user.) The user asked about their phone, but you called " +
   "no tool in this turn, so your reply didn't come from the phone. If the answer depends on " +
   "what is on the phone right now (a setting, a value, what an app shows) or asks you to do " +
-  "something there, call phone_task now. Otherwise answer again without stating any phone " +
+  "something there, call the matching phone tool now (device_control, send_message, " +
+  "read_notifications, … or phone_task). Otherwise answer again without stating any phone " +
   "value you haven't read.";
 
 /**
