@@ -50,6 +50,10 @@ const FACTS_KEY = "jarvis.android.facts.v1";
 /** fact text → when it was learned. Separate from FACTS_KEY so the fact list keeps
  *  its plain string[] shape (recall, prompts and existing installs all read it). */
 const FACT_TIMES_KEY = "jarvis.android.facts.at.v1";
+/** fact key → when it was forgotten (ms). Tombstones, so a fact forgotten here doesn't
+ *  come back from the PC (memory/sync.ts). */
+const FACT_GONE_KEY = "jarvis.android.facts.gone.v1";
+const GONE_KEEP_MS = 90 * 86_400_000;
 const TURNS_KEY = "jarvis.android.turns.v1";
 const RECENTS_KEY = "jarvis.android.recents.v1";
 
@@ -225,6 +229,40 @@ export interface ArchivedThread {
   turns: ChatMessage[];
 }
 
+/** A fact's identity across devices: its text, lower-cased, spacing collapsed, no
+ *  trailing full stop. Mirrors the desktop's memory_sync.fact_key. */
+export function factKey(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[ .!]+$/, "")
+    .slice(0, 300);
+}
+
+const goneKv = makeKV();
+
+/** Forgotten facts (key → ms), for memory/sync.ts. */
+export function factTombstones(): Record<string, number> {
+  return readJson<Record<string, number>>(goneKv, FACT_GONE_KEY, {});
+}
+
+/** Record (or with `at` 0, clear) a forgotten fact. Old tombstones age out. */
+export function markFactGone(keys: string[], at: number = Date.now()): void {
+  const gone = factTombstones();
+  for (const k of keys) {
+    if (!k) continue;
+    if (at) gone[k] = Math.max(gone[k] ?? 0, at);
+    else delete gone[k];
+  }
+  const cutoff = Date.now() - GONE_KEEP_MS;
+  const kept = Object.entries(gone)
+    .filter(([, t]) => t >= cutoff)
+    .sort((a, b) => a[1] - b[1])
+    .slice(-2000);
+  writeJson(goneKv, FACT_GONE_KEY, Object.fromEntries(kept));
+}
+
 /** Persistent store backed by localStorage (with an in-memory fallback). */
 export class PersistentStore implements MemoryStore {
   private kv: KV;
@@ -253,6 +291,7 @@ export class PersistentStore implements MemoryStore {
           error: "storage_full",
         };
       }
+      markFactGone([factKey(t)], 0); // known again: no longer forgotten
 
       // Also generate embedding for semantic search if we have Vertex credentials
       if (saJson) {
@@ -269,6 +308,7 @@ export class PersistentStore implements MemoryStore {
   async forget(text: string): Promise<ToolResult> {
     const t = text.trim().toLowerCase();
     if (t === "everything") {
+      markFactGone(readJson<string[]>(this.kv, FACTS_KEY, []).map(factKey));
       writeJson(this.kv, FACTS_KEY, []);
       await withVectorStore((m) => m.clearVectors());
       return { ok: true, summary: "Forgotten everything I knew about you." };
@@ -276,6 +316,7 @@ export class PersistentStore implements MemoryStore {
     const facts = readJson<string[]>(this.kv, FACTS_KEY, []);
     const kept = facts.filter((f) => !f.toLowerCase().includes(t));
     writeJson(this.kv, FACTS_KEY, kept);
+    markFactGone(facts.filter((f) => !kept.includes(f)).map(factKey));
 
     await withVectorStore((m) => {
       const removed = facts.filter((f) => f.toLowerCase().includes(t));
@@ -306,6 +347,7 @@ export class PersistentStore implements MemoryStore {
     const times = readJson<Record<string, number>>(this.kv, FACT_TIMES_KEY, {});
     delete times[text];
     writeJson(this.kv, FACT_TIMES_KEY, times);
+    markFactGone([factKey(text)]);
     await withVectorStore((m) => m.deleteVectorRecordByText(text));
     return { ok: true, summary: "Forgotten." };
   }

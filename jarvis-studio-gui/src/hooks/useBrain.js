@@ -16,6 +16,7 @@ import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
 import { androidPlatform, pollRoutineTap, pollShare, wolSend } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
+import { applyRemote, localChanges } from "../brain/memory/sync";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
 import {
@@ -99,6 +100,9 @@ const TV_KEY = "jarvis.android.tv.v1";
 const PC_WAKE_KEY = "jarvis.android.pcwake.v1";
 // The last share from another app this WebView handled (ShareInbox.kt boot:seq).
 const SHARE_KEY = "jarvis.android.share.v1";
+// One memory with the PC (brain/memory/sync.ts): which PC, when this phone last sent
+// (phone clock), and the PC's cursor from its last reply (PC clock).
+const MEMORY_SYNC_KEY = "jarvis.android.memorysync.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
@@ -354,12 +358,18 @@ export function useBrain() {
   // the caption with no picture. onDispatched is the one hook that sees every tool
   // result, so collect here and attach when the message is built.
   const pendingCardsRef = useRef([]);
+  // One memory with the PC: set further down, once the memory view exists.
+  const syncMemoryRef = useRef(null);
+  const memorySyncedRef = useRef(null);
   const onDispatched = useCallback(
     (spec, result) => {
       logCommand(spec, result);
       // Re-read rather than trust result.data: a reset returns no config, and the
       // HUD kept the old look until the next launch.
       if (spec?.type === "screen" && result?.ok) setScreen(loadScreenConfig());
+      if (result?.ok && ["remember", "forget", "routine"].includes(spec?.type)) {
+        setTimeout(() => void syncMemoryRef.current?.(), 1500); // one memory with the PC
+      }
       const imageUrl = result?.data?.imageUrl;
       if (imageUrl && (spec?.type === "generate_image" || spec?.type === "qr_code")) {
         pendingCardsRef.current.push({
@@ -790,6 +800,7 @@ export function useBrain() {
           // before the host authorizes any restored subscription.
           queueMicrotask(() => {
             if (pcRef.current !== pc || !pc.isOnline) return;
+            void syncMemoryRef.current?.();
             for (const { taskId, lastSeq } of loadKnownRemoteTaskCursors()) {
               pc.signal("task.subscribe", { task_id: taskId, resume_after_seq: lastSeq });
               pc.signal("task.status", { task_id: taskId });
@@ -800,6 +811,7 @@ export function useBrain() {
       },
       onEvent: (ev) => {
         const e = ev.event;
+        if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
         if (
           [
             "task.accepted",
@@ -1759,6 +1771,47 @@ export function useBrain() {
       now: Date.now(),
     });
   }, []);
+  // ── One memory with the PC (brain/memory/sync.ts, desktop memory_sync.py) ─────
+  // Sent when the link comes up, every minute while it's up, and just after a memory
+  // or routine change; the PC answers with its own changes (memory.synced, below).
+  const memorySyncSentRef = useRef(0);
+  const syncMemory = useCallback(async () => {
+    const pc = pcRef.current;
+    const hostId = pcConfig?.hostId;
+    if (!pc?.isOnline || !hostId) return;
+    const cur = readJson(kv, MEMORY_SYNC_KEY, {});
+    const same = cur.host === hostId;
+    const startedAt = Date.now();
+    const changes = await localChanges(memoryRef.current, same ? cur.sent || 0 : 0);
+    memorySyncSentRef.current = startedAt;
+    pc.signal("memory.sync", { since: same ? cur.pc || 0 : 0, ...changes });
+  }, [pcConfig?.hostId]);
+  const memorySynced = useCallback(
+    async (data) => {
+      const hostId = pcConfig?.hostId;
+      if (!hostId || !data || typeof data.now !== "number") return;
+      const changed = await applyRemote(data, memoryRef.current, stored.vertexSaJson);
+      writeJson(kv, MEMORY_SYNC_KEY, {
+        host: hostId,
+        sent: memorySyncSentRef.current,
+        pc: data.now,
+      });
+      if (changed) {
+        await listMemory();
+        syncRoutineAlarms();
+      }
+    },
+    [pcConfig?.hostId, listMemory, stored.vertexSaJson],
+  );
+  useEffect(() => {
+    syncMemoryRef.current = syncMemory;
+    memorySyncedRef.current = memorySynced;
+  }, [syncMemory, memorySynced]);
+  useEffect(() => {
+    const id = setInterval(() => void syncMemoryRef.current?.(), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   const rememberFact = useCallback(
     async (text) => {
       const res = await memoryRef.current.remember(text, stored.vertexSaJson);

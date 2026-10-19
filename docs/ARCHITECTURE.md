@@ -839,6 +839,22 @@ shape; facts saved before it existed are undated and just don't appear on the ti
 
 ---
 
+
+**One memory with the PC (2026-10-19).** Facts (`store.ts`) and routines
+(`schedule/routines.ts`) — not playbooks, whose two shapes differ — merge with the paired
+PC's over the signed link (`memory/sync.ts`, the desktop's `memory_sync.py`). Facts are
+keyed by normalised text (`factKey`), routines by name (`routineKey`); the newest change
+wins, and forgetting leaves a dated tombstone (`jarvis.android.facts.gone.v1`,
+`…routines.gone.v1`, 90 days) so a deletion propagates instead of being re-added. A routine
+also carries `updatedAt` and `origin`: a timed routine synced from the PC is listed and
+runs by name here, but neither `routineAlarms` nor `dueRoutines` fire it — the PC's clock
+does (and the PC skips the phone's). The phone starts each exchange (`memory.sync`: its
+changes since it last sent, plus the PC's cursor) when the link comes up, every minute
+while it's up and just after a memory or routine tool runs; the PC answers
+`memory.synced` with its own changes and a new cursor (`jarvis.android.memorysync.v1`,
+keyed by the PC's host id, so a different PC starts from zero). Cursors are inclusive: a
+repeat is harmless, a miss isn't.
+
 ## 8. Desktop vs mobile splits
 
 **Rust: compile-time.** `src-tauri/src/lib.rs` gates every desktop-only feature (system

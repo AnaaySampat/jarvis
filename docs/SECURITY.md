@@ -29,6 +29,7 @@ service, and then only to that service.
 | Rough location | ipwho.is / ipapi.co (from your IP), or your phone's GPS | Weather and "near me" answers |
 | Text for a QR code | api.qrserver.com | When you ask for a QR code |
 | Tasks and screen-sharing for your PC | Your own PC only, directly or through Tailscale | When you use Remote PC |
+| Remembered facts and routines | Your own paired PC, over the same signed link | Every minute while connected, so both devices share one memory |
 | A Wake-on-LAN packet (the device's MAC address) | Your own home network, as a broadcast | When you ask to switch the TV or the PC on |
 | The title of the YouTube video playing on the phone | Your web-search provider, then YouTube's public oEmbed endpoint (the video id) | When you ask to send it to the TV |
 

@@ -72,6 +72,9 @@ the app**, so the phone needs no server and no Python.
   TV, type its IP, tap Connect and accept the prompt on the TV. Two routers at home (a
   second one in router mode makes its Wi-Fi a separate network)? Switch the second one to
   Access Point mode, or install Tailscale on the TV and add its address after a comma.
+- **One memory** — what you tell JARVIS to remember, and your routines, are shared with
+  the paired PC: tell either one, both know. Forgetting works the same way. A timed
+  routine still goes off on the device you made it on.
 - **Send this to the TV** — "send this to the TV" moves the YouTube video or Netflix show
   playing on the phone to the TV at the same point and pauses the phone (needs
   notification access). Or share a YouTube/Netflix link to JARVIS from any app's Share
