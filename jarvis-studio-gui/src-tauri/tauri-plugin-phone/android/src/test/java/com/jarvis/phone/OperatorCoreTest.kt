@@ -21,6 +21,10 @@ class OperatorCoreTest {
         var shot: String? = null
         var audio: Boolean? = null
         override suspend fun musicActive() = audio
+        /** The media store's count, and how much each tap adds to it (a camera's shutter). */
+        var media: Int? = null
+        var mediaPerTap = 0
+        override suspend fun mediaSaved() = media
         var namedApp: String? = null
         override suspend fun appNamedIn(goal: String) = namedApp
         private var observed = 0
@@ -32,6 +36,7 @@ class OperatorCoreTest {
                 actions += "tapFailed:${target.index}:$code"
                 return OpResult(false, "The screen changed before the action.", code)
             }
+            media = media?.plus(mediaPerTap)
             return rec("tap:${target.index}", target)
         }
         override suspend fun longPress(target: OpTarget) = rec("longPress:${target.index}", target)
@@ -569,6 +574,37 @@ class OperatorCoreTest {
         assertFalse(wantsPlayback("continue the download"))
         assertFalse(wantsPlayback("open the Play Store"))
         assertFalse(wantsPlayback("play a chess game"))
+    }
+
+    @Test fun aPhotoIsProvedByTheMediaStoreNotTheViewfinder() {
+        // Live 2026-10-19 "click a photo": the viewfinder looked the same after every shot, the
+        // checker rejected each one, the operator re-tapped, and 8 photos were taken.
+        val dev = FakeDevice(listOf(screen(node(0, "Take picture"), node(1, "Gallery")))).apply {
+            media = 5
+            mediaPerTap = 1
+        }
+        val verifier = ScriptedModel(pass)
+        val m = ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Photo taken."}""")
+        val out = run("click a photo", dev, m, verifier = verifier)
+        assertTrue(out.summary, out.ok)
+        assertEquals(listOf("tap:0"), dev.actions)
+        assertTrue(m.prompts[1].contains("a new photo/video was saved on the phone"))
+        assertFalse(m.prompts[1].contains("did NOT change"))
+        assertTrue(verifier.prompts[0].contains("\"photos_videos_saved_during_task\":1"))
+        assertTrue(wantsCapture("click a photo"))
+        assertTrue(wantsCapture("take a selfie with the front camera"))
+        assertTrue(wantsCapture("record a short video"))
+        assertTrue(wantsCapture("take a screenshot"))
+        assertFalse(wantsCapture("click on the photos app"))
+        assertFalse(wantsCapture("send the photo to Alex"))
+    }
+
+    @Test fun mediaCountsStayOutOfOtherGoalsChecks() {
+        val dev = FakeDevice(listOf(screen(node(0, "Go")))).apply { media = 3 }
+        val verifier = ScriptedModel(pass)
+        assertTrue(run("press go", dev, ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"Pressed."}"""),
+            verifier = verifier).ok)
+        assertFalse(verifier.prompts[0].contains("photos_videos_saved_during_task"))
     }
 
     @Test fun aStuckTaskStillFailsWhenTheCheckerSaysNo() {

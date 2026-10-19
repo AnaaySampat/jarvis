@@ -40,9 +40,69 @@ export function inlineMarkdownSegments(text: string): InlineMarkdownSegment[] {
   return out.length ? out : [{ kind: "text", content: source }];
 }
 
+export type TextBlock =
+  { kind: "text"; content: string } | { kind: "table"; header: string[]; rows: string[][] };
+
+const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** One pipe-table row's cells; `\|` is a literal pipe inside a cell. */
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/(?<!\\)\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, "|"));
+}
+
+/**
+ * Split GitHub-style pipe tables (a header row, a `|---|:--:|` divider, body rows) out of
+ * a reply. Models write them for any comparison, and shown raw they were rows of pipes.
+ */
+export function splitMarkdownTables(text: string): TextBlock[] {
+  const lines = (text ?? "").split("\n");
+  const out: TextBlock[] = [];
+  let prose: string[] = [];
+  const flush = () => {
+    const content = prose.join("\n").trim();
+    if (content) out.push({ kind: "text", content });
+    prose = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const divider = lines[i + 1];
+    if (
+      !line.includes("|") ||
+      divider === undefined ||
+      !divider.includes("|") ||
+      !TABLE_DIVIDER.test(divider)
+    ) {
+      prose.push(line);
+      continue;
+    }
+    const header = tableCells(line);
+    const rows: string[][] = [];
+    for (i += 2; i < lines.length && lines[i]!.includes("|") && lines[i]!.trim(); i++) {
+      // Every row as wide as the header, so a short row doesn't shift its neighbours.
+      const cells = tableCells(lines[i]!);
+      rows.push(header.map((_, c) => cells[c] ?? ""));
+    }
+    i--;
+    flush();
+    out.push({ kind: "table", header, rows });
+  }
+  flush();
+  return out.length ? out : [{ kind: "text", content: text ?? "" }];
+}
+
 /** Remove common Markdown decoration before sending a reply to TTS. */
 export function stripMarkdownForSpeech(text: string): string {
-  let spoken = text ?? "";
+  // A table is read row by row, its cells separated by pauses rather than "vertical bar".
+  let spoken = splitMarkdownTables(text ?? "")
+    .map((b) =>
+      b.kind === "text" ? b.content : [b.header, ...b.rows].map((r) => r.join(", ")).join(".\n"),
+    )
+    .join("\n");
 
   // Say a link's useful label, never its punctuation or URL. Images work the
   // same way: their alt text is the only spoken portion.

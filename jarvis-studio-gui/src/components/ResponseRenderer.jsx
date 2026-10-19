@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo } from "react";
 import StateMessage from "./StateMessage";
 import { parseJSON } from "./jsonRepair";
-import { inlineMarkdownSegments } from "../brain/formatting";
+import { inlineMarkdownSegments, splitMarkdownTables } from "../brain/formatting";
 // recharts (with its d3/lodash deps) is ~390 kB and only ever renders when a
 // reply actually contains a [CHART] block, which most never do. Loading it on
 // demand keeps it out of the startup parse on a phone.
@@ -305,6 +305,38 @@ function InlineMarkdown({ text }) {
   });
 }
 
+/** A Markdown pipe table from the reply text, drawn like a [TABLE] block. */
+function MarkdownTable({ header, rows }) {
+  return (
+    <div className="card table-block">
+      <div className="table-scroll">
+        <table className="jarvis-table">
+          <thead>
+            <tr>
+              {header.map((c, i) => (
+                <th key={i}>
+                  <InlineMarkdown text={c} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r}>
+                {row.map((cell, c) => (
+                  <td key={c}>
+                    <InlineMarkdown text={cell} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // Block kind → renderer. Non-chart blocks ignore the extra tagHead prop.
 const BLOCKS = {
   CHART: ChartBlock,
@@ -330,10 +362,14 @@ export default function ResponseRenderer({ text, actions, runAction }) {
           );
         }
         if (Block) return <Block key={i} tagHead={seg.tagHead} body={seg.content} />;
-        return (
-          <p key={i} className="chat-text">
-            <InlineMarkdown text={seg.content} />
-          </p>
+        return splitMarkdownTables(seg.content).map((b, j) =>
+          b.kind === "table" ? (
+            <MarkdownTable key={`${i}.${j}`} header={b.header} rows={b.rows} />
+          ) : (
+            <p key={`${i}.${j}`} className="chat-text">
+              <InlineMarkdown text={b.content} />
+            </p>
+          ),
         );
       })}
       {actions?.length > 0 && <ActionCard results={actions} runAction={runAction} />}

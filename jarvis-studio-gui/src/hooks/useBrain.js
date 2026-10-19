@@ -235,6 +235,19 @@ function toBrainConfig(stored) {
   };
 }
 
+/** A phone photo is 3–12 MB and the model gets it on every tool round of the turn: send a
+ *  JPEG no longer than 1536 px a side (Gemini scales larger ones down anyway). */
+async function shrinkToJpeg(file, maxSide = 1536) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 const uid = () => `${Date.now()}_${Math.floor(performance.now() * 1000) % 100000}`;
 
 // True for a same-LAN address (RFC-1918 private range or loopback). Tailscale's
@@ -1365,12 +1378,16 @@ export function useBrain() {
   const finishListenRef = useRef(null);
   // `display` is what the user's bubble shows when it isn't what the brain gets — a
   // routine run sends its steps but reads "Run bedtime". It's saved with the turn.
+  // `photo` is a JPEG data URL the user attached (see sendUpload).
   const sendMessage = useCallback(
-    async (text, display) => {
+    async (text, display, photo) => {
       const t = (text || "").trim();
       if (!t || busyRef.current) return;
       userInteractedRef.current = true; // gates the one-time overlay-permission prompt
-      setMessages((prev) => [...prev, { role: "user", text: display || t, id: uid() }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: display || t, ...(photo ? { image: photo } : {}), id: uid() },
+      ]);
       if (pcCommandModeRef.current) {
         busyRef.current = true;
         setStatus("thinking");
@@ -1407,7 +1424,11 @@ export function useBrain() {
       const replyId = uid();
       let spoken = "";
       try {
-        const reply = await brainRef.current.ask(t, display);
+        const reply = await brainRef.current.ask(
+          t,
+          display,
+          photo ? [photo.slice(photo.indexOf(",") + 1)] : undefined,
+        );
         spoken = reply;
         setMessages((prev) => [
           ...prev,
@@ -1433,6 +1454,34 @@ export function useBrain() {
       }
     },
     [runPcTask, drainCards],
+  );
+
+  // A photo for JARVIS to look at, from the chat's attach button.
+  const sendUpload = useCallback(
+    async (file, prompt) => {
+      if (busyRef.current) return;
+      if (!file?.type?.startsWith("image/")) {
+        pushWarning("I can look at photos, but not other kinds of files yet.");
+        return;
+      }
+      let photo;
+      try {
+        photo = await shrinkToJpeg(file);
+      } catch {
+        pushWarning(
+          /hei[cf]/i.test(file.type)
+            ? "I can't open HEIC photos — pick a JPEG or PNG, or a screenshot of it."
+            : `Couldn't open ${file.name || "that photo"}.`,
+        );
+        return;
+      }
+      await sendMessage(
+        prompt || "What's in this photo?",
+        prompt ? `📷 ${prompt}` : "📷 Photo",
+        photo,
+      );
+    },
+    [sendMessage, pushWarning],
   );
 
   // Timed routines. Fires from here because this is the only place a brain turn can
@@ -2232,7 +2281,7 @@ export function useBrain() {
     setMute,
     runAction,
     setBrowserOpen: () => {},
-    sendUpload: () => pushWarning("File upload isn't available on the phone yet."),
+    sendUpload,
     sendScreen,
     setAlwaysOnMode,
     setConversationModeOn,

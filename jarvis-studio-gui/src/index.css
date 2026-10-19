@@ -3915,6 +3915,17 @@ button.cap-row:active {
 .cv-attach:hover {
   color: var(--text-pri);
 }
+.cv-attach:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cv-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+  margin-bottom: 6px;
+}
 .cv-newchat {
   gap: 8px;
   margin-bottom: 20px;

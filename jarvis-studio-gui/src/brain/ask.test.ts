@@ -141,6 +141,32 @@ describe("chatOverLadder after a model's 400", () => {
   });
 });
 
+describe("chatOverLadder with a photo attached", () => {
+  beforeEach(() => {
+    quota.setStorage(fakeKV());
+    quota.reset();
+    resetLatency();
+    chat.mockReset();
+  });
+  const photo = [{ role: "user" as const, content: "what is this?", images: ["AAAA"] }];
+
+  it("asks only Google's models, which can see it", async () => {
+    const both: BrainConfig = {
+      tier: "groq",
+      model: "openai/gpt-oss-120b",
+      keys: { groq: ["g1"], gemini: ["k1"] },
+    };
+    chat.mockResolvedValue({ text: "A cat.", toolCalls: [] });
+    await chatOverLadder(photo, [], both);
+    expect(chat.mock.calls[0]![2].model).toMatch(/^(gemini|gemma)/);
+  });
+
+  it("says a Google key is needed instead of answering unseen", async () => {
+    await expect(chatOverLadder(photo, [], cfg)).rejects.toThrow(/Gemini or Vertex AI key/);
+    expect(chat).not.toHaveBeenCalled();
+  });
+});
+
 describe("chatOverLadder hedging a slow route", () => {
   beforeEach(() => {
     quota.setStorage(fakeKV());

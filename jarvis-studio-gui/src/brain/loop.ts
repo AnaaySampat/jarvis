@@ -44,6 +44,25 @@ function stuckOnRepeat(history: CallRecord[], sig: string, resultSig: string): b
   return last !== undefined && last.sig === sig && last.resultSig === resultSig;
 }
 
+/** A phone task that went through with at least one action on the phone and then failed.
+ *  Running another — reworded or not — repeats what it already did. Live 2026-10-19, "click
+ *  a photo": the first task stopped after 4 shutter taps, and the chat model re-ran it with
+ *  a new goal 6 s later, which took 4 more. */
+function actedAndFailed(r: ToolResult): boolean {
+  return !r.ok && (r.data as { acted?: boolean } | undefined)?.acted === true;
+}
+
+/** Fed back in place of a phone_task that was refused, never run. */
+const PHONE_RETRY_REFUSED: ToolResult = {
+  ok: false,
+  error: "retry_refused",
+  summary:
+    "Not run. The phone task before this one already acted on the phone and then failed, so " +
+    "another one now (even reworded) could repeat what it did — another photo, another message. " +
+    "Tell the user what that task did and that it couldn't be confirmed, and ask them to check " +
+    "the phone before you try again.",
+};
+
 /** An action-shaped request. Port of groq_bridge.py `_ACTIONY_RE`. */
 const ACTIONY_RE = new RegExp(
   "\\b(open|close|launch|start|stop|play|pause|search|google|set|turn|mute|" +
@@ -150,6 +169,7 @@ export async function runTurn(
   const callHistory: CallRecord[] = [];
   const userText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   let claimChecked = false;
+  let phoneActedAndFailed = false;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const reply = await chatOverLadder(convo, tools, deps.config, onFallback);
@@ -179,9 +199,15 @@ export async function runTurn(
     // feed the REAL results back so the model speaks from truth, not assumption.
     convo.push({ role: "assistant", content: reply.text, toolCalls: reply.toolCalls });
     for (const call of reply.toolCalls) {
-      const spec = toSpec(call.name, call.args);
-      const result = await dispatch(spec, deps);
-      toolResults.push(result);
+      const isPhoneTask = call.name === "phone_task";
+      let result: ToolResult;
+      if (isPhoneTask && phoneActedAndFailed) {
+        result = PHONE_RETRY_REFUSED; // nothing ran, so it isn't one of toolResults
+      } else {
+        result = await dispatch(toSpec(call.name, call.args), deps);
+        toolResults.push(result);
+        if (isPhoneTask && actedAndFailed(result)) phoneActedAndFailed = true;
+      }
       convo.push({
         role: "tool",
         toolCallId: call.id,

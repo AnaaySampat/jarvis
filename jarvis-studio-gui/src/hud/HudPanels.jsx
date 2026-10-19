@@ -1261,6 +1261,10 @@ const MOBILE_CAPABILITIES = [
       { t: "Answer questions and explain things", say: "Explain how a heat pump works" },
       { t: "Remember things you tell it", say: "What do you remember about me?" },
       {
+        t: "Look at a photo you send",
+        note: "Tap the paperclip in the chat. Needs a Gemini or Vertex AI key.",
+      },
+      {
         t: "Short, chatty replies",
         note: "Turn on conversation mode with the speech-bubble button at the top.",
       },
@@ -1894,7 +1898,10 @@ const ChatMessage = memo(function ChatMessage({ m, runAction }) {
       <span className="sp-sr">{user ? "You:" : "JARVIS:"}</span>
       <div className="cv-bubble">
         {user ? (
-          m.text
+          <>
+            {m.image && <img className="cv-photo" src={m.image} alt="Attached photo" />}
+            {m.text}
+          </>
         ) : (
           <ResponseRenderer text={m.text} actions={m.actions} runAction={runAction} />
         )}
@@ -2104,20 +2111,22 @@ export function ChatOverlay({
       }
       footer={
         <div className="cv-compose">
-          {onUpload && !IS_MOBILE && (
+          {onUpload && (
             <>
+              {/* The phone's brain only reads photos; the desktop backend takes documents too. */}
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*,.pdf,.txt,.md,.csv,.json,.log"
+                accept={IS_MOBILE ? "image/*" : "image/*,.pdf,.txt,.md,.csv,.json,.log"}
                 onChange={pickFile}
                 hidden
               />
               <button
                 type="button"
                 className="cv-attach"
-                aria-label="Attach an image or document"
-                title="Attach an image or document"
+                aria-label={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
+                title={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
+                disabled={busy}
                 onClick={() => fileRef.current?.click()}
               >
                 <Icon name="paperclip" size={20} />

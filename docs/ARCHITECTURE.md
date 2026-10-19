@@ -383,7 +383,13 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   ordinary UI state counts as evidence (a Pause control = playing). For a playback goal
   the phone's own audio state (`AudioManager.isMusicActive`) is ground truth: nothing
   playing rejects without a model call, and both executor and checker see it — the checker
-  once passed a paused Spotify mini-player off the song's title. A `done` whose summary
+  once passed a paused Spotify mini-player off the song's title. A capture goal ("click a
+  photo", "record a video", "take a screenshot") is judged the same way off the **media
+  store**: `MediaSaves` (NativeOperator.kt) counts new photo/video rows from MediaStore's
+  change notifications — no storage permission, only that a row appeared — and the count
+  rides on the step line ("→ a new photo/video was saved") and to the checker
+  (`photos_videos_saved_during_task`). A camera's viewfinder looks the same after the
+  shutter: on 2026-10-19 the checker rejected every shot and the operator took 8 photos. A `done` whose summary
   narrates non-completion is sent back to work, not ended. A second rejection with nothing
   done in between ends the task as `unverified` ("I think X, but couldn't confirm it")
   instead of burning steps re-claiming. Before any give-up (cycle, no progress, step or
@@ -479,7 +485,10 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   still reaches for a tool, the reply quotes the tools' own summaries (`partialReply`). And
   the chat ladder (`ask.ts`) now treats a 400 like the native ladder does — this model's
   reply failed (Groq's `tool_use_failed`), so try the next model this turn, unbenched —
-  instead of ending the turn with "I hit an error: Groq 400".
+  instead of ending the turn with "I hit an error: Groq 400". A `phone_task` that **acted
+  and failed** (the native result's `acted`: an `isActuation` step in its feed) ends
+  `phone_task` for that turn: `runTurn` answers any further call with a refusal instead of
+  dispatching it, so a reworded goal can't repeat the side effect (2026-10-19: 4 + 4 photos).
 - **Doing exactly the goal.** The prompt (kept tight — it is paid on every step) says a
   goal to open/find/search/show/check is done when the thing is on screen, never toggle or
   select beyond it, and to use an app's search rather than browse. The checker judges the

@@ -446,6 +446,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         createReminderChannel()
         requestNotificationPermission()
         AutonomyRecoveryWorker.enqueue(activity)
+        MediaSaves.watch(activity.applicationContext)
         // ~3s of loadLabel calls, paid now in the background instead of by the first task.
         Thread({ LauncherApps.all(activity.applicationContext) }, "launcher-apps-warmup").start()
     }

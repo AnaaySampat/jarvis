@@ -29,7 +29,7 @@ import {
 } from "./errorClass";
 import { recordRemap } from "./modelRemap";
 import { markModelDead } from "./providers/catalog";
-import { EXTRA_PROVIDERS } from "./providers/openaiCompat";
+import { EXTRA_PROVIDERS, isCompatProvider } from "./providers/openaiCompat";
 import { markNoTools } from "./modelRanker";
 
 /** Raised when the whole ladder is spent. Its message is the honest wait time. */
@@ -157,7 +157,15 @@ export async function chatOverLadder(
   const userText = [...convo].reverse().find((m) => m.role === "user")?.content ?? "";
   // The class also picks the smart-routing tier for a pinned model's fallbacks.
   const requestedClass = opts?.disableThinking ? "dumb" : taskModelClass(userText);
-  const allRoutes = fastFirst(routesFor(cfg, requestedClass, tools.length > 0));
+  // A photo the user attached goes only to Google's models: the OpenAI-compatible client
+  // sends text alone, so any other route would answer about a photo it never saw.
+  const hasPhoto = convo.some((m) => m.role === "user" && m.images?.length);
+  const allRoutes = fastFirst(routesFor(cfg, requestedClass, tools.length > 0)).filter(
+    (r) => !hasPhoto || !isCompatProvider(r.provider),
+  );
+  if (hasPhoto && !allRoutes.length) {
+    throw new Error("Looking at photos needs a Gemini or Vertex AI key — add one in Settings.");
+  }
   let lastError: unknown = null;
   const skipModels = new Set<string>();
 

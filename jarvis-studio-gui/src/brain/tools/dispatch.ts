@@ -683,6 +683,7 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
             "I lost track of that phone task, sir — it may have been interrupted. " +
             "Please check the screen before asking again.",
           error: "operator_lost",
+          data: { acted: true }, // unknown, so assume it did: the next-turn retry is the user's call
         });
       }
       continue;
@@ -701,7 +702,7 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
       summary: r.summary,
       ...(r.error ? { error: r.error } : {}),
       ...(r.needsApproval ? { needsApproval: true } : {}),
-      data: { findings: r.findings, verificationReceipt: r.verificationReceipt },
+      data: { findings: r.findings, verificationReceipt: r.verificationReceipt, acted: r.acted === true },
     };
     if (result.error === "accessibility_disabled") {
       await deps.platform.openAccessibilitySettings().catch(() => {});

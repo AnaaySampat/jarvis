@@ -28,6 +28,47 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
+ * Photos, videos and screenshots saved since JARVIS started, counted off the media store's
+ * change notifications — a capture's only proof, since a camera's viewfinder looks the same
+ * after the shutter. Needs no storage permission: only that a new item appeared is seen,
+ * never what it is. Registered once per process, from PhonePlugin.load.
+ */
+internal object MediaSaves {
+    private val ids = ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var watching = false
+
+    /** null until [watch] has registered (or when it couldn't). */
+    val count: Int? get() = if (watching) ids.size else null
+
+    @Synchronized
+    fun watch(context: Context) {
+        if (watching) return
+        val observer = object : android.database.ContentObserver(null) {
+            // API 30+: flags tell an insert from an edit or delete of an older item.
+            override fun onChange(selfChange: Boolean, uri: android.net.Uri?, flags: Int) {
+                if (flags == 0 || flags and android.content.ContentResolver.NOTIFY_INSERT != 0) add(uri)
+            }
+            override fun onChange(selfChange: Boolean, uri: android.net.Uri?) = add(uri)
+        }
+        try {
+            for (u in listOf(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            )) context.contentResolver.registerContentObserver(u, true, observer)
+            watching = true
+        } catch (e: SecurityException) {
+            Log.w("JarvisOperator", "can't watch the media store: ${e.message}")
+        }
+    }
+
+    /** Item uris end in their row id; the collection-level notifications don't. */
+    private fun add(uri: android.net.Uri?) {
+        val id = uri?.lastPathSegment?.takeIf { s -> s.all(Char::isDigit) } ?: return
+        if (ids.add(id) && ids.size == 1) Log.i("JarvisOperator", "media store: first new item seen this run")
+    }
+}
+
+/**
  * Android glue for the native operator (OperatorCore.kt): the accessibility device,
  * the HTTP model ladder, the Room journal, and a start/status registry the WebView
  * polls. The WebView only STARTS a task and reads its progress — nothing here waits
@@ -196,6 +237,8 @@ object NativeOperator {
                 .put("summary", o.summary)
                 .put("error", o.error ?: JSONObject.NULL)
                 .put("needsApproval", o.needsApproval)
+                // The step feed, not o.steps: a crash outcome carries no steps but may have acted.
+                .put("acted", steps.any { isActuation(it.optString("line")) })
                 .put("findings", JSONArray(o.findings))
                 .put("verificationReceipt", o.verificationReceipt),
         )
@@ -410,6 +453,7 @@ object NativeOperator {
         }
         override suspend fun musicActive(): Boolean? =
             (context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)?.isMusicActive
+        override suspend fun mediaSaved(): Int? = MediaSaves.count
         override suspend fun back() = act { s, done -> s.goBack(done) }
         override suspend fun home() = act { s, done -> s.goHome(done) }
         override suspend fun quickSettings() = act { s, done -> s.openQuickSettings(done) }

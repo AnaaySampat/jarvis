@@ -100,6 +100,8 @@ export interface OperatorStatus {
     summary: string;
     error: string | null;
     needsApproval: boolean;
+    /** At least one actuation (tap, type, open_app, …) went through on the phone. */
+    acted?: boolean;
     findings: string[];
     verificationReceipt: string;
   };

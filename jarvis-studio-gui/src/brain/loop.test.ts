@@ -10,15 +10,17 @@ vi.mock("./ask", () => ({
   },
 }));
 const dispatched: string[] = [];
+const results: ToolResult[] = [];
 vi.mock("./tools/dispatch", () => ({
   dispatch: async (spec: { type: string }) => {
     dispatched.push(spec.type);
-    return { ok: true, summary: "Found it: 55.2 GB used." };
+    return results.shift() ?? { ok: true, summary: "Found it: 55.2 GB used." };
   },
 }));
 
 import { answeredPhoneWithoutLooking, claimedWithoutActing, runTurn } from "./loop";
 import type { DispatchDeps } from "./tools/dispatch";
+import type { ToolResult } from "./types";
 
 const deps = { config: {} } as unknown as DispatchDeps;
 const ask = (text: string) => runTurn([{ role: "user", content: text }], [], deps);
@@ -27,6 +29,42 @@ beforeEach(() => {
   replies.length = 0;
   seen.length = 0;
   dispatched.length = 0;
+  results.length = 0;
+});
+
+describe("runTurn — a phone task that acted and failed is not re-run", () => {
+  const task = (id: string, goal: string) => ({ text: "", toolCalls: [{ id, name: "phone_task", args: { goal } }] });
+  const stopped = (acted: boolean): ToolResult => ({
+    ok: false,
+    summary: "Nothing on screen is changing, sir — I've stopped.",
+    error: "incomplete",
+    data: { findings: [], verificationReceipt: "", acted },
+  });
+
+  it("refuses a reworded retry in the same turn", async () => {
+    // Live 2026-10-19: 4 shutter taps, ok=false, then a reworded task took 4 more photos.
+    results.push(stopped(true));
+    replies.push(
+      task("c1", "click a photo"),
+      task("c2", "open the Camera app and press the shutter button once"),
+      { text: "I tapped the shutter but couldn't confirm a photo was saved — please check.", toolCalls: [] },
+    );
+    const out = await ask("click a photo");
+    expect(dispatched).toEqual(["phone_task"]);
+    expect(out.toolResults).toHaveLength(1);
+    expect(seen[2]!.at(-1)).toMatch(/^\{"ok":false,"summary":"Not run\./);
+    expect(out.reply).toMatch(/couldn't confirm/);
+  });
+
+  it("still retries one that failed before touching anything", async () => {
+    results.push(stopped(false));
+    replies.push(task("c1", "click a photo"), task("c2", "open Camera, take a photo"), {
+      text: "Done.",
+      toolCalls: [],
+    });
+    await ask("click a photo");
+    expect(dispatched).toEqual(["phone_task", "phone_task"]);
+  });
 });
 
 describe("runTurn — said it did it but didn't", () => {
