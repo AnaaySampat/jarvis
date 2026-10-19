@@ -58,6 +58,8 @@ const COMMANDS: &[&str] = &[
     "tv_shell",
     "wol_send",
     "media_now",
+    "arrival_sync",
+    "home_network",
     "poll_share",
     "schedule_routines",
     "poll_routine_tap",

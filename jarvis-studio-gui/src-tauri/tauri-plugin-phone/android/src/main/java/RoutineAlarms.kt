@@ -205,21 +205,26 @@ object RoutineAlarms {
         NotificationManagerCompat.from(context).cancel(tag(name), NOTIFICATION_ID)
     }
 
-    private fun notice(context: Context, e: Entry, date: String) {
+    private fun notice(context: Context, e: Entry, date: String) =
+        post(context, e.name, date, "Time for ${e.name}")
+
+    /** The routine notification: tapping it opens JARVIS, which runs routine [name] for
+     *  [date] (takeTap → pollRoutineTap). Also posted by ArrivalWatcher on getting home. */
+    fun post(context: Context, name: String, date: String, title: String) {
         val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(EXTRA_NAME, e.name)
+            putExtra(EXTRA_NAME, name)
             putExtra(EXTRA_DATE, date)
         } ?: return
         // ponytail: request code is the name's hash, so two names that collide would share
         // one tap target. Upgrade: a stored id per routine.
         val pi = PendingIntent.getActivity(
-            context, tag(e.name).hashCode(), open,
+            context, tag(name).hashCode(), open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val n = NotificationCompat.Builder(context, PhonePlugin.REMINDER_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Time for ${e.name}")
+            .setContentTitle(title)
             .setContentText("Tap and JARVIS runs it.")
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -227,7 +232,7 @@ object RoutineAlarms {
             .setContentIntent(pi)
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(tag(e.name), NOTIFICATION_ID, n)
+            NotificationManagerCompat.from(context).notify(tag(name), NOTIFICATION_ID, n)
         } catch (ex: SecurityException) {
             Log.w(TAG, "routine notification not permitted: ${ex.message}")
         }

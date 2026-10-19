@@ -210,6 +210,12 @@ impl<R: Runtime> Phone<R> {
     pub fn media_now(&self) -> crate::Result<serde_json::Value> {
         Ok(serde_json::json!({ "ok": false, "summary": "Reading what's playing is only available on Android." }))
     }
+    pub fn arrival_sync(&self, _p: ArrivalSyncRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "\"When I get home\" is only available on Android.", "homes": 0, "here": false }))
+    }
+    pub fn home_network(&self, _p: HomeNetworkRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "Home Wi-Fi is only known on Android.", "homes": 0, "here": false }))
+    }
     pub fn poll_share(&self) -> crate::Result<ShareResponse> {
         Ok(ShareResponse { seq: 0, text: String::new(), boot: 0 })
     }

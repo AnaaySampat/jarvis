@@ -136,6 +136,8 @@ export interface TvWakeOpts {
   onMac?: (mac: string) => void;
   send?: WolSend;
   wait?: (ms: number) => Promise<void>;
+  /** The TV answered on a home-network (private) address: the phone is home. */
+  onLan?: () => void;
 }
 
 /**
@@ -161,6 +163,7 @@ export function nativeTvShell(
       const r = await shell(addresses[i]!, command);
       if (r.ok) {
         preferred = i;
+        if (PRIVATE_V4.test(addresses[i]!)) opts.onLan?.();
         return r;
       }
       last = r;

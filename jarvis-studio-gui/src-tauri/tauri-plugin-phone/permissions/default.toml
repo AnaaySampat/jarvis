@@ -58,6 +58,8 @@ permissions = [
     "allow-tv-shell",
     "allow-wol-send",
     "allow-media-now",
+    "allow-arrival-sync",
+    "allow-home-network",
     "allow-poll-share",
     "allow-schedule-routines",
     "allow-poll-routine-tap",

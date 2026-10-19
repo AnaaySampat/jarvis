@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The native scheduler (RoutineAlarms.kt): null = off-device.
 const schedule = vi.hoisted(() => vi.fn(async (_list: unknown[]): Promise<unknown> => null));
-vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule }));
+const arrivals = vi.hoisted(() => vi.fn(async (_names: string[]): Promise<unknown> => null));
+vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule, syncArrivals: arrivals }));
 
 import { applyRemote, localChanges } from "./sync";
 import { createStore, factTombstones } from "./store";

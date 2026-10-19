@@ -14,7 +14,12 @@
  */
 
 import { makeKV, readJson, writeJson } from "../memory/store";
-import { type RoutineAlarm, type RoutineSchedule, scheduleRoutineAlarms } from "../platform";
+import {
+  type RoutineAlarm,
+  type RoutineSchedule,
+  scheduleRoutineAlarms,
+  syncArrivals,
+} from "../platform";
 import { localISODate, normaliseTime } from "./store";
 
 export interface Routine {
@@ -27,6 +32,8 @@ export interface Routine {
   days: string;
   /** Local date (YYYY-MM-DD) it last ran, so it fires once a day. */
   lastRun?: string;
+  /** "home": runs when the phone gets home (ArrivalWatcher.kt) instead of at a time. */
+  trigger?: "home";
   /** When it was last saved (ms) — the newest edit wins a sync (memory/sync.ts). */
   updatedAt?: number;
   /** The device whose clock fires it when timed: a routine synced from the PC is
@@ -99,6 +106,12 @@ let scheduled: Promise<RoutineSchedule | null> = Promise.resolve(null);
 /** save() is the one place the list changes, so it's the one place that reschedules. */
 function schedule(list: Routine[]): void {
   scheduled = scheduleRoutineAlarms(routineAlarms(list));
+  void syncArrivals(homeRoutines(list));
+}
+
+/** The "when I get home" routines this phone watches for (not the PC's). */
+export function homeRoutines(list: Routine[]): string[] {
+  return list.filter((r) => r.trigger === "home" && r.origin !== "pc").map((r) => r.name);
 }
 
 /** On launch: the native alarms may predate this store (an upgrade, a reinstall). */
@@ -161,7 +174,8 @@ export function tappedRoutine(name: string, date: string): Routine | undefined {
 
 /** When a routine runs, in words for the screen: "When you ask", "Every day at 08:00",
  *  "Mon, Wed, Fri at 18:30". Reads days with the same parser that schedules them. */
-export function routineWhen(r: Pick<Routine, "time" | "days" | "origin">): string {
+export function routineWhen(r: Pick<Routine, "time" | "days" | "origin" | "trigger">): string {
+  if (r.trigger === "home") return "When you get home";
   if (!r.time) return "When you ask";
   const s = (r.days || "daily").trim().toLowerCase();
   const set = parseDays(s);
@@ -202,6 +216,8 @@ export function addRoutine(input: {
   prompt: string;
   time?: string;
   days?: string;
+  /** "home" (or a time like "when I get home") = run on getting home. */
+  trigger?: string;
 }): RoutineResult {
   const name = input.name.trim().slice(0, 60);
   const prompt = input.prompt.trim().slice(0, 600);
@@ -215,8 +231,9 @@ export function addRoutine(input: {
       summary: `I didn't understand “${days}” — use daily, weekdays, weekends, or e.g. mon,wed,fri.`,
     };
   }
+  const home = input.trigger === "home" || /\b(home|arriv)/i.test(input.time ?? "");
   let time: string | undefined;
-  if (input.time?.trim()) {
+  if (input.time?.trim() && !home) {
     time = normaliseTime(input.time);
     if (!/^\d{2}:\d{2}$/.test(time)) {
       return { ok: false, summary: `I couldn't read “${input.time}” as a time of day.` };
@@ -230,8 +247,9 @@ export function addRoutine(input: {
     prompt,
     days,
     ...(time ? { time } : {}),
+    ...(home ? { trigger: "home" as const } : {}),
     updatedAt: Date.now(),
-    origin: prev?.origin ?? "phone",
+    origin: home ? "phone" : (prev?.origin ?? "phone"), // only the phone knows it got home
   };
   const list = before.filter((r) => r !== prev);
   save([...list, routine]);
@@ -239,9 +257,11 @@ export function addRoutine(input: {
   return {
     ok: true,
     routine,
-    summary: time
-      ? `Saved “${name}” for ${time} (${days}). Say “run ${name}” to run it any time.`
-      : `Saved “${name}”. Say “run ${name}” to run it.`,
+    summary: home
+      ? `Saved “${name}” for when you get home: when the phone joins your home Wi-Fi I'll post a notification, and tapping it runs it. I learn which Wi-Fi is home when your TV or PC answers on it. Say “run ${name}” to run it any time.`
+      : time
+        ? `Saved “${name}” for ${time} (${days}). Say “run ${name}” to run it any time.`
+        : `Saved “${name}”. Say “run ${name}” to run it.`,
   };
 }
 
@@ -367,6 +387,7 @@ export interface SyncedRoutine {
   prompt?: string;
   time?: string;
   days?: string;
+  trigger?: "home";
   origin?: "phone" | "pc";
 }
 
@@ -403,6 +424,7 @@ export function routineChanges(since: number): SyncedRoutine[] {
       prompt: r.prompt,
       time: r.time ?? "",
       days: daysOut(r.days),
+      ...(r.trigger ? { trigger: r.trigger } : {}),
       origin: r.origin ?? "phone",
     });
   }
@@ -445,6 +467,7 @@ export function applyRoutineChanges(entries: SyncedRoutine[]): boolean {
       prompt,
       days: e.days || "daily",
       ...(time ? { time } : {}),
+      ...(e.trigger === "home" ? { trigger: "home" as const } : {}),
       updatedAt: e.ts,
       origin: e.origin === "pc" ? "pc" : "phone",
       ...(local?.lastRun ? { lastRun: local.lastRun } : {}),

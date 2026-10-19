@@ -373,6 +373,19 @@ pub struct TvShellRequest {
     pub command: String,
 }
 
+/// The "when I get home" routines (a JSON array of names) for ArrivalWatcher.kt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArrivalSyncRequest {
+    #[serde(rename = "namesJson")]
+    pub names_json: String,
+}
+
+/// Home Wi-Fi: "mark" the current network as home, "forget", or "status".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeNetworkRequest {
+    pub action: String,
+}
+
 /// The last text shared to JARVIS from another app (ShareInbox.kt); `seq` bumps once
 /// per share (polled, §5).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-home-network"
+description = "Enables the home_network command without any pre-configured scope."
+commands.allow = ["home_network"]
+
+[[permission]]
+identifier = "deny-home-network"
+description = "Denies the home_network command without any pre-configured scope."
+commands.deny = ["home_network"]

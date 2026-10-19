@@ -9,6 +9,7 @@ class AutonomyBootReceiver : BroadcastReceiver() {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED || intent?.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             AutonomyRecoveryWorker.enqueue(context)
             RoutineAlarms.onAlarm(context) // a reboot drops alarms; re-arming after an update is harmless
+            ArrivalWatcher.rearm(context) // …and network callbacks
         }
     }
 }

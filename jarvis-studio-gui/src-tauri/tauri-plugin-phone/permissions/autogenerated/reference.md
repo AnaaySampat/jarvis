@@ -59,6 +59,8 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-tv-shell`
 - `allow-wol-send`
 - `allow-media-now`
+- `allow-arrival-sync`
+- `allow-home-network`
 - `allow-poll-share`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
@@ -74,6 +76,32 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`phone:allow-arrival-sync`
+
+</td>
+<td>
+
+Enables the arrival_sync command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-arrival-sync`
+
+</td>
+<td>
+
+Denies the arrival_sync command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>
@@ -435,6 +463,32 @@ Enables the home command without any pre-configured scope.
 <td>
 
 Denies the home command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-home-network`
+
+</td>
+<td>
+
+Enables the home_network command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-home-network`
+
+</td>
+<td>
+
+Denies the home_network command without any pre-configured scope.
 
 </td>
 </tr>

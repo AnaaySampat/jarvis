@@ -72,6 +72,10 @@ the app**, so the phone needs no server and no Python.
   TV, type its IP, tap Connect and accept the prompt on the TV. Two routers at home (a
   second one in router mode makes its Wi-Fi a separate network)? Switch the second one to
   Access Point mode, or install Tailscale on the TV and add its address after a comma.
+- **When I get home** — a routine can run when you get home ("when I get home, turn on
+  the TV and play lofi"). The phone recognises your home Wi-Fi by itself (the network
+  where your TV or PC answers; no location permission) and shows a notification as you
+  arrive: tap it and the routine runs.
 - **One memory** — what you tell JARVIS to remember, and your routines, are shared with
   the paired PC: tell either one, both know. Forgetting works the same way. A timed
   routine still goes off on the device you made it on.

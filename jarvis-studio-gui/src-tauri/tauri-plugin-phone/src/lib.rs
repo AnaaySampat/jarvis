@@ -96,6 +96,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::tv_shell,
             commands::wol_send,
             commands::media_now,
+            commands::arrival_sync,
+            commands::home_network,
             commands::poll_share,
             commands::schedule_routines,
             commands::poll_routine_tap,

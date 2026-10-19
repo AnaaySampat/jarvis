@@ -382,7 +382,9 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
         action: str("What to do.", ["add", "run", "list", "remove"]),
         name: str("The routine's name."),
         prompt: str("For 'add': the steps in plain English, e.g. 'give me the weather, today's agenda and top news'."),
-        time: str("For 'add': time of day to run it automatically. Omit for a routine that only runs when asked."),
+        time: str(
+          "For 'add': time of day to run it automatically, or 'home' to run it when the user gets home. Omit for a routine that only runs when asked.",
+        ),
         days: str("For 'add' with a time: 'daily', 'weekdays', 'weekends', or 'mon,wed,fri'."),
       },
       ["action"],
@@ -748,7 +750,7 @@ export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: 
   planner: {
     blurb: "the agenda, routines, playbooks, and listing or cancelling alarms and timers",
     tools: ["manage_schedule", "manage_routine", "manage_playbook", "manage_clock"],
-    cue: /\b(schedule|agenda|calendar|meeting|appointment|routines?|playbooks?|every (?:day|morning|evening|night|week|weekday)|each (?:day|morning)|daily|weekdays?|weekends?|teach|recipe|alarms|timers|cancel|delete|dismiss)\b/i,
+    cue: /\b(schedule|agenda|calendar|meeting|appointment|routines?|playbooks?|every (?:day|morning|evening|night|week|weekday)|each (?:day|morning)|daily|weekdays?|weekends?|teach|recipe|alarms|timers|cancel|delete|dismiss|(?:get|come|arrive|i'?m) home|whenever i)\b/i,
   },
   hud: {
     blurb: "JARVIS's own screen: theme, background, panels, opening its views, clearing the chat",

@@ -124,6 +124,8 @@ phone_command!(config_secret_delete(name: String) -> ActionResponse, ConfigSecre
 phone_command!(tv_shell(host: String, command: String) -> serde_json::Value, TvShellRequest);
 phone_command!(wol_send(mac: String, near: String) -> ActionResponse, WolSendRequest);
 phone_command!(media_now() -> serde_json::Value);
+phone_command!(arrival_sync(names_json: String) -> serde_json::Value, ArrivalSyncRequest);
+phone_command!(home_network(action: String) -> serde_json::Value, HomeNetworkRequest);
 phone_command!(poll_share() -> ShareResponse);
 phone_command!(schedule_routines(routines_json: String) -> ScheduleRoutinesResponse, ScheduleRoutinesRequest);
 phone_command!(poll_routine_tap() -> RoutineTapResponse);

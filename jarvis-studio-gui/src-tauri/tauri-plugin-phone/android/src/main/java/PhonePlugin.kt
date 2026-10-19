@@ -220,6 +220,16 @@ internal class TvShellArgs {
 }
 
 @InvokeArg
+internal class ArrivalSyncArgs {
+    var namesJson: String = "[]"
+}
+
+@InvokeArg
+internal class HomeNetworkArgs {
+    var action: String = "status"
+}
+
+@InvokeArg
 internal class WolSendArgs {
     var mac: String = ""
     var near: String = ""
@@ -2137,6 +2147,40 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     fun deviceAction(invoke: Invoke) {
         val args = invoke.parseArgs(DeviceActionArgs::class.java)
         autonomyScope.launch { invoke.resolve(DirectActions.device(activity, args)) }
+    }
+
+    /** "When I get home" routines (names) for ArrivalWatcher to watch for. */
+    @Command
+    fun arrivalSync(invoke: Invoke) {
+        val args = invoke.parseArgs(ArrivalSyncArgs::class.java)
+        autonomyScope.launch {
+            ArrivalWatcher.sync(activity, args.namesJson)
+            invoke.resolve(homeState(true, "ok"))
+        }
+    }
+
+    /** Home Wi-Fi: "mark" the current one as home, "forget" them all, or "status". */
+    @Command
+    fun homeNetwork(invoke: Invoke) {
+        val args = invoke.parseArgs(HomeNetworkArgs::class.java)
+        autonomyScope.launch {
+            when (args.action) {
+                "mark" -> {
+                    val (ok, summary, _) = ArrivalWatcher.markHome(activity)
+                    invoke.resolve(homeState(ok, summary))
+                }
+                "forget" -> {
+                    ArrivalWatcher.forgetHomes(activity)
+                    invoke.resolve(homeState(true, "Forgot the home Wi-Fi."))
+                }
+                else -> invoke.resolve(homeState(true, "ok"))
+            }
+        }
+    }
+
+    private fun homeState(ok: Boolean, summary: String) = result(ok, summary).apply {
+        put("homes", ArrivalWatcher.homeCount(activity))
+        put("here", ArrivalWatcher.atHome(activity))
     }
 
     /** What's playing on the phone (DirectActions.mediaNow), for "send this to the TV". */

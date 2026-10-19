@@ -645,6 +645,7 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
+| `ArrivalWatcher.kt` | "When I get home" routines. Home is a Wi-Fi network by gateway + subnet (no SSID, so no location permission), learned when the TV or PC answers on its home address (`home_network` "mark"). A PendingIntent network callback (`ArrivalReceiver`) sees a home Wi-Fi come up while JARVIS is closed; a 15-minute `ArrivalSampleWorker` records home/away so a blip at home isn't an arrival. Arriving posts `RoutineAlarms.post` — the tap-to-run notification a timed routine uses. Pure half JVM-tested (`ArrivalWatcherTest.kt`) |
 | `ShareInbox.kt` | Text shared to JARVIS from another app's Share sheet, taken by MainActivity (like a routine tap) and polled by JS (`poll_share`) |
 | `WakeOnLan.kt` | A Wake-on-LAN magic packet (six 0xFF, then the MAC ×16) to the broadcast address and the device's /24, ports 9 and 7, three times. `ok` means it left the phone; callers prove the wake by reaching the device. Pure half JVM-tested (`WakeOnLanTest.kt`) |
 | `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
@@ -668,7 +669,8 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
 (`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), Wake-on-LAN
-(`wol_send`, §6a), "send this to the TV" (`media_now`, `poll_share`, §6a), and one-step actions
+(`wol_send`, §6a), "send this to the TV" (`media_now`, `poll_share`, §6a), "when I get home" (`arrival_sync`,
+`home_network`), and one-step actions
 (`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
 `Option`, and Tauri rejects a call missing any of them ("missing required key"), so JS
 sends every key. `platform/index.test.ts` parses `commands.rs` and checks each call;

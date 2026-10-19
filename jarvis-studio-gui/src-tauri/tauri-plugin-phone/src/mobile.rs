@@ -94,6 +94,8 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(tv_shell(payload: TvShellRequest) -> serde_json::Value, "tvShell");
     mobile_command!(wol_send(payload: WolSendRequest) -> ActionResponse, "wolSend");
     mobile_command!(media_now() -> serde_json::Value, "mediaNow");
+    mobile_command!(arrival_sync(payload: ArrivalSyncRequest) -> serde_json::Value, "arrivalSync");
+    mobile_command!(home_network(payload: HomeNetworkRequest) -> serde_json::Value, "homeNetwork");
     mobile_command!(poll_share() -> ShareResponse, "pollShare");
     mobile_command!(schedule_routines(payload: ScheduleRoutinesRequest) -> ScheduleRoutinesResponse, "scheduleRoutines");
     mobile_command!(poll_routine_tap() -> RoutineTapResponse, "pollRoutineTap");

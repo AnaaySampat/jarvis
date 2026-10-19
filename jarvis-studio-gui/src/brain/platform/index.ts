@@ -251,6 +251,25 @@ export interface RoutineSchedule {
   nextAt: number;
 }
 
+/** Home Wi-Fi as ArrivalWatcher.kt knows it: how many networks count as home, and
+ *  whether the phone is on one now. */
+export interface HomeNetwork {
+  ok: boolean;
+  summary: string;
+  homes: number;
+  here: boolean;
+}
+
+/** The "when I get home" routines (names) for the native arrival watcher. */
+export function syncArrivals(names: string[]): Promise<HomeNetwork | null> {
+  return phoneJson<HomeNetwork>("arrival_sync", { namesJson: JSON.stringify(names) });
+}
+
+/** "mark" the Wi-Fi the phone is on as home, "forget" them all, or "status". */
+export function homeNetwork(action: "mark" | "forget" | "status"): Promise<HomeNetwork | null> {
+  return phoneJson<HomeNetwork>("home_network", { action });
+}
+
 /** Replace every native routine alarm with `list`. Null off-device or on no reply. */
 export function scheduleRoutineAlarms(list: RoutineAlarm[]): Promise<RoutineSchedule | null> {
   return phoneJson<RoutineSchedule>("schedule_routines", { routinesJson: JSON.stringify(list) });

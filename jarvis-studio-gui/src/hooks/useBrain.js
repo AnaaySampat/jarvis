@@ -14,7 +14,13 @@ import { createBrain } from "../brain";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
-import { androidPlatform, pollRoutineTap, pollShare, wolSend } from "../brain/platform";
+import {
+  androidPlatform,
+  homeNetwork,
+  pollRoutineTap,
+  pollShare,
+  wolSend,
+} from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { applyRemote, localChanges } from "../brain/memory/sync";
 import { LocationService } from "../brain/tools/location";
@@ -106,6 +112,15 @@ const MEMORY_SYNC_KEY = "jarvis.android.memorysync.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
+
+// "When I get home" (ArrivalWatcher.kt): the TV or PC answering on its home address
+// means the phone's Wi-Fi is home. Told at most every 10 minutes; idempotent natively.
+let homeMarkedAt = 0;
+function markHomeNetwork() {
+  if (Date.now() - homeMarkedAt < 10 * 60_000) return;
+  homeMarkedAt = Date.now();
+  void homeNetwork("mark");
+}
 const pendingLegacyConfigSecrets = {};
 
 const nativeConfigSecretBridge = {
@@ -690,7 +705,12 @@ export function useBrain() {
       writeJson(kv, TV_KEY, next);
       setTvConfig(next);
     };
-    return nativeTvShell(tvConfig.host, undefined, { mac: tvConfig.mac, onMac, send: wolSend });
+    return nativeTvShell(tvConfig.host, undefined, {
+      mac: tvConfig.mac,
+      onMac,
+      send: wolSend,
+      onLan: markHomeNetwork,
+    });
   }, [tvConfig]);
   // Saved only once the TV actually answers, which on the first connection means the
   // user accepted "Allow USB debugging?" on the TV.
@@ -801,6 +821,10 @@ export function useBrain() {
           queueMicrotask(() => {
             if (pcRef.current !== pc || !pc.isOnline) return;
             void syncMemoryRef.current?.();
+            // Reached over its home address, not Tailscale: the phone is home.
+            if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(pc.activeHost || "")) {
+              markHomeNetwork();
+            }
             for (const { taskId, lastSeq } of loadKnownRemoteTaskCursors()) {
               pc.signal("task.subscribe", { task_id: taskId, resume_after_seq: lastSeq });
               pc.signal("task.status", { task_id: taskId });
