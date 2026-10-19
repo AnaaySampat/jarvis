@@ -399,6 +399,12 @@ pub struct ShareResponse {
     pub boot: i64,
 }
 
+/// A screenshot of the TV at `host` (TvAdb.capture).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TvCaptureRequest {
+    pub host: String,
+}
+
 /// A Wake-on-LAN magic packet for `mac`, also sent to the /24 broadcast of `near` (the
 /// device's last known address) — see WakeOnLan.kt.
 #[derive(Debug, Clone, Serialize, Deserialize)]

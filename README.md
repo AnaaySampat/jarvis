@@ -82,6 +82,9 @@ the app**, so the phone needs no server and no Python.
 - **One memory** — what you tell JARVIS to remember, and your routines, are shared with
   the paired PC: tell either one, both know. Forgetting works the same way. A timed
   routine still goes off on the device you made it on.
+- **TV by sight** — "what's on my TV?" looks at the TV's screen, and "on YouTube, play the
+  second result for lofi" is done step by step, looking after each button press (nothing
+  inside Netflix can be seen: it blocks screenshots).
 - **Send this to the TV** — "send this to the TV" moves the YouTube video or Netflix show
   playing on the phone to the TV at the same point and pauses the phone (needs
   notification access). Or share a YouTube/Netflix link to JARVIS from any app's Share

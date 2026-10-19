@@ -207,6 +207,9 @@ impl<R: Runtime> Phone<R> {
         Ok(serde_json::json!({ "ok": false, "output": "", "exitCode": -1, "summary": "TV control is only available on Android." }))
     }
     unavailable_command!(wol_send(WolSendRequest));
+    pub fn tv_capture(&self, _p: TvCaptureRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "Seeing the TV is only available on Android." }))
+    }
     pub fn media_now(&self) -> crate::Result<serde_json::Value> {
         Ok(serde_json::json!({ "ok": false, "summary": "Reading what's playing is only available on Android." }))
     }

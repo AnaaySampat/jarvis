@@ -95,6 +95,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::identity_verify_host_envelope,
             commands::tv_shell,
             commands::wol_send,
+            commands::tv_capture,
             commands::media_now,
             commands::arrival_sync,
             commands::home_network,

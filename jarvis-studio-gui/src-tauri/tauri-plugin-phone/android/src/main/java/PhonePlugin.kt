@@ -1118,6 +1118,23 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    /** A screenshot of the TV (TvAdb.capture), for tv_control look / task. */
+    @Command
+    fun tvCapture(invoke: Invoke) {
+        val args = invoke.parseArgs(TvShellArgs::class.java)
+        autonomyScope.launch {
+            val c = tvAdb.capture(args.host)
+            invoke.resolve(JSObject().apply {
+                put("ok", c.ok)
+                put("image", c.image)
+                put("blocked", c.blocked)
+                put("blank", c.blank)
+                put("sig", c.sig)
+                put("summary", c.summary)
+            })
+        }
+    }
+
     @Command
     fun configSecretDelete(invoke: Invoke) {
         val args = invoke.parseArgs(ConfigSecretNameArgs::class.java)

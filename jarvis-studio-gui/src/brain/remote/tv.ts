@@ -26,7 +26,20 @@ export interface ShellReply {
 export type TvShell = ((command: string) => Promise<ShellReply>) & {
   /** Set once the TV's MAC is known: switch it on when it's fully off (wakeTv). */
   wake?: () => Promise<ToolResult | null>;
+  /** A screenshot of the TV (TvAdb.capture), for look / task (remote/tvSight.ts). */
+  capture?: () => Promise<TvCapture>;
 };
+
+/** A TV screenshot: `image` base64 JPEG; `blocked` = nothing capturable or all black (a
+ *  copy-protected layer); `sig` a 64×36 grey signature (base64); `blank` one flat colour. */
+export interface TvCapture {
+  ok: boolean;
+  image: string;
+  blocked: boolean;
+  blank: boolean;
+  sig: string;
+  summary: string;
+}
 
 /** Sends a Wake-on-LAN packet (platform wolSend → WakeOnLan.kt). */
 export type WolSend = (mac: string, near: string) => Promise<ToolResult>;
@@ -70,6 +83,36 @@ export interface EpisodePick {
 // Longer than TvAdb's 30s socket timeout: the first connection waits on the user
 // accepting "Allow USB debugging?" on the TV.
 const SHELL_TIMEOUT_MS = 45_000;
+
+async function invokeTvCapture(host: string): Promise<TvCapture> {
+  const fail = (summary: string): TvCapture => ({
+    ok: false,
+    image: "",
+    blocked: false,
+    blank: false,
+    sig: "",
+    summary,
+  });
+  if (!inTauri()) return fail("Seeing the TV only works on the phone.");
+  try {
+    const r = await Promise.race([
+      invoke<Partial<TvCapture>>("plugin:phone|tv_capture", { host }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("The TV didn't respond.")), SHELL_TIMEOUT_MS),
+      ),
+    ]);
+    return {
+      ok: Boolean(r?.ok),
+      image: String(r?.image ?? ""),
+      blocked: Boolean(r?.blocked),
+      blank: Boolean(r?.blank),
+      sig: String(r?.sig ?? ""),
+      summary: String(r?.summary ?? ""),
+    };
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+}
 
 /** One shell call to one address: the native bridge (`plugin:phone|tv_shell`). */
 export type AddressShell = (address: string, command: string) => Promise<ShellReply>;
@@ -150,6 +193,7 @@ export function nativeTvShell(
   host: string,
   shell: AddressShell = invokeTvShell,
   opts: TvWakeOpts = {},
+  capture: (address: string) => Promise<TvCapture> = invokeTvCapture,
 ): TvShell {
   const addresses = tvAddresses(host);
   let preferred = 0;
@@ -182,6 +226,30 @@ export function nativeTvShell(
       if (mac) opts.onMac(mac);
     }
     return r;
+  };
+  // Screenshots go to the address that answered last, then the others, like commands.
+  out.capture = async () => {
+    const order = [preferred, ...addresses.keys()].filter((i, n, a) => a.indexOf(i) === n);
+    let last: TvCapture | null = null;
+    for (const i of order) {
+      const c = await capture(addresses[i]!);
+      if (c.ok) {
+        preferred = i;
+        return c;
+      }
+      last = c;
+      if (!unreachable(c.summary)) return c;
+    }
+    return (
+      last ?? {
+        ok: false,
+        image: "",
+        blocked: false,
+        blank: false,
+        sig: "",
+        summary: "That isn't a valid TV address.",
+      }
+    );
   };
   const { mac, send } = opts;
   if (mac && send) {
@@ -569,14 +637,19 @@ export async function runTvControl(
   }
 }
 
-class TvUnreachable extends Error {}
+export class TvUnreachable extends Error {}
+
+/** What the user would call the app with this package ("Netflix", "the home screen"). */
+export function appLabel(pkg: string): string {
+  return APP_NAMES[pkg] ?? pkg;
+}
 
 interface Session {
   state: number;
   position: number;
 }
 
-class Tv {
+export class Tv {
   constructor(
     private readonly shell: TvShell,
     private readonly wait: (ms: number) => Promise<void>,
@@ -888,7 +961,7 @@ class Tv {
     return { ok: true, summary: after ? "The TV is muted." : "The TV is unmuted." };
   }
 
-  private async wakefulness(): Promise<string> {
+  async wakefulness(): Promise<string> {
     return (
       /mWakefulness=(\w+)/.exec(await this.sh("dumpsys power | grep mWakefulness="))?.[1] ?? ""
     );
@@ -927,6 +1000,22 @@ class Tv {
       ok: true,
       summary: `Sent ${name.replace(/_/g, " ")}${count > 1 ? ` ×${count}` : ""} to the TV.`,
     };
+  }
+
+  /** Raw keycodes, in order (the TV-by-sight operator's moves; nothing is verified). */
+  async pressCodes(codes: number[]): Promise<void> {
+    if (codes.length) await this.keyevent(...codes);
+  }
+
+  /** Type into the focused text field. `input text` takes %s for a space and only what
+   *  the TV's virtual keyboard map has (no emoji or non-Latin). */
+  async typeText(text: string): Promise<ToolResult> {
+    const t = text.replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!t) return { ok: false, summary: "There was nothing to type." };
+    const out = await this.sh(`input text ${shellQuote(t.replace(/ /g, "%s"))}`);
+    return /Exception|Error/.test(out)
+      ? { ok: false, summary: `The TV couldn't type “${t}”.` }
+      : { ok: true, summary: `Typed “${t}” on the TV.` };
   }
 
   async status(): Promise<ToolResult> {

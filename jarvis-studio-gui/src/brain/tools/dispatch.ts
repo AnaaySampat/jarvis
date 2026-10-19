@@ -40,6 +40,8 @@ import * as quota from "../quota";
 import * as http from "./http";
 import type { HttpToolCtx } from "./http";
 import { runTvControl, tvEnv, type TvShell } from "../remote/tv";
+import { lookAtTv, runTvTask, type Sight } from "../remote/tvSight";
+import { chatOverLadder } from "../ask";
 
 export interface DispatchDeps {
   platform: Platform;
@@ -360,6 +362,9 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
     case "tv_control":
       if (!deps.tv) {
         return { ok: false, summary: "No TV is set up yet — add it under Remote PC & TV, sir." };
+      }
+      if (spec.do === "look" || spec.do === "task") {
+        return tvBySight(deps, deps.tv, String(spec.do), String(spec.target ?? ""));
       }
       return runTvControl(
         deps.tv,
@@ -721,6 +726,53 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
     }
     return end(result, !r.ok && r.error === "cancelled");
   }
+}
+
+/** tv_control look / task (remote/tvSight.ts): the vision call goes over the route
+ *  ladder with the screenshot attached, which keeps it to models that can see it. A
+ *  task shows in the activity feed like a phone task, and STOP ends it. */
+async function tvBySight(
+  deps: DispatchDeps,
+  tv: TvShell,
+  action: string,
+  target: string,
+): Promise<ToolResult> {
+  const sight: Sight = {
+    see: async (system, prompt, image) => {
+      try {
+        const r = await chatOverLadder(
+          [
+            { role: "system", content: system },
+            { role: "user", content: prompt, ...(image ? { images: [image] } : {}) },
+          ],
+          [],
+          deps.config,
+          deps.onFallback,
+          { disableThinking: true },
+        );
+        return r.text ?? "";
+      } catch {
+        return "";
+      }
+    },
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    shouldStop: () => deps.shouldStopPhoneTask?.() === true,
+  };
+  if (action === "look") return lookAtTv(tv, target, sight);
+  const id = `tv_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+  deps.onAgentEvent?.({ event: "agent_task", data: { id, kind: "tv", goal: target } });
+  sight.onStep = (line, ok) => deps.onAgentEvent?.({ event: "agent_step", data: { id, line, ok } });
+  sight.onShot = (image) =>
+    deps.onAgentEvent?.({
+      event: "agent_shot",
+      data: { id, image: `data:image/jpeg;base64,${image}` },
+    });
+  const result = await runTvTask(tv, target, sight);
+  deps.onAgentEvent?.({
+    event: "agent_task_end",
+    data: { id, ok: result.ok, summary: result.summary, stopped: result.error === "cancelled" },
+  });
+  return result;
 }
 
 /** Pin or clear the user's location (the `set_my_location` tool). */

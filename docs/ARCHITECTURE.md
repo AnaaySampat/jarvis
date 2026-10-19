@@ -668,7 +668,7 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
-(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), Wake-on-LAN
+(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, `tv_capture`, §6a), Wake-on-LAN
 (`wol_send`, §6a), "send this to the TV" (`media_now`, `poll_share`, §6a), "when I get home" (`arrival_sync`,
 `home_network`), and one-step actions
 (`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
@@ -779,6 +779,18 @@ and adds its address — over their tailnet.
   `ACTION_SEND text/plain` filter hands the text to `ShareInbox.kt`; JS polls
   `poll_share` (keyed `boot:seq`, so a WebView reload doesn't replay it) and runs a
   YouTube/Netflix link as an ordinary "play this on the TV" turn.
+- **By sight: `look` and `task` (2026-10-19, `remote/tvSight.ts`).** Ports of the
+  desktop's `tv.look` and `tv_operator.py`. `tv_capture` (`TvAdb.capture`) runs
+  `screencap -p` over dadb's binary `exec:` channel — shell output is text — and returns a
+  ≤1280 px JPEG, `blocked` (nothing captured, or black: a secure layer, which in Netflix
+  is everything), `blank`, and a 64×36 grey signature (`TvFrame.kt`, JVM-tested) the loop
+  compares to tell whether a press changed anything. The vision call goes over the route
+  ladder with the screenshot attached (`chatOverLadder`), which keeps it to models that
+  can see. The task loop runs **in the WebView**, unlike phone_task (§4): driving the TV
+  never takes the phone out of JARVIS, so nothing pauses it; with the screen off it
+  stalls and the 4-minute deadline ends it. Success is only the model's `done` on a
+  screenshot; STOP, three unchanged screens, a hidden screen and the step cap all end it
+  with a reason. No `ask`: an ambiguous goal fails with the question.
 - **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
   `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
   enters a command through `shellQuote()` or as a validated package name or title id, so

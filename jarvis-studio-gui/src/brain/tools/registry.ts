@@ -128,6 +128,8 @@ export const TV_ACTIONS = [
   "key",
   "status",
   "cast",
+  "look",
+  "task",
 ];
 
 /** Every `device_control` action; each has its branch in DirectActions.device
@@ -532,7 +534,11 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
               "'the TV' or 'on my TV' — never the phone tools. 'play' puts a named show or " +
               "film on Netflix, or a video/music search on YouTube, and plays it. 'cast' moves " +
               "what's playing on this phone (YouTube or Netflix) to the TV at the same point " +
-              "('send this to the TV'), or plays a YouTube/Netflix link there.",
+              "('send this to the TV'), or plays a YouTube/Netflix link there. 'look' sees " +
+              "the TV's screen and answers about it ('what's on my TV?'). 'task' does a " +
+              "multi-step job by sight — navigating menus, picking a particular search result, " +
+              "changing a TV setting — that no other action covers. Neither can see inside " +
+              "Netflix: it blocks screenshots.",
             {
               action: str("What to do on the TV.", TV_ACTIONS),
               target: str(
@@ -541,7 +547,9 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
                   "previous, fast forward, rewind, channel up, channel down, input, captions " +
                   "(add a number to press it several times, e.g. 'down 3'). set_volume: the " +
                   "level 0-100. volume_up/volume_down: how many steps (default 5). cast: a " +
-                  "YouTube or Netflix link, or omit for what's playing on this phone.",
+                  "YouTube or Netflix link, or omit for what's playing on this phone. look: the " +
+                  "question about the screen. task: the whole goal in plain English, e.g. 'on " +
+                  "YouTube, play the second result for lofi'.",
               ),
               app: str(
                 "For play: 'netflix' for shows and films (default), 'youtube' for videos, music " +

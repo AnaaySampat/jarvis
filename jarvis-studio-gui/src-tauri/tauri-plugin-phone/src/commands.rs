@@ -123,6 +123,7 @@ phone_command!(config_secret_get(name: String) -> ConfigSecretResponse, ConfigSe
 phone_command!(config_secret_delete(name: String) -> ActionResponse, ConfigSecretNameRequest);
 phone_command!(tv_shell(host: String, command: String) -> serde_json::Value, TvShellRequest);
 phone_command!(wol_send(mac: String, near: String) -> ActionResponse, WolSendRequest);
+phone_command!(tv_capture(host: String) -> serde_json::Value, TvCaptureRequest);
 phone_command!(media_now() -> serde_json::Value);
 phone_command!(arrival_sync(names_json: String) -> serde_json::Value, ArrivalSyncRequest);
 phone_command!(home_network(action: String) -> serde_json::Value, HomeNetworkRequest);

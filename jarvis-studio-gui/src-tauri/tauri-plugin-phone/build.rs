@@ -57,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "identity_verify_host_envelope",
     "tv_shell",
     "wol_send",
+    "tv_capture",
     "media_now",
     "arrival_sync",
     "home_network",

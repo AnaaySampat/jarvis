@@ -524,7 +524,7 @@ export function useBrain() {
   }, []);
 
   const onAgentEvent = useCallback((ev) => {
-    if (ev.event === "agent_task" && ev.data?.kind === "phone") {
+    if (ev.event === "agent_task" && (ev.data?.kind === "phone" || ev.data?.kind === "tv")) {
       phoneTaskStopRef.current = false;
     }
     setAgentTasks((prev) => reduceTaskCenterAgentEvent(prev, ev));
@@ -1216,7 +1216,8 @@ export function useBrain() {
   const stopPhoneTask = useCallback(() => {
     requestPhoneStop();
     const tasks = agentTasksRef.current.filter(
-      (task) => task.kind === "phone" && !TERMINAL_TASK_STATES.has(task.status),
+      (task) =>
+        (task.kind === "phone" || task.kind === "tv") && !TERMINAL_TASK_STATES.has(task.status),
     );
     setAgentTasks((prev) => tasks.reduce((next, task) => markTaskStopping(next, task.id), prev));
     const nativeIds = [...new Set(tasks.map((task) => task.nativeTaskId).filter(Boolean))];
@@ -1227,7 +1228,7 @@ export function useBrain() {
     (id) => {
       const task = agentTasksRef.current.find((item) => item.id === id || item.nativeTaskId === id);
       if (!task || TERMINAL_TASK_STATES.has(task.status)) return;
-      if (task.kind === "phone" || task.source === "phone") {
+      if (task.kind === "phone" || task.kind === "tv" || task.source === "phone") {
         setAgentTasks((prev) => markTaskStopping(prev, task.id));
         requestPhoneStop();
         if (task.nativeTaskId) void journaledPhone.cancelTask?.(task.nativeTaskId);
@@ -1254,7 +1255,9 @@ export function useBrain() {
   const stopAllTasks = useCallback(() => {
     requestPhoneStop();
     const active = agentTasksRef.current.filter((task) => !TERMINAL_TASK_STATES.has(task.status));
-    const phoneTasks = active.filter((task) => task.kind === "phone" || task.source === "phone");
+    const phoneTasks = active.filter(
+      (task) => task.kind === "phone" || task.kind === "tv" || task.source === "phone",
+    );
     setAgentTasks((prev) =>
       phoneTasks.reduce((next, task) => markTaskStopping(next, task.id), prev),
     );

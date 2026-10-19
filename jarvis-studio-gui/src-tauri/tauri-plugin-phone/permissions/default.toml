@@ -56,6 +56,7 @@ permissions = [
     "allow-identity-verify-host-challenge",
     "allow-identity-verify-host-envelope",
     "allow-tv-shell",
+    "allow-tv-capture",
     "allow-wol-send",
     "allow-media-now",
     "allow-arrival-sync",

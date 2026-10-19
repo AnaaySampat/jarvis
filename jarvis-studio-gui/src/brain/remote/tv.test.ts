@@ -209,7 +209,8 @@ describe("runTvControl", () => {
   });
 
   it("has a handler for every action the registry advertises", async () => {
-    for (const action of TV_ACTIONS) {
+    // look and task see the screen: dispatch sends them to remote/tvSight.ts.
+    for (const action of TV_ACTIONS.filter((a) => a !== "look" && a !== "task")) {
       const tv = fakeTv([[/mCurrentFocus/, focus("com.netflix.ninja")]]);
       const r = await runTvControl(tv.shell, action, "1", "netflix", env);
       expect(r.summary, action).not.toMatch(/don't know the TV action/);

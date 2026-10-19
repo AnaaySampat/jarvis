@@ -1,8 +1,12 @@
 package com.jarvis.phone
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import dadb.AdbKeyPair
 import dadb.Dadb
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -20,6 +24,18 @@ import java.net.UnknownHostException
  */
 internal class TvAdb(context: Context) {
     data class Reply(val ok: Boolean, val output: String, val exitCode: Int, val summary: String)
+
+    /** A screenshot: [image] is base64 JPEG (≤ maxSide), [blocked] = nothing could be
+     *  captured or it came back black (a copy-protected layer — Netflix), [sig] the
+     *  64×36 grey signature (base64), [blank] one flat colour. */
+    data class Capture(
+        val ok: Boolean,
+        val image: String = "",
+        val blocked: Boolean = false,
+        val blank: Boolean = false,
+        val sig: String = "",
+        val summary: String = "",
+    )
 
     // noBackupFilesDir: app-private and never copied off the phone by a backup.
     private val privFile = File(context.noBackupFilesDir, "tv_adbkey")
@@ -46,6 +62,47 @@ internal class TvAdb(context: Context) {
             }
         }
         return Reply(false, "", -1, describe(last, target))
+    }
+
+    /** `screencap -p` over the binary exec channel (shell output is text). The TV
+     *  returns nothing while a secure surface is up (SurfaceFlinger: "FB is protected"). */
+    @Synchronized
+    fun capture(host: String, maxSide: Int = 1280): Capture {
+        val target = parseTarget(host) ?: return Capture(false, summary = "That isn't a valid TV address.")
+        var last: Exception? = null
+        repeat(2) {
+            try {
+                val png = connection(target).open("exec:screencap -p").use { it.source.readByteArray() }
+                return encode(png, maxSide)
+            } catch (e: Exception) {
+                last = e
+                drop()
+            }
+        }
+        return Capture(false, summary = describe(last, target))
+    }
+
+    private fun encode(png: ByteArray, maxSide: Int): Capture {
+        if (png.isEmpty()) return Capture(true, blocked = true)
+        val full = BitmapFactory.decodeByteArray(png, 0, png.size)
+            ?: return Capture(false, summary = "The TV's screenshot couldn't be read.")
+        val scale = minOf(1.0, maxSide.toDouble() / maxOf(full.width, full.height))
+        val shot = if (scale < 1.0) {
+            Bitmap.createScaledBitmap(full, (full.width * scale).toInt(), (full.height * scale).toInt(), true)
+        } else full
+        val pixels = IntArray(shot.width * shot.height)
+        shot.getPixels(pixels, 0, shot.width, 0, 0, shot.width, shot.height)
+        if (TvFrame.brightest(pixels) <= TvFrame.BLACK) return Capture(true, blocked = true)
+        val thumb = Bitmap.createScaledBitmap(shot, TvFrame.SIG_W, TvFrame.SIG_H, true)
+        val small = IntArray(TvFrame.SIG_W * TvFrame.SIG_H)
+        thumb.getPixels(small, 0, TvFrame.SIG_W, 0, 0, TvFrame.SIG_W, TvFrame.SIG_H)
+        val jpeg = ByteArrayOutputStream().also { shot.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        return Capture(
+            true,
+            image = Base64.encodeToString(jpeg.toByteArray(), Base64.NO_WRAP),
+            blank = TvFrame.blank(small),
+            sig = Base64.encodeToString(TvFrame.signature(small), Base64.NO_WRAP),
+        )
     }
 
     private fun connection(target: Pair<String, Int>): Dadb {

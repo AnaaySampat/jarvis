@@ -57,6 +57,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-verify-host-challenge`
 - `allow-identity-verify-host-envelope`
 - `allow-tv-shell`
+- `allow-tv-capture`
 - `allow-wol-send`
 - `allow-media-now`
 - `allow-arrival-sync`
@@ -1633,6 +1634,32 @@ Enables the task_status command without any pre-configured scope.
 <td>
 
 Denies the task_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-tv-capture`
+
+</td>
+<td>
+
+Enables the tv_capture command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-tv-capture`
+
+</td>
+<td>
+
+Denies the tv_capture command without any pre-configured scope.
 
 </td>
 </tr>
