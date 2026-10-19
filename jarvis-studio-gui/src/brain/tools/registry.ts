@@ -678,7 +678,8 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
   tv_control: (a) => ({
     type: "tv_control",
     do: a.action ?? "",
-    target: a.target ?? "",
+    // Live (desktop, then replay.test.ts): a model names the app to open in "app".
+    target: a.target || (a.action === "open_app" ? (a.app ?? "") : ""),
     app: a.app ?? "netflix",
     season: Number(a.season ?? 0),
     episode: Number(a.episode ?? 0),

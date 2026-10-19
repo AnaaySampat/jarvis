@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live": "vitest run replay.live"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

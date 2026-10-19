@@ -108,6 +108,10 @@ These are the ones that get broken by well-meaning changes. Details in ARCHITECT
    `poll_speaking` for completion. (§5)
 
 10. **Tests are colocated** — `foo.test.ts` next to `foo.ts`, not in a `tests/` tree.
+    Model behaviour has its own: `brain/replay/fixtures.json` holds real (or live-observed)
+    model replies that `replay.test.ts` plays through the real turn loop. When a model
+    surprises you on a device, add the turn there. `npm run test:live` asks a real model
+    the same questions (needs GEMINI_API_KEY or GROQ_API_KEY in the environment).
 
 11. **The phone operator loop is native — keep it there.** `OperatorCore.kt` runs the
     loop; JS only starts it (`operator_start`) and polls it (`operator_status`). A hidden
