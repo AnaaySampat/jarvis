@@ -13,6 +13,7 @@ import type {
   PhoneController,
 } from "../operator/controller";
 import { inTauri } from "../tools/httpClient";
+import type { PhoneMedia } from "../remote/tv";
 import { makeKV, readJson, writeJson } from "../memory/store";
 
 export interface TextToSpeech {
@@ -267,6 +268,21 @@ export function pollRoutineTap(): Promise<{ seq: number; name: string; date: str
  *  woke — the caller checks that by reaching it. */
 export function wolSend(mac: string, near = ""): Promise<ToolResult> {
   return phoneInvoke("wol_send", { mac, near });
+}
+
+// ── "Send this to the TV": what's playing here, and links shared to JARVIS ──
+
+/** What Android's media sessions say is playing (DirectActions.mediaNow). Needs
+ *  notification access; says so otherwise. */
+export async function mediaNow(): Promise<PhoneMedia> {
+  const r = await phoneJson<PhoneMedia>("media_now", {});
+  return r ?? { ok: false, summary: "I couldn't read what's playing on the phone." };
+}
+
+/** The last text shared to JARVIS from another app (ShareInbox.kt); `seq` bumps once
+ *  per share (polled, §5). Null off-device. */
+export function pollShare(): Promise<{ seq: number; text: string; boot: number } | null> {
+  return phoneJson("poll_share", {});
 }
 
 // ── Read-only file access (Storage Access Framework) ──

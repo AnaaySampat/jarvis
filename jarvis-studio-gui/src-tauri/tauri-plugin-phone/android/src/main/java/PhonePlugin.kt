@@ -2139,6 +2139,23 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         autonomyScope.launch { invoke.resolve(DirectActions.device(activity, args)) }
     }
 
+    /** What's playing on the phone (DirectActions.mediaNow), for "send this to the TV". */
+    @Command
+    fun mediaNow(invoke: Invoke) {
+        autonomyScope.launch { invoke.resolve(DirectActions.mediaNow(activity)) }
+    }
+
+    /** The last text shared to JARVIS (ShareInbox); `seq` bumps once per share. */
+    @Command
+    fun pollShare(invoke: Invoke) {
+        val s = ShareInbox.shared
+        invoke.resolve(JSObject().apply {
+            put("seq", s.seq)
+            put("text", s.text)
+            put("boot", ShareInbox.boot)
+        })
+    }
+
     @Command
     fun commAction(invoke: Invoke) {
         val args = invoke.parseArgs(CommActionArgs::class.java)

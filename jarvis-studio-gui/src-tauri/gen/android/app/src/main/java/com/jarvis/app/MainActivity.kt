@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import com.jarvis.phone.RoutineAlarms
+import com.jarvis.phone.ShareInbox
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -17,13 +18,16 @@ class MainActivity : TauriActivity() {
     )
     super.onCreate(savedInstanceState)
     RoutineAlarms.takeTap(intent)
+    ShareInbox.take(intent)
   }
 
   // A routine notification's tap is taken here, not in PhonePlugin: Tauri registers its
   // plugins only after the WebView starts, and a tap that brings a killed JARVIS back
   // arrives as onNewIntent before that, so the plugin never saw it (2026-10-18, live).
+  // A share from another app's Share sheet arrives the same way.
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     RoutineAlarms.takeTap(intent)
+    ShareInbox.take(intent)
   }
 }

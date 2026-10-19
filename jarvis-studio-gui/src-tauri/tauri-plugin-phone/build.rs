@@ -57,6 +57,8 @@ const COMMANDS: &[&str] = &[
     "identity_verify_host_envelope",
     "tv_shell",
     "wol_send",
+    "media_now",
+    "poll_share",
     "schedule_routines",
     "poll_routine_tap",
     "device_action",

@@ -645,6 +645,7 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
+| `ShareInbox.kt` | Text shared to JARVIS from another app's Share sheet, taken by MainActivity (like a routine tap) and polled by JS (`poll_share`) |
 | `WakeOnLan.kt` | A Wake-on-LAN magic packet (six 0xFF, then the MAC ×16) to the broadcast address and the device's /24, ports 9 and 7, three times. `ok` means it left the phone; callers prove the wake by reaching the device. Pure half JVM-tested (`WakeOnLanTest.kt`) |
 | `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
 | `JarvisNotificationListener.kt` | Notification access: lists what's showing, and replies through a notification's own RemoteInput, confirmed only when the app updates or clears that notification |
@@ -667,7 +668,7 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
 (`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), Wake-on-LAN
-(`wol_send`, §6a), and one-step actions
+(`wol_send`, §6a), "send this to the TV" (`media_now`, `poll_share`, §6a), and one-step actions
 (`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
 `Option`, and Tauri rejects a call missing any of them ("missing required key"), so JS
 sends every key. `platform/index.test.ts` parses `commands.rs` and checks each call;
@@ -764,6 +765,18 @@ and adds its address — over their tailnet.
   (rewriting the pairing record would rebuild the link) and `wake_pc` sends to each,
   then counts the PC awake only once the link is back online. A broadcast never
   crosses a router, so both need the phone on the device's own network.
+- **"Send this to the TV" (`cast`).** A YouTube or Netflix link (`parseLink`, also inside
+  shared text), or with no link what's playing on the phone: `media_now`
+  (`DirectActions.mediaNow`) reads the playing media session — package, title, channel,
+  position extrapolated from `PlaybackState` — through notification access. YouTube has
+  no video id in its session, so `findYoutubeVideo` finds one by web search and keeps it
+  only if YouTube's own oEmbed title matches. YouTube opens at `watch?v=<id>&t=<s>s`;
+  the position the TV reports says whether it took the start time, and the reply says
+  so if not. The phone is paused only once the TV plays (Netflix the other way round:
+  paused first, so the profile resumes there). **Share → JARVIS**: MainActivity's
+  `ACTION_SEND text/plain` filter hands the text to `ShareInbox.kt`; JS polls
+  `poll_share` (keyed `boot:seq`, so a WebView reload doesn't replay it) and runs a
+  YouTube/Netflix link as an ordinary "play this on the TV" turn.
 - **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
   `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
   enters a command through `shellQuote()` or as a validated package name or title id, so

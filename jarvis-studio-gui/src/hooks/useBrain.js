@@ -14,7 +14,7 @@ import { createBrain } from "../brain";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
-import { androidPlatform, pollRoutineTap, wolSend } from "../brain/platform";
+import { androidPlatform, pollRoutineTap, pollShare, wolSend } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
@@ -31,7 +31,7 @@ import {
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
 import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
-import { nativeTvShell, normMac, tvAddresses } from "../brain/remote/tv";
+import { nativeTvShell, normMac, parseLink, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
@@ -97,6 +97,8 @@ const TV_KEY = "jarvis.android.tv.v1";
 // The PC's network adapters for Wake-on-LAN, from its signed auth.ready. Kept apart
 // from PC_KEY: rewriting the pairing record would rebuild (and reconnect) the link.
 const PC_WAKE_KEY = "jarvis.android.pcwake.v1";
+// The last share from another app this WebView handled (ShareInbox.kt boot:seq).
+const SHARE_KEY = "jarvis.android.share.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
@@ -1554,6 +1556,41 @@ export function useBrain() {
       document.removeEventListener("visibilitychange", tick);
     };
   }, [sendMessage, secretsReady]);
+
+  // Share → JARVIS (ShareInbox.kt): a YouTube or Netflix link shared from another app
+  // plays on the TV, as an ordinary turn so the reply says what really happened.
+  // Polled (§5) whenever JARVIS comes forward — which a share makes it do — and every
+  // few seconds while it's in front.
+  const tvSetUp = Boolean(tvConfig);
+  useEffect(() => {
+    if (!secretsReady) return undefined;
+    const tick = async () => {
+      if (document.visibilityState !== "visible" || busyRef.current || !brainRef.current) return;
+      const share = await pollShare();
+      if (!share?.seq) return;
+      const key = `${share.boot}:${share.seq}`;
+      if (kv.get(SHARE_KEY) === key) return;
+      kv.set(SHARE_KEY, key);
+      const link = parseLink(share.text);
+      if (!link) {
+        pushWarning("Shared with JARVIS: only a YouTube or Netflix link can be played on the TV.");
+      } else if (!tvSetUp) {
+        pushWarning("Set up your TV under Remote PC & TV to play shared links on it.");
+      } else {
+        void sendMessage(
+          `Play this on the TV (tv_control cast): ${share.text}`,
+          `📺 ${share.text}`,
+        );
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 5_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [sendMessage, secretsReady, pushWarning, tvSetUp]);
 
   // Quick-action buttons fire a command without echoing a user bubble. On mobile we
   // just treat it as a normal turn (the brain decides whether to act/answer).

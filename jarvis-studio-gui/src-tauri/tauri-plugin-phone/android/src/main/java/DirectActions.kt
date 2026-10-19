@@ -281,6 +281,31 @@ internal object DirectActions {
         emptyList()
     }
 
+    /** What's playing, for "send this to the TV": the playing session (else the most
+     *  recent) with where it is now — PlaybackState's position plus the time since it
+     *  was reported, while playing. Nothing is guessed without notification access. */
+    fun mediaNow(ctx: Context): JSObject {
+        if (!JarvisNotificationListener.enabled(ctx)) {
+            return res(false, "Turn on notification access for JARVIS so I can see what's playing.", "no_access")
+        }
+        val all = sessions(ctx)
+        val s = all.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: all.firstOrNull()
+            ?: return res(false, "Nothing is playing on the phone.", "nothing_playing")
+        val st = s.playbackState
+        val playing = st?.state == PlaybackState.STATE_PLAYING
+        var position = st?.position ?: 0L
+        if (playing && st != null && st.lastPositionUpdateTime > 0) {
+            position += ((SystemClock.elapsedRealtime() - st.lastPositionUpdateTime) * st.playbackSpeed).toLong()
+        }
+        return res(true, "ok").apply {
+            put("package", s.packageName)
+            put("title", s.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "")
+            put("artist", s.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "")
+            put("playing", playing)
+            put("position", maxOf(position, 0L))
+        }
+    }
+
     /** The title of the active media session, when notification access lets us see it. */
     private fun nowPlaying(ctx: Context): String? =
         sessions(ctx).firstOrNull()?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)

@@ -31,7 +31,25 @@ export type TvShell = ((command: string) => Promise<ShellReply>) & {
 /** Sends a Wake-on-LAN packet (platform wolSend → WakeOnLan.kt). */
 export type WolSend = (mac: string, near: string) => Promise<ToolResult>;
 
+/** What Android's media sessions say is playing on the phone (DirectActions.mediaNow). */
+export interface PhoneMedia {
+  ok: boolean;
+  summary: string;
+  package?: string;
+  title?: string;
+  artist?: string;
+  playing?: boolean;
+  /** Milliseconds into it, now. */
+  position?: number;
+}
+
 export interface TvEnv {
+  /** What's playing on the phone, for "send this to the TV" (cast with no link). */
+  phoneMedia?(): Promise<PhoneMedia>;
+  /** Pause the phone's player; true only when Android reports it paused. */
+  pausePhone?(): Promise<boolean>;
+  /** A YouTube video's title + channel → its id, checked against YouTube's own name. */
+  findYoutube?(title: string, channel: string): Promise<{ id: string } | { error: string }>;
   /** A show/film name → its Netflix title id, plus Netflix's own name for it. */
   lookupNetflix(title: string): Promise<{ id: string; name: string } | { error: string }>;
   /** A show's season/episode → that episode's own Netflix id and title. */
@@ -241,12 +259,182 @@ export async function wakeTv(
   };
 }
 
-export function tvEnv(ctx: HttpToolCtx): TvEnv {
+export function tvEnv(
+  ctx: HttpToolCtx,
+  phone: Pick<TvEnv, "phoneMedia" | "pausePhone"> = {},
+): TvEnv {
   return {
+    ...phone,
+    findYoutube: (title, channel) => findYoutubeVideo(title, channel, ctx),
     lookupNetflix: (title) => lookupNetflixTitle(title, ctx),
     netflixEpisode,
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+}
+
+// ── "Send this to the TV": links, and what's playing on the phone ────────────
+
+export type MediaLink =
+  | { service: "youtube"; id: string; t: number }
+  | { service: "netflix"; kind: "watch" | "title"; id: string };
+
+/** "90", "90s", "1m30s", "1h2m3s" → seconds (YouTube's t= / start=). */
+function linkSeconds(raw: string): number {
+  const t = (raw ?? "").trim().toLowerCase();
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t);
+  if (!m || !(m[1] || m[2] || m[3])) return 0;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+/** A YouTube or Netflix link → which video/title, or null. Mirrors the desktop's
+ *  actions/now_playing.py parse_link; takes links without https:// too. */
+export function parseLink(raw: string): MediaLink | null {
+  const text = (raw ?? "").trim();
+  // A share often wraps the link in words ("Watch this! https://youtu.be/…").
+  const found =
+    /(?:https?:\/\/)?(?:[a-z0-9-]+\.)*(?:youtube\.com|youtu\.be|netflix\.com)\/\S*/i.exec(text);
+  if (!found) return null;
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(found[0]) ? found[0] : `https://${found[0]}`);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (["youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].includes(host)) {
+    let id = "";
+    if (host === "youtu.be") id = parts[0] ?? "";
+    else if (parts[0] === "watch") id = u.searchParams.get("v") ?? "";
+    else if (["shorts", "live", "embed"].includes(parts[0] ?? "")) id = parts[1] ?? "";
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+    return {
+      service: "youtube",
+      id,
+      t: linkSeconds(u.searchParams.get("t") ?? u.searchParams.get("start") ?? ""),
+    };
+  }
+  if (host === "netflix.com") {
+    const at =
+      parts[0] === "watch" || parts[0] === "title"
+        ? 0
+        : parts[1] === "watch" || parts[1] === "title"
+          ? 1
+          : -1;
+    if (at >= 0 && /^\d+$/.test(parts[at + 1] ?? "")) {
+      return { service: "netflix", kind: parts[at] as "watch" | "title", id: parts[at + 1]! };
+    }
+    const jbv = u.searchParams.get("jbv") ?? "";
+    if (/^\d+$/.test(jbv)) return { service: "netflix", kind: "title", id: jbv };
+  }
+  return null;
+}
+
+const PHONE_YOUTUBE = [
+  "com.google.android.youtube",
+  "com.google.android.apps.youtube.music",
+  "app.revanced.android.youtube",
+];
+const PHONE_NETFLIX = "com.netflix.mediaclient";
+
+function clock(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const mm = h ? String(m).padStart(2, "0") : String(m);
+  return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * "Send this to the TV": a YouTube/Netflix link in `target`, else whatever is playing
+ * on the phone. YouTube carries on at the same point and is paused on the phone only
+ * once the TV plays it; Netflix is paused first, so the TV resumes where it stopped.
+ */
+async function castToTv(tv: Tv, target: string, env: TvEnv): Promise<ToolResult> {
+  if (target.trim()) {
+    const link = parseLink(target);
+    if (!link)
+      return { ok: false, summary: "That isn't a YouTube or Netflix link I can play on the TV." };
+    return tv.cast(link, link.service === "youtube" ? link.t : 0);
+  }
+  if (!env.phoneMedia) return { ok: false, summary: "I can't see what's playing on this phone." };
+  const now = await env.phoneMedia();
+  if (!now.ok) return { ok: false, summary: now.summary || "Nothing is playing on the phone." };
+  const title = (now.title ?? "").trim();
+  const pkg = now.package ?? "";
+  const pause = async (r: ToolResult, before = false): Promise<ToolResult> => {
+    const paused = env.pausePhone ? await env.pausePhone() : false;
+    if (before) return r;
+    return {
+      ...r,
+      summary:
+        r.summary + (paused ? " Paused it on the phone." : " (I couldn't pause it on the phone.)"),
+    };
+  };
+  if (PHONE_YOUTUBE.includes(pkg)) {
+    if (!title || !env.findYoutube)
+      return { ok: false, summary: "I can't tell which YouTube video is playing." };
+    const found = await env.findYoutube(title, now.artist ?? "");
+    if ("error" in found) return { ok: false, summary: found.error };
+    const r = await tv.cast(
+      { service: "youtube", id: found.id, t: 0 },
+      Math.floor((now.position ?? 0) / 1000),
+      title,
+    );
+    return r.ok ? pause(r) : r;
+  }
+  if (pkg === PHONE_NETFLIX) {
+    const show = title
+      ? await env.lookupNetflix(title)
+      : { error: "I can't tell what's playing on Netflix." };
+    if ("error" in show) return { ok: false, summary: show.error };
+    const paused = env.pausePhone ? await env.pausePhone() : false;
+    if (paused) await env.wait(3000); // let Netflix save where it is
+    const r = await tv.cast({ service: "netflix", kind: "title", id: show.id }, 0, show.name);
+    return paused
+      ? {
+          ...r,
+          summary: r.summary + (r.ok ? " Paused it on the phone." : " (It's paused on the phone.)"),
+        }
+      : r;
+  }
+  return {
+    ok: false,
+    summary: `“${title || "That"}” is playing in ${pkg || "an app"}; only YouTube and Netflix can be sent to the TV.`,
+  };
+}
+
+/** A YouTube video id for a title + channel: web search for its link, then YouTube's
+ *  own oEmbed name for that id has to match the title (the Netflix lookup's rule). */
+export async function findYoutubeVideo(
+  title: string,
+  channel: string,
+  ctx: HttpToolCtx,
+): Promise<{ id: string } | { error: string }> {
+  const t = title.trim();
+  const r = await webSearch(
+    `YouTube video "${t}"${channel ? ` by ${channel}` : ""}: reply with its https://www.youtube.com/watch?v= link.`,
+    ctx,
+  );
+  if (!r.ok) return { error: `I couldn't look up “${t}” on YouTube: ${r.summary}` };
+  const ids = [
+    ...r.summary.matchAll(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/g),
+  ].map((m) => m[1]!);
+  for (const id of [...new Set(ids)].slice(0, 3)) {
+    try {
+      const res = await resilientFetch(
+        `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}`,
+        {},
+        15_000,
+      );
+      const o = res.ok ? ((await res.json()) as { title?: string }) : null;
+      if (o?.title && sameTitle(o.title, t)) return { id };
+    } catch {
+      /* try the next one */
+    }
+  }
+  return { error: `I couldn't find which YouTube video “${t}” is.` };
 }
 
 const NETFLIX = "com.netflix.ninja";
@@ -331,7 +519,7 @@ export async function runTvControl(
   const tv = new Tv(shell, env.wait);
   // A TV that's fully off can't be reached at all: wake it first (when its MAC is known).
   let woke: ToolResult | null = null;
-  if (shell.wake && ["power_on", "play", "open_app"].includes(action)) {
+  if (shell.wake && ["power_on", "play", "open_app", "cast"].includes(action)) {
     woke = await shell.wake();
     if (woke && !woke.ok) return woke;
   }
@@ -354,6 +542,8 @@ export async function runTvControl(
         return await tv.setVolume(parseInt(target, 10));
       case "mute":
         return await tv.toggleMute();
+      case "cast":
+        return await castToTv(tv, target, env);
       case "power_on": {
         const r = await tv.power(true);
         return r.ok && woke
@@ -528,6 +718,12 @@ class Tv {
       path = `watch/${ep.id}`;
       found.name = `${show.name} season ${season}, episode ${episode}${ep.title ? ` (“${ep.title}”)` : ""}`;
     }
+    return this.netflixOpen(path, found.name);
+  }
+
+  /** Open a Netflix `title/<id>` or `watch/<id>` link and confirm it plays. */
+  async netflixOpen(path: string, name: string): Promise<ToolResult> {
+    const found = { name };
     const cold = !(await this.sh(`pidof ${NETFLIX}`)).trim();
     const before = cold ? undefined : await this.playingNow(NETFLIX);
     const sentAt = Date.now();
@@ -571,6 +767,43 @@ class Tv {
       summary:
         `I opened ${found.name} on Netflix, but I couldn't confirm it started playing — ` +
         "it may be waiting on the TV screen.",
+    };
+  }
+
+  /** A parsed link on the TV. YouTube starts at `startS` (checked against the position
+   *  the TV reports); Netflix resumes wherever the profile left off. */
+  async cast(link: MediaLink, startS = 0, name = ""): Promise<ToolResult> {
+    const label = name ? `“${name}”` : "it";
+    if (link.service === "netflix") {
+      if (!/^\d+$/.test(link.id)) return { ok: false, summary: "That isn't a Netflix title." };
+      return this.netflixOpen(`${link.kind}/${link.id}`, name ? label : "the title");
+    }
+    if (!/^[A-Za-z0-9_-]{11}$/.test(link.id))
+      return { ok: false, summary: "That isn't a YouTube video." };
+    const start = Math.max(Math.floor(startS || 0), 0);
+    const url = `https://www.youtube.com/watch?v=${link.id}${start >= 5 ? `&t=${start}s` : ""}`;
+    await this.sh(`am start -a android.intent.action.VIEW -d ${shellQuote(url)} ${YOUTUBE}`);
+    if (!(await this.waitForFocus(YOUTUBE))) {
+      return { ok: false, summary: "I asked the TV to open YouTube, but it didn't come up." };
+    }
+    for (let i = 0; i < 8; i++) {
+      await this.wait(2000);
+      const now = await this.playingNow(YOUTUBE);
+      if (!now.playing) continue;
+      if (start >= 5 && now.after && now.after.position < (start - 10) * 1000) {
+        return {
+          ok: true,
+          summary: `Playing ${label} on YouTube on the TV, but from the start: it didn't take the start time (${clock(start)}).`,
+        };
+      }
+      return {
+        ok: true,
+        summary: `Playing ${label} on YouTube on the TV${start >= 5 ? ` from ${clock(start)}` : ""}.`,
+      };
+    }
+    return {
+      ok: false,
+      summary: `I opened ${label} in YouTube on the TV, but couldn't confirm it started playing.`,
     };
   }
 

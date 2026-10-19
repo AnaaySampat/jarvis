@@ -14,7 +14,7 @@
 
 import type { ActionSpec, ToolResult } from "../types";
 import { type BrainConfig, configReady } from "../config";
-import type { Platform } from "../platform";
+import { mediaNow, type Platform } from "../platform";
 import type { MemoryStore } from "../memory/store";
 import type { LocationService } from "./location";
 import { agendaStartMillis, runSchedule } from "../schedule/store";
@@ -366,7 +366,11 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
         String(spec.do ?? ""),
         String(spec.target ?? ""),
         String(spec.app ?? "netflix"),
-        tvEnv(httpCtx),
+        tvEnv(httpCtx, {
+          phoneMedia: mediaNow,
+          pausePhone: async () =>
+            Boolean((await deps.platform.direct?.device({ action: "media_pause" }))?.ok),
+        }),
         { season: Number(spec.season) || 0, episode: Number(spec.episode) || 0 },
       );
 

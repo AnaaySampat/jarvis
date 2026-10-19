@@ -58,6 +58,8 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-verify-host-envelope`
 - `allow-tv-shell`
 - `allow-wol-send`
+- `allow-media-now`
+- `allow-poll-share`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
 - `allow-device-action`
@@ -674,6 +676,32 @@ Denies the long_press command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-media-now`
+
+</td>
+<td>
+
+Enables the media_now command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-media-now`
+
+</td>
+<td>
+
+Denies the media_now command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-notification-action`
 
 </td>
@@ -927,6 +955,32 @@ Enables the poll_routine_tap command without any pre-configured scope.
 <td>
 
 Denies the poll_routine_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-poll-share`
+
+</td>
+<td>
+
+Enables the poll_share command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-poll-share`
+
+</td>
+<td>
+
+Denies the poll_share command without any pre-configured scope.
 
 </td>
 </tr>

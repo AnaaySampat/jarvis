@@ -93,6 +93,8 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(config_secret_delete(payload: ConfigSecretNameRequest) -> ActionResponse, "configSecretDelete");
     mobile_command!(tv_shell(payload: TvShellRequest) -> serde_json::Value, "tvShell");
     mobile_command!(wol_send(payload: WolSendRequest) -> ActionResponse, "wolSend");
+    mobile_command!(media_now() -> serde_json::Value, "mediaNow");
+    mobile_command!(poll_share() -> ShareResponse, "pollShare");
     mobile_command!(schedule_routines(payload: ScheduleRoutinesRequest) -> ScheduleRoutinesResponse, "scheduleRoutines");
     mobile_command!(poll_routine_tap() -> RoutineTapResponse, "pollRoutineTap");
     mobile_command!(device_action(payload: DeviceActionRequest) -> ActionResponse, "deviceAction");

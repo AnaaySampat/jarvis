@@ -127,6 +127,7 @@ export const TV_ACTIONS = [
   "power_off",
   "key",
   "status",
+  "cast",
 ];
 
 /** Every `device_control` action; each has its branch in DirectActions.device
@@ -527,7 +528,9 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
             "tv_control",
             "Control the user's TV (an Android TV on the home Wi-Fi). Use for anything about " +
               "'the TV' or 'on my TV' — never the phone tools. 'play' puts a named show or " +
-              "film on Netflix, or a video/music search on YouTube, and plays it.",
+              "film on Netflix, or a video/music search on YouTube, and plays it. 'cast' moves " +
+              "what's playing on this phone (YouTube or Netflix) to the TV at the same point " +
+              "('send this to the TV'), or plays a YouTube/Netflix link there.",
             {
               action: str("What to do on the TV.", TV_ACTIONS),
               target: str(
@@ -535,7 +538,8 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
                   "name. key: a remote button — up, down, left, right, ok, back, home, next, " +
                   "previous, fast forward, rewind, channel up, channel down, input, captions " +
                   "(add a number to press it several times, e.g. 'down 3'). set_volume: the " +
-                  "level 0-100. volume_up/volume_down: how many steps (default 5).",
+                  "level 0-100. volume_up/volume_down: how many steps (default 5). cast: a " +
+                  "YouTube or Netflix link, or omit for what's playing on this phone.",
               ),
               app: str(
                 "For play: 'netflix' for shows and films (default), 'youtube' for videos, music " +

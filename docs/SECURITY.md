@@ -30,6 +30,7 @@ service, and then only to that service.
 | Text for a QR code | api.qrserver.com | When you ask for a QR code |
 | Tasks and screen-sharing for your PC | Your own PC only, directly or through Tailscale | When you use Remote PC |
 | A Wake-on-LAN packet (the device's MAC address) | Your own home network, as a broadcast | When you ask to switch the TV or the PC on |
+| The title of the YouTube video playing on the phone | Your web-search provider, then YouTube's public oEmbed endpoint (the video id) | When you ask to send it to the TV |
 
 Free tiers have their own rules: **Mistral's free tier trains on what you send it**, and
 OpenRouter's free models are run by third parties. The app says so next to those keys in

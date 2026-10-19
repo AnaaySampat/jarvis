@@ -373,6 +373,19 @@ pub struct TvShellRequest {
     pub command: String,
 }
 
+/// The last text shared to JARVIS from another app (ShareInbox.kt); `seq` bumps once
+/// per share (polled, §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareResponse {
+    #[serde(default)]
+    pub seq: i32,
+    #[serde(default)]
+    pub text: String,
+    /// When the app's process started (ms): `seq` restarts with it.
+    #[serde(default)]
+    pub boot: i64,
+}
+
 /// A Wake-on-LAN magic packet for `mac`, also sent to the /24 broadcast of `near` (the
 /// device's last known address) — see WakeOnLan.kt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
