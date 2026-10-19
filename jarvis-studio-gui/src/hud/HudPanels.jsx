@@ -22,6 +22,7 @@ import Sheet, { ActionRow, Field, Group, HeaderButton, Toggle } from "../compone
 import { STATUS_META } from "./hudConstants";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 import { listRoutines, parseDays, routineWhen, saveRoutine } from "../brain/schedule/routines";
+import { digestEnabled, setDigestEnabled } from "../brain/memory/digest";
 import { localISODate } from "../brain/schedule/store";
 
 // Coerce a telemetry field to a finite number (→0). A partial frame missing
@@ -1544,6 +1545,7 @@ export function MemoryOverlay({
 }) {
   const [tab, setTab] = useState("facts");
   const [draft, setDraft] = useState("");
+  const [digestOn, setDigestOn] = useState(digestEnabled);
   const [armed, setArmed] = useState(null); // id awaiting its confirming second tap
   const [focus, setFocus] = useState(null); // id picked on the timeline
   const mainRef = useRef(null);
@@ -1696,6 +1698,22 @@ export function MemoryOverlay({
                   Remember
                 </button>
               </form>
+            )}
+            {tab === "facts" && (
+              <label className="memx-digest">
+                <input
+                  type="checkbox"
+                  checked={digestOn}
+                  onChange={(e) => {
+                    setDigestEnabled(e.target.checked);
+                    setDigestOn(e.target.checked);
+                  }}
+                />
+                <span>
+                  Each night, keep what&apos;s worth remembering from your chats (your own words
+                  only, up to five facts)
+                </span>
+              </label>
             )}
 
             {tab === "conversations" && currentCount > 0 && (

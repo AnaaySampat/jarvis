@@ -2573,6 +2573,19 @@
 .memx-add input::placeholder {
   color: var(--txt-3);
 }
+.memx-digest {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--txt-3);
+}
+.memx-digest input {
+  margin-top: 3px;
+  accent-color: var(--ac);
+}
 .memx-add input:focus {
   border-color: var(--ac);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--ac) 14%, transparent);

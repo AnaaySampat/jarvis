@@ -23,6 +23,9 @@ import {
 } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { applyRemote, localChanges } from "../brain/memory/sync";
+import { digestDue, runDigest } from "../brain/memory/digest";
+import { configReady } from "../brain/config";
+import { makeProvider } from "../brain/providers";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
 import {
@@ -1835,6 +1838,58 @@ export function useBrain() {
     const id = setInterval(() => void syncMemoryRef.current?.(), 60_000);
     return () => clearInterval(id);
   }, []);
+
+  // The nightly memory digest (brain/memory/digest.ts): the first idle moment after
+  // 03:00 that JARVIS is open, one call on the active model; new facts reach the PC
+  // with the next memory sync.
+  useEffect(() => {
+    if (!secretsReady) return undefined;
+    let running = false;
+    const tick = async () => {
+      if (running || !digestDue() || document.visibilityState !== "visible") return;
+      if (busyRef.current || listeningRef.current) return;
+      const cfg = toBrainConfig(storedRef.current);
+      if (!configReady(cfg)) return;
+      running = true;
+      try {
+        const provider = makeProvider(cfg);
+        const complete = async (system, user) => {
+          try {
+            const r = await provider.chat(
+              [
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ],
+              [],
+            );
+            return r.text || "";
+          } catch {
+            return "";
+          }
+        };
+        const res = await runDigest(
+          memoryRef.current,
+          complete,
+          new Date(),
+          cfg.vertexServiceAccountJson,
+        );
+        if (res.added.length) {
+          await listMemory();
+          void syncMemoryRef.current?.();
+        }
+      } catch (err) {
+        console.error("[Digest] failed:", err);
+      } finally {
+        running = false;
+      }
+    };
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [secretsReady, listMemory]);
 
   const rememberFact = useCallback(
     async (text) => {

@@ -76,6 +76,9 @@ the app**, so the phone needs no server and no Python.
   the TV and play lofi"). The phone recognises your home Wi-Fi by itself (the network
   where your TV or PC answers; no location permission) and shows a notification as you
   arrive: tap it and the routine runs.
+- **Nightly memory digest** — once a night JARVIS reads what you said to it (your own
+  words only) and keeps up to five new things worth remembering. They're ordinary
+  facts: see or forget them in Memory, or switch the digest off there.
 - **One memory** — what you tell JARVIS to remember, and your routines, are shared with
   the paired PC: tell either one, both know. Forgetting works the same way. A timed
   routine still goes off on the device you made it on.

@@ -857,6 +857,13 @@ while it's up and just after a memory or routine tool runs; the PC answers
 keyed by the PC's host id, so a different PC starts from zero). Cursors are inclusive: a
 repeat is harmless, a miss isn't.
 
+**The nightly digest (2026-10-19)** — `memory/digest.ts`, the phone's half of the
+desktop's `memory_digest.py`. The first idle moment after 03:00 that JARVIS is open, one
+plain call on the active model reads the user's own messages not digested yet (FNV hashes
+of read ones are kept) and adds at most five new facts through `memory.remember`, so they
+sync like any other. Only user turns are read, never replies or tool output, so nothing
+JARVIS read can plant a fact; it adds and never deletes. Toggle: Memory ▸ Facts.
+
 ## 8. Desktop vs mobile splits
 
 **Rust: compile-time.** `src-tauri/src/lib.rs` gates every desktop-only feature (system
