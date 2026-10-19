@@ -3,9 +3,11 @@ import type { LLMReply } from "./providers";
 
 const replies: LLMReply[] = [];
 const seen: string[][] = [];
+const seenTools: string[][] = [];
 vi.mock("./ask", () => ({
-  chatOverLadder: async (convo: Array<{ content: string }>) => {
+  chatOverLadder: async (convo: Array<{ content: string }>, tools?: Array<{ name: string }>) => {
     seen.push(convo.map((m) => m.content));
+    seenTools.push((tools ?? []).map((t) => t.name));
     return replies.shift() ?? { text: "(script exhausted)", toolCalls: [] };
   },
 }));
@@ -20,7 +22,8 @@ vi.mock("./tools/dispatch", () => ({
 
 import { answeredPhoneWithoutLooking, claimedWithoutActing, runTurn } from "./loop";
 import type { DispatchDeps } from "./tools/dispatch";
-import type { ToolResult } from "./types";
+import { turnPalette } from "./tools/registry";
+import type { ToolDeclaration, ToolResult } from "./types";
 
 const deps = { config: {} } as unknown as DispatchDeps;
 const ask = (text: string) => runTurn([{ role: "user", content: text }], [], deps);
@@ -28,6 +31,7 @@ const ask = (text: string) => runTurn([{ role: "user", content: text }], [], dep
 beforeEach(() => {
   replies.length = 0;
   seen.length = 0;
+  seenTools.length = 0;
   dispatched.length = 0;
   results.length = 0;
 });
@@ -176,5 +180,49 @@ describe("runTurn — answered about the phone without looking", () => {
       "what's the phone number for Pizza Hut?"]) {
       expect(answeredPhoneWithoutLooking(q, false), q).toBe(false);
     }
+  });
+});
+
+describe("runTurn — load_tools", () => {
+  const full = ["open_application", "manage_schedule", "get_news"].map(
+    (name) => ({ name, description: name }) as ToolDeclaration,
+  );
+  const call = (id: string, name: string, args: Record<string, unknown>) => ({
+    text: "",
+    toolCalls: [{ id, name, args }],
+  });
+
+  it("adds a group for the rest of the turn without spending a round", async () => {
+    replies.push(
+      call("l", "load_tools", { groups: "planner" }),
+      call("a", "manage_schedule", { action: "get" }),
+      call("b", "manage_schedule", { action: "get", day: "tomorrow" }),
+      { text: "Two meetings tomorrow, sir.", toolCalls: [] },
+    );
+    const out = await runTurn(
+      [{ role: "user", content: "what's on tomorrow" }],
+      turnPalette(full, new Set()),
+      deps,
+      undefined,
+      full,
+    );
+    expect(seenTools[0]).toEqual(["open_application", "load_tools"]);
+    expect(seenTools[1]).toContain("manage_schedule");
+    expect(dispatched).toHaveLength(2); // load_tools itself runs nothing
+    expect(out.toolResults).toHaveLength(2);
+    expect(out.reply).toBe("Two meetings tomorrow, sir.");
+    expect(out.calledTools).toEqual(["load_tools", "manage_schedule", "manage_schedule"]);
+  });
+
+  it("answers a load of an unknown group with the failure", async () => {
+    replies.push(call("l", "load_tools", { groups: "nope" }), { text: "OK.", toolCalls: [] });
+    await runTurn(
+      [{ role: "user", content: "hi" }],
+      turnPalette(full, new Set()),
+      deps,
+      undefined,
+      full,
+    );
+    expect(seen[1]!.at(-1)).toBe('{"ok":false,"summary":"No such group."}');
   });
 });

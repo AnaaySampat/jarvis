@@ -1,6 +1,16 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import { toSpec, capabilitiesFor, toolPalette, DEVICE_ACTIONS } from "./registry";
+import {
+  toSpec,
+  capabilitiesFor,
+  toolPalette,
+  DEVICE_ACTIONS,
+  groupsFor,
+  LOAD_TOOLS,
+  requestedGroups,
+  TOOL_GROUPS,
+  turnPalette,
+} from "./registry";
 import kotlin from "../../../src-tauri/tauri-plugin-phone/android/src/main/java/DirectActions.kt?raw";
 
 describe("toSpec", () => {
@@ -171,5 +181,39 @@ describe("one-step phone tools", () => {
       (t) => t.name === "device_control",
     );
     expect(tool?.parameters?.properties.action?.enum).toEqual(DEVICE_ACTIONS);
+  });
+});
+
+describe("tool groups", () => {
+  const cfg = { tier: "gemini", keys: { gemini: ["k"] } } as unknown as Parameters<
+    typeof toolPalette
+  >[0];
+  const full = toolPalette(cfg, { pcPaired: true, tvPaired: true });
+  const names = (d: Array<{ name: string }>) => d.map((t) => t.name);
+
+  it("every grouped tool is a real tool", () => {
+    for (const [g, { tools }] of Object.entries(TOOL_GROUPS)) {
+      for (const t of tools) expect(names(full), `${g} lists ${t}`).toContain(t);
+    }
+  });
+
+  it("a plain turn sends well under the whole palette, and keeps the phone's one-step tools", () => {
+    const turn = turnPalette(full, groupsFor("turn on the flashlight"));
+    expect(names(turn)).toContain("device_control");
+    expect(names(turn)).toContain("phone_task");
+    expect(names(turn)).toContain(LOAD_TOOLS);
+    expect(names(turn)).not.toContain("customize_screen");
+    expect(JSON.stringify(turn).length).toBeLessThan(JSON.stringify(full).length * 0.75);
+  });
+
+  it("the request's words preload their group", () => {
+    expect(names(turnPalette(full, groupsFor("make the theme red")))).toContain("customize_screen");
+    expect(names(turnPalette(full, groupsFor("what's on my agenda")))).toContain("manage_schedule");
+    expect(names(turnPalette(full, new Set(Object.keys(TOOL_GROUPS))))).not.toContain(LOAD_TOOLS);
+  });
+
+  it("reads groups from a list or a comma string", () => {
+    expect(requestedGroups({ groups: "files, hud" })).toEqual(["files", "hud"]);
+    expect(requestedGroups({ groups: ["places", "bogus"] })).toEqual(["places"]);
   });
 });

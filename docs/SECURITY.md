@@ -194,7 +194,10 @@ fresh single-commit snapshot, so history never goes public. `reference/` and
   - **What reaches the shell.** The brain sends only commands built from typed `tv_control`
     actions. Titles and search text are single-quoted (`shellQuote`), package names are
     allow-listed by pattern, and Netflix ids are digits verified against Netflix's own page.
-  - **Reach.** LAN only; the TV is never exposed over Tailscale.
+  - **Reach.** The home LAN. Since 2026-10-19 the TV's address may also list its
+    Tailscale address, for homes with two routers; that only works if the user installs
+    Tailscale on the TV, which puts port 5555 on their tailnet too (their own devices,
+    WireGuard-authenticated). The on-TV key prompt stays the gate either way.
   - **Undoing it.** Turn off USB debugging on the TV, then "Revoke USB debugging
     authorisations" there.
 

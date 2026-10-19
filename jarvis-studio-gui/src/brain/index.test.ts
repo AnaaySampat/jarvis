@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { BrainConfig } from "./config";
 import type { ChatMessage } from "./types";
 
-const runTurn = vi.fn(async (_messages: ChatMessage[]) => ({ reply: "Done, sir." }));
+const runTurn = vi.fn(async (_messages: ChatMessage[]) => ({
+  reply: "Done, sir.",
+  toolResults: [],
+  calledTools: [],
+}));
 vi.mock("./loop", () => ({ runTurn }));
 
 const { createBrain } = await import("./index");

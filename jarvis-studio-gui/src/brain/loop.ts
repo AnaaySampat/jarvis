@@ -17,7 +17,7 @@
 
 import type { ChatMessage, ToolResult } from "./types";
 import type { ToolDeclaration } from "./types";
-import { toSpec } from "./tools/registry";
+import { groupOf, LOAD_TOOLS, requestedGroups, toSpec, turnPalette } from "./tools/registry";
 import { dispatch, type DispatchDeps } from "./tools/dispatch";
 import { chatOverLadder } from "./ask";
 
@@ -26,6 +26,8 @@ const MAX_TOOL_ROUNDS = 3; // backstop against runaway tool loops (cf. cycle gua
 export interface TurnResult {
   reply: string;
   toolResults: ToolResult[];
+  /** Every tool the model called this turn (load_tools included). */
+  calledTools: string[];
 }
 
 interface CallRecord {
@@ -163,13 +165,21 @@ export async function runTurn(
   tools: ToolDeclaration[],
   deps: DispatchDeps,
   onFallback?: (msg: string) => void,
+  /** The whole palette, when `tools` is this turn's slice of it (turnPalette): what
+   *  load_tools can add from. Without it, load_tools isn't on offer. */
+  fullTools?: ToolDeclaration[],
 ): Promise<TurnResult> {
   const convo = [...messages];
   const toolResults: ToolResult[] = [];
+  const calledTools: string[] = [];
   const callHistory: CallRecord[] = [];
   const userText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   let claimChecked = false;
   let phoneActedAndFailed = false;
+  // Loaded groups widen the palette for the rest of the turn. A round spent only on
+  // load_tools doesn't count against the cap, once.
+  const loaded = new Set<string>();
+  let freeLoadRound = true;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const reply = await chatOverLadder(convo, tools, deps.config, onFallback);
@@ -192,16 +202,31 @@ export async function runTurn(
         convo.push({ role: "user", content: note });
         continue;
       }
-      return { reply: reply.text, toolResults };
+      return { reply: reply.text, toolResults, calledTools };
     }
 
     // The model wants to act. Run each call through the single dispatcher, then
     // feed the REAL results back so the model speaks from truth, not assumption.
     convo.push({ role: "assistant", content: reply.text, toolCalls: reply.toolCalls });
+    if (freeLoadRound && reply.toolCalls.every((c) => c.name === LOAD_TOOLS)) {
+      freeLoadRound = false;
+      round--;
+    }
     for (const call of reply.toolCalls) {
+      calledTools.push(call.name);
       const isPhoneTask = call.name === "phone_task";
       let result: ToolResult;
-      if (isPhoneTask && phoneActedAndFailed) {
+      if (call.name === LOAD_TOOLS && fullTools) {
+        // Not an action: nothing is dispatched and it isn't one of toolResults.
+        const groups = requestedGroups(call.args);
+        groups.forEach((g) => loaded.add(g));
+        const before = new Set(tools.map((t) => t.name));
+        tools = turnPalette(fullTools, new Set([...activeGroups(tools), ...loaded]));
+        const added = tools.filter((t) => !before.has(t.name)).map((t) => t.name);
+        result = groups.length
+          ? { ok: true, summary: `Now available: ${added.join(", ") || "already loaded"}.` }
+          : { ok: false, summary: "No such group." };
+      } else if (isPhoneTask && phoneActedAndFailed) {
         result = PHONE_RETRY_REFUSED; // nothing ran, so it isn't one of toolResults
       } else {
         result = await dispatch(toSpec(call.name, call.args), deps);
@@ -225,6 +250,7 @@ export async function runTurn(
           reply:
             "I caught myself repeating the same step with no change, sir — stopping here rather than going in circles.",
           toolResults,
+          calledTools,
         };
       }
       callHistory.push({ sig, resultSig });
@@ -238,11 +264,17 @@ export async function runTurn(
   convo.push({ role: "user", content: FINAL_ANSWER_NOTE });
   try {
     const last = await chatOverLadder(convo, tools, deps.config, onFallback);
-    if (!last.toolCalls.length && last.text.trim()) return { reply: last.text, toolResults };
+    if (!last.toolCalls.length && last.text.trim())
+      return { reply: last.text, toolResults, calledTools };
   } catch {
     // Fall through to the tools' own words.
   }
-  return { reply: partialReply(toolResults), toolResults };
+  return { reply: partialReply(toolResults), toolResults, calledTools };
+}
+
+/** The groups whose tools a palette already carries. */
+function activeGroups(tools: ToolDeclaration[]): string[] {
+  return tools.map((t) => groupOf(t.name)).filter((g): g is string => Boolean(g));
 }
 
 const FINAL_ANSWER_NOTE =

@@ -31,7 +31,7 @@ import {
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
 import { RemotePC } from "../brain/remote/pc";
-import { nativeTvShell } from "../brain/remote/tv";
+import { nativeTvShell, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
@@ -122,8 +122,9 @@ function saveCommands(list) {
 // The TV record is just its LAN address (plus the model it reported, for display).
 // The ADB key that lets this phone in lives natively (TvAdb.kt), never in WebView storage.
 export function sanitizeTvConfig(value) {
-  const host = String(value?.host ?? "").trim();
-  if (!/^[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/.test(host)) return null;
+  // One TV, one or more addresses: its home IP, then optionally its Tailscale IP.
+  const host = tvAddresses(String(value?.host ?? "")).join(", ");
+  if (!host) return null;
   const model = String(value?.model ?? "")
     .trim()
     .slice(0, 80);

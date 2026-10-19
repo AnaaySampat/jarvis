@@ -11,7 +11,7 @@
  */
 
 import { type BrainConfig, configReady, DEFAULT_CONFIG } from "./config";
-import { toolPalette } from "./tools/registry";
+import { groupOf, groupsFor, toolPalette, turnPalette } from "./tools/registry";
 import { dispatch, type DispatchDeps } from "./tools/dispatch";
 import { createStore, type MemoryStore } from "./memory/store";
 import { playbooksPromptHint } from "./memory/playbooks";
@@ -56,6 +56,8 @@ export function createBrain(opts: BrainOptions = {}): Brain {
   const getConfig = opts.getConfig ?? (() => DEFAULT_CONFIG);
   const memory = opts.memory ?? createStore();
   const platform = opts.platform ?? androidPlatform;
+  // Tool groups the last two turns called, so a follow-up keeps the tools it just had.
+  const recentGroups: Set<string>[] = [];
 
   async function ask(text: string, display?: string, images?: string[]): Promise<string> {
     const config = getConfig();
@@ -89,7 +91,14 @@ export function createBrain(opts: BrainOptions = {}): Brain {
       return image.summary;
     }
 
-    const tools = toolPalette(config, { pcPaired: deps.remote != null, tvPaired: deps.tv != null });
+    const fullTools = toolPalette(config, {
+      pcPaired: deps.remote != null,
+      tvPaired: deps.tv != null,
+    });
+    const tools = turnPalette(
+      fullTools,
+      new Set([...groupsFor(text), ...recentGroups.flatMap((g) => [...g])]),
+    );
 
     // Storage keeps 40 turns; the model gets the last 12. Every turn is resent on
     // every call (twice when a tool runs), against free-tier per-minute token caps.
@@ -104,7 +113,9 @@ export function createBrain(opts: BrainOptions = {}): Brain {
       { role: "user", content: text, ...(images?.length ? { images } : {}) },
     ];
 
-    const { reply } = await runTurn(messages, tools, deps, opts.onFallback);
+    const { reply, calledTools } = await runTurn(messages, tools, deps, opts.onFallback, fullTools);
+    recentGroups.push(new Set(calledTools.map(groupOf).filter((g): g is string => Boolean(g))));
+    recentGroups.splice(0, recentGroups.length - 2);
 
     // ponytail: the photo itself isn't kept (localStorage would fill in a few photos), so a
     // follow-up works from JARVIS's own description of it. Keep the last one in memory if

@@ -69,7 +69,9 @@ the app**, so the phone needs no server and no Python.
   Netflix (a named season and episode too) or a YouTube search, pause/resume, volume, power,
   remote buttons. It uses the TV's own USB debugging over the network, so nothing is
   installed on the TV. Set up under the Remote PC & TV screen: turn on USB debugging on the
-  TV, type its IP, tap Connect and accept the prompt on the TV.
+  TV, type its IP, tap Connect and accept the prompt on the TV. Two routers at home (a
+  second one in router mode makes its Wi-Fi a separate network)? Switch the second one to
+  Access Point mode, or install Tailscale on the TV and add its address after a comma.
 
 Known gaps and the things that still need a live on-device test are tracked in
 [docs/STATUS.md](docs/STATUS.md).

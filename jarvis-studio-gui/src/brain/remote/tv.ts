@@ -47,37 +47,89 @@ export interface EpisodePick {
 // accepting "Allow USB debugging?" on the TV.
 const SHELL_TIMEOUT_MS = 45_000;
 
-export function nativeTvShell(host: string): TvShell {
+/** One shell call to one address: the native bridge (`plugin:phone|tv_shell`). */
+export type AddressShell = (address: string, command: string) => Promise<ShellReply>;
+
+async function invokeTvShell(host: string, command: string): Promise<ShellReply> {
+  if (!inTauri()) {
+    return {
+      ok: false,
+      output: "",
+      exitCode: -1,
+      summary: "TV control only works on the phone.",
+    };
+  }
+  try {
+    const r = await Promise.race([
+      invoke<Partial<ShellReply>>("plugin:phone|tv_shell", { host, command }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("The TV didn't respond.")), SHELL_TIMEOUT_MS),
+      ),
+    ]);
+    return {
+      ok: Boolean(r?.ok),
+      output: String(r?.output ?? ""),
+      exitCode: Number(r?.exitCode ?? -1),
+      summary: String(r?.summary ?? ""),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      output: "",
+      exitCode: -1,
+      summary: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** The TV's addresses in a saved host ("192.168.1.20, 100.101.1.2"), in order. */
+export function tvAddresses(host: string): string[] {
+  const out: string[] = [];
+  for (const part of (host ?? "").split(/[,;\s]+/)) {
+    if (/^[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/.test(part) && !out.includes(part)) out.push(part);
+  }
+  return out;
+}
+
+/** A failure that means "not reachable this way" (another address might work), as
+ *  TvAdb.describe and the timeout above word it. */
+function unreachable(summary: string): boolean {
+  return /can't reach the TV|didn't answer in time|didn't respond/.test(summary);
+}
+
+/** Said when no address got through: a second router in router mode gives its Wi-Fi
+ *  its own network, and the phone can't open a connection into it from the other one. */
+export const OTHER_NETWORK_HINT =
+  " If your home has two routers, the phone and the TV may be on different networks: " +
+  "set the second router to Access Point mode, or install Tailscale on the TV and add " +
+  "its 100.x address after a comma under Remote PC & TV.";
+
+/**
+ * The TV's shell. `host` may list several addresses for the same TV — its address on
+ * the home Wi-Fi, and its Tailscale address for when the phone is on another router's
+ * network. Each is tried in turn when the last couldn't be reached; the one that
+ * answered goes first next time, so a network change costs one connect timeout, once.
+ */
+export function nativeTvShell(host: string, shell: AddressShell = invokeTvShell): TvShell {
+  const addresses = tvAddresses(host);
+  let preferred = 0;
   return async (command) => {
-    if (!inTauri()) {
-      return {
-        ok: false,
-        output: "",
-        exitCode: -1,
-        summary: "TV control only works on the phone.",
-      };
+    if (!addresses.length) {
+      return { ok: false, output: "", exitCode: -1, summary: "That isn't a valid TV address." };
     }
-    try {
-      const r = await Promise.race([
-        invoke<Partial<ShellReply>>("plugin:phone|tv_shell", { host, command }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("The TV didn't respond.")), SHELL_TIMEOUT_MS),
-        ),
-      ]);
-      return {
-        ok: Boolean(r?.ok),
-        output: String(r?.output ?? ""),
-        exitCode: Number(r?.exitCode ?? -1),
-        summary: String(r?.summary ?? ""),
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        output: "",
-        exitCode: -1,
-        summary: err instanceof Error ? err.message : String(err),
-      };
+    const order = [preferred, ...addresses.keys()].filter((i, n, a) => a.indexOf(i) === n);
+    let last: ShellReply | null = null;
+    for (const i of order) {
+      const r = await shell(addresses[i]!, command);
+      if (r.ok) {
+        preferred = i;
+        return r;
+      }
+      last = r;
+      // Reached but refused (or failed): another path to the same TV won't change that.
+      if (!unreachable(r.summary)) return r;
     }
+    return { ...last!, summary: last!.summary + OTHER_NETWORK_HINT };
   };
 }
 
