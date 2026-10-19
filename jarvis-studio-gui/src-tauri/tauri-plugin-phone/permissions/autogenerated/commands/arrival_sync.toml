@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-arrival-sync"
+description = "Enables the arrival_sync command without any pre-configured scope."
+commands.allow = ["arrival_sync"]
+
+[[permission]]
+identifier = "deny-arrival-sync"
+description = "Denies the arrival_sync command without any pre-configured scope."
+commands.deny = ["arrival_sync"]

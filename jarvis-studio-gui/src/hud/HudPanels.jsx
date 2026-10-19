@@ -22,6 +22,7 @@ import Sheet, { ActionRow, Field, Group, HeaderButton, Toggle } from "../compone
 import { STATUS_META } from "./hudConstants";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 import { listRoutines, parseDays, routineWhen, saveRoutine } from "../brain/schedule/routines";
+import { digestEnabled, setDigestEnabled } from "../brain/memory/digest";
 import { localISODate } from "../brain/schedule/store";
 
 // Coerce a telemetry field to a finite number (→0). A partial frame missing
@@ -192,6 +193,7 @@ function RoutineForm({ routine, onSaved, onCancel }) {
   const [name, setName] = useState(routine?.name || "");
   const [steps, setSteps] = useState(routine?.prompt || "");
   const [time, setTime] = useState(routine?.time || "");
+  const [home, setHome] = useState(routine?.trigger === "home");
   const [mode, setMode] = useState(savedMode);
   const [picked, setPicked] = useState(savedMode === "custom" ? savedSet : new Set());
   const [error, setError] = useState("");
@@ -219,7 +221,10 @@ function RoutineForm({ routine, onSaved, onCancel }) {
   const ready = name.trim() && steps.trim() && !(time && mode === "custom" && !picked.size);
   const submit = (e) => {
     e.preventDefault();
-    const res = saveRoutine({ name, prompt: steps, time, days }, routine?.name);
+    const res = saveRoutine(
+      { name, prompt: steps, time: home ? "" : time, days, trigger: home ? "home" : undefined },
+      routine?.name,
+    );
     if (res.ok) onSaved(res.routine);
     else setError(res.summary);
   };
@@ -242,52 +247,79 @@ function RoutineForm({ routine, onSaved, onCancel }) {
         maxLength={600}
         rows={3}
       />
-      <div className="sch-form-row">
-        <input
-          className="sch-form-time"
-          type="time"
-          value={time}
-          onChange={(e) => edit(setTime)(e.target.value)}
-          aria-label="Time (optional)"
-        />
-        {time && (
-          <button type="button" className="sch-form-btn" onClick={() => edit(setTime)("")}>
-            No time
-          </button>
-        )}
+      <div className="cz-seg" role="group" aria-label="When it runs">
+        <button
+          type="button"
+          className={`cz-seg-btn ${!home ? "is-on" : ""}`}
+          aria-pressed={!home}
+          onClick={() => edit(setHome)(false)}
+        >
+          At a time or when asked
+        </button>
+        <button
+          type="button"
+          className={`cz-seg-btn ${home ? "is-on" : ""}`}
+          aria-pressed={home}
+          onClick={() => edit(setHome)(true)}
+        >
+          When I get home
+        </button>
       </div>
-      {!time ? (
-        <p className="rt-form-note">No time: it runs only when you ask.</p>
+      {home ? (
+        <p className="rt-form-note">
+          When the phone joins your home Wi-Fi you get a notification; tap it and JARVIS runs this.
+          Home is the Wi-Fi where your TV or PC answers.
+        </p>
       ) : (
         <>
-          <div className="cz-seg" role="group" aria-label="Days">
-            {DAY_MODES.map(([m, label]) => (
-              <button
-                key={m}
-                type="button"
-                className={`cz-seg-btn ${mode === m ? "is-on" : ""}`}
-                aria-pressed={mode === m}
-                onClick={() => pickMode(m)}
-              >
-                {label}
+          <div className="sch-form-row">
+            <input
+              className="sch-form-time"
+              type="time"
+              value={time}
+              onChange={(e) => edit(setTime)(e.target.value)}
+              aria-label="Time (optional)"
+            />
+            {time && (
+              <button type="button" className="sch-form-btn" onClick={() => edit(setTime)("")}>
+                No time
               </button>
-            ))}
+            )}
           </div>
-          {mode === "custom" && (
-            <div className="cz-seg rt-days" role="group" aria-label="Pick days">
-              {WEEK.map((i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={`cz-seg-btn ${picked.has(i) ? "is-on" : ""}`}
-                  aria-pressed={picked.has(i)}
-                  aria-label={DAY_NAME[i]}
-                  onClick={() => toggleDay(i)}
-                >
-                  {DAY_NAME[i].slice(0, 2)}
-                </button>
-              ))}
-            </div>
+          {!time ? (
+            <p className="rt-form-note">No time: it runs only when you ask.</p>
+          ) : (
+            <>
+              <div className="cz-seg" role="group" aria-label="Days">
+                {DAY_MODES.map(([m, label]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`cz-seg-btn ${mode === m ? "is-on" : ""}`}
+                    aria-pressed={mode === m}
+                    onClick={() => pickMode(m)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {mode === "custom" && (
+                <div className="cz-seg rt-days" role="group" aria-label="Pick days">
+                  {WEEK.map((i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`cz-seg-btn ${picked.has(i) ? "is-on" : ""}`}
+                      aria-pressed={picked.has(i)}
+                      aria-label={DAY_NAME[i]}
+                      onClick={() => toggleDay(i)}
+                    >
+                      {DAY_NAME[i].slice(0, 2)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -1513,6 +1545,7 @@ export function MemoryOverlay({
 }) {
   const [tab, setTab] = useState("facts");
   const [draft, setDraft] = useState("");
+  const [digestOn, setDigestOn] = useState(digestEnabled);
   const [armed, setArmed] = useState(null); // id awaiting its confirming second tap
   const [focus, setFocus] = useState(null); // id picked on the timeline
   const mainRef = useRef(null);
@@ -1665,6 +1698,22 @@ export function MemoryOverlay({
                   Remember
                 </button>
               </form>
+            )}
+            {tab === "facts" && (
+              <label className="memx-digest">
+                <input
+                  type="checkbox"
+                  checked={digestOn}
+                  onChange={(e) => {
+                    setDigestEnabled(e.target.checked);
+                    setDigestOn(e.target.checked);
+                  }}
+                />
+                <span>
+                  Each night, keep what&apos;s worth remembering from your chats (your own words
+                  only, up to five facts)
+                </span>
+              </label>
             )}
 
             {tab === "conversations" && currentCount > 0 && (

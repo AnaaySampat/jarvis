@@ -13,6 +13,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { ToolResult } from "../types";
+import { normMac, type WolSend } from "./tv";
 
 /** Live connection state, surfaced to the pairing UI. */
 export type RemoteState =
@@ -52,6 +53,29 @@ export interface RemotePCConfig {
   deviceName?: string;
 }
 
+/** One of the PC's network adapters, for waking it with Wake-on-LAN: the PC names
+ *  them in its (signed) auth.ready, wired first. */
+export interface WakeTarget {
+  mac: string;
+  ip: string;
+}
+
+/** The PC's `wake` list from auth.ready, kept only if well-formed (at most 4). */
+export function sanitizeWakeTargets(value: unknown): WakeTarget[] {
+  if (!Array.isArray(value)) return [];
+  const out: WakeTarget[] = [];
+  for (const row of value.slice(0, 4)) {
+    const mac = normMac((row as { mac?: unknown } | null)?.mac);
+    const ip = String((row as { ip?: unknown } | null)?.ip ?? "");
+    if (mac && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) out.push({ mac, ip });
+  }
+  return out;
+}
+
+/** How long `wake` waits for the PC to come back online. From sleep it's seconds;
+ *  from shut down it's a boot, a sign-in and JARVIS starting with Windows. */
+const PC_WAKE_WAIT_MS = 60_000;
+
 /** One raw backend event, forwarded to the HUD (step feed, status, warnings…). */
 export interface RemoteEvent {
   event: string;
@@ -78,6 +102,8 @@ export interface RemotePCOptions extends RemotePCConfig {
   onEvent?: (ev: RemoteEvent) => void;
   /** Connection-state changes, for the pairing UI's status pill. */
   onStateChange?: (state: RemoteState) => void;
+  /** The PC's network adapters for Wake-on-LAN, each time it accepts this phone. */
+  onWakeTargets?: (targets: WakeTarget[]) => void;
   /** Give up on a task after this many ms with NO event from the PC. Default 210s —
    *  MUST exceed the desktop's cold browser-launch budget (browser.py `_LAUNCH_TIMEOUT`
    *  = 150s) plus its first plan/step, or the phone aborts a launch the PC is still
@@ -1000,7 +1026,7 @@ export class RemotePC {
   }
 
   /** Resolve once the socket is online, or false on timeout / terminal failure. */
-  private waitForOnline(): Promise<boolean> {
+  private waitForOnline(timeoutMs = this.connectMs): Promise<boolean> {
     if (this._state === "online" && this.authenticated && this.ws?.readyState === OPEN) return Promise.resolve(true);
     if (this._state === "unauthorized") return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
@@ -1011,7 +1037,7 @@ export class RemotePC {
         clearTimeout(timer);
         resolve(v);
       };
-      const timer = setTimeout(() => done(false), this.connectMs);
+      const timer = setTimeout(() => done(false), timeoutMs);
       this.onlineWaiters.push(done);
     });
   }
@@ -1023,6 +1049,53 @@ export class RemotePC {
     if (this._state === "unauthorized") return false;
     this.connect();
     return this.waitForOnline();
+  }
+
+  /**
+   * Switch the PC on from sleep or shut down: a Wake-on-LAN packet to each of its
+   * network adapters, then wait for the link to come back. Success is the PC
+   * reconnecting, never the packet leaving the phone.
+   */
+  async wake(targets: WakeTarget[], send: WolSend, waitMs = PC_WAKE_WAIT_MS): Promise<ToolResult> {
+    if (this.isOnline) return { ok: true, summary: "The PC is already on and connected." };
+    if (this._state === "unauthorized") {
+      return { ok: false, summary: "This phone isn't accepted by the PC any more — pair it again." };
+    }
+    if (!targets.length) {
+      return {
+        ok: false,
+        error: "no_wake_target",
+        summary:
+          "I don't know your PC's network adapter yet. Connect to the PC once while it's on " +
+          "and you're at home, then I can wake it.",
+      };
+    }
+    let sent = 0;
+    let why = "";
+    for (const t of targets) {
+      const r = await send(t.mac, t.ip);
+      if (r.ok) sent++;
+      else why = r.summary;
+    }
+    if (!sent) return { ok: false, summary: why || "The wake-up packet couldn't be sent." };
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      this.nudge();
+      if (await this.waitForOnline(Math.min(5_000, Math.max(deadline - Date.now(), 1)))) {
+        return { ok: true, summary: "Woke the PC — it's connected now." };
+      }
+    }
+    return {
+      ok: false,
+      error: "pc_unreachable",
+      summary:
+        `I sent the PC a wake-up packet, but it didn't connect within ${Math.round(waitMs / 1000)} ` +
+        "seconds. If it was shut down it may still be starting — ask again in a minute. " +
+        "Otherwise: Wake-on-LAN has to be on in the PC's BIOS and in its network adapter " +
+        "(Device Manager → adapter → Power Management → Allow this device to wake the " +
+        "computer), the phone has to be on the same network as the PC, and JARVIS has to " +
+        "start with Windows.",
+    };
   }
 
   // ── Running a task ───────────────────────────────────────────────────────────
@@ -1461,6 +1534,14 @@ export class RemotePC {
         throw new Error("authenticated device mismatch");
       }
       this.authenticated = true;
+      const wake = sanitizeWakeTargets(ready.wake);
+      if (wake.length) {
+        try {
+          this.opts.onWakeTargets?.(wake);
+        } catch {
+          /* a UI callback must never break the socket */
+        }
+      }
       this.finishAuthenticated(ws);
       return;
     }

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The native scheduler (RoutineAlarms.kt): null = off-device, as in the browser.
 const schedule = vi.hoisted(() => vi.fn(async (_list: unknown[]): Promise<unknown> => null));
-vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule }));
+const arrivals = vi.hoisted(() => vi.fn(async (_names: string[]): Promise<unknown> => null));
+vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule, syncArrivals: arrivals }));
 
 import {
   addRoutine,
@@ -12,6 +13,7 @@ import {
   listRoutines,
   markRoutineRan,
   removeRoutine,
+  homeRoutines,
   routineAlarms,
   routineWhen,
   routinesPromptHint,
@@ -57,7 +59,9 @@ describe("native routine alarms", () => {
       { name: "brief", hour: 7, minute: 30, days: [1, 2, 3, 4, 5], lastRun: "" },
     ]);
     claimRoutine("brief", at(9, 0));
-    expect(schedule.mock.lastCall?.[0]).toEqual([expect.objectContaining({ lastRun: "2026-09-30" })]);
+    expect(schedule.mock.lastCall?.[0]).toEqual([
+      expect.objectContaining({ lastRun: "2026-09-30" }),
+    ]);
     removeRoutine("brief");
     expect(schedule).toHaveBeenLastCalledWith([]);
   });
@@ -73,17 +77,35 @@ describe("native routine alarms", () => {
     const r = addRoutine({ name: "check", prompt: "say the time", time: "19:21" }).routine!;
     expect(await timedRoutineNote(r)).toMatch(/can't schedule it on this device/);
 
-    schedule.mockResolvedValue({ ok: true, summary: "", exact: true, notifications: true, nextAt: 1 });
+    schedule.mockResolvedValue({
+      ok: true,
+      summary: "",
+      exact: true,
+      notifications: true,
+      nextAt: 1,
+    });
     addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
     expect(await timedRoutineNote(r)).toBe(
       "At 19:21 I'll post a notification; tap it and I'll run the routine.",
     );
 
-    schedule.mockResolvedValue({ ok: true, summary: "", exact: false, notifications: true, nextAt: 1 });
+    schedule.mockResolvedValue({
+      ok: true,
+      summary: "",
+      exact: false,
+      notifications: true,
+      nextAt: 1,
+    });
     addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
     expect(await timedRoutineNote(r)).toMatch(/may hold it a few minutes/);
 
-    schedule.mockResolvedValue({ ok: true, summary: "", exact: true, notifications: false, nextAt: 1 });
+    schedule.mockResolvedValue({
+      ok: true,
+      summary: "",
+      exact: true,
+      notifications: false,
+      nextAt: 1,
+    });
     addRoutine({ name: "check", prompt: "say the time", time: "19:21" });
     expect(await timedRoutineNote(r)).toMatch(/notifications are off/);
   });
@@ -212,5 +234,29 @@ describe("routineWhen", () => {
     expect(routineWhen({ time: "07:30", days: "weekdays" })).toBe("Weekdays at 07:30");
     expect(routineWhen({ time: "10:00", days: "weekends" })).toBe("Weekends at 10:00");
     expect(routineWhen({ time: "18:30", days: "fri,mon,wed" })).toBe("Mon, Wed, Fri at 18:30");
+  });
+});
+
+describe("when I get home", () => {
+  it("a 'home' routine has no time, says so, and is handed to the arrival watcher", () => {
+    const res = addRoutine({ name: "Welcome", prompt: "turn on the TV", time: "when I get home" });
+    expect(res.ok).toBe(true);
+    expect(res.routine).toMatchObject({ trigger: "home", origin: "phone" });
+    expect(res.routine!.time).toBeUndefined();
+    expect(res.summary).toContain("when you get home");
+    expect(routineWhen(res.routine!)).toBe("When you get home");
+    expect(arrivals).toHaveBeenLastCalledWith(["Welcome"]);
+    expect(routineAlarms(listRoutines())).toEqual([]); // never on the clock
+    expect(dueRoutines(at(23, 0))).toEqual([]);
+  });
+
+  it("the PC's home routines aren't watched here", () => {
+    expect(
+      homeRoutines([
+        { name: "a", prompt: "x", days: "daily", trigger: "home" },
+        { name: "b", prompt: "x", days: "daily", trigger: "home", origin: "pc" },
+        { name: "c", prompt: "x", days: "daily", time: "08:00" },
+      ]),
+    ).toEqual(["a"]);
   });
 });

@@ -373,6 +373,46 @@ pub struct TvShellRequest {
     pub command: String,
 }
 
+/// The "when I get home" routines (a JSON array of names) for ArrivalWatcher.kt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArrivalSyncRequest {
+    #[serde(rename = "namesJson")]
+    pub names_json: String,
+}
+
+/// Home Wi-Fi: "mark" the current network as home, "forget", or "status".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeNetworkRequest {
+    pub action: String,
+}
+
+/// The last text shared to JARVIS from another app (ShareInbox.kt); `seq` bumps once
+/// per share (polled, §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShareResponse {
+    #[serde(default)]
+    pub seq: i32,
+    #[serde(default)]
+    pub text: String,
+    /// When the app's process started (ms): `seq` restarts with it.
+    #[serde(default)]
+    pub boot: i64,
+}
+
+/// A screenshot of the TV at `host` (TvAdb.capture).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TvCaptureRequest {
+    pub host: String,
+}
+
+/// A Wake-on-LAN magic packet for `mac`, also sent to the /24 broadcast of `near` (the
+/// device's last known address) — see WakeOnLan.kt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WolSendRequest {
+    pub mac: String,
+    pub near: String,
+}
+
 /// Every timed routine, as JSON: `[{name, hour, minute, days: [0-6, 0 = Sunday], lastRun}]`
 /// (see RoutineAlarms.kt). Replaces whatever was scheduled before.
 #[derive(Debug, Clone, Serialize, Deserialize)]

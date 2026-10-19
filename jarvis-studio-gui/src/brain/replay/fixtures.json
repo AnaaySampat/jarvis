@@ -1,0 +1,387 @@
+[
+  {
+    "name": "a TV follow-up 'resume' claimed without a tool call is rechecked, then done for real",
+    "source": "live 2026-09-30 on SM-E156B: 'Resumed — back to Arcane' with no tool call (docs/STATUS.md, TV control)",
+    "context": {
+      "tvPaired": true
+    },
+    "history": [
+      {
+        "role": "user",
+        "content": "play stranger things on the tv"
+      },
+      {
+        "role": "assistant",
+        "content": "Playing Stranger Things on Netflix."
+      },
+      {
+        "role": "user",
+        "content": "pause"
+      },
+      {
+        "role": "assistant",
+        "content": "Paused Netflix."
+      }
+    ],
+    "user": "resume",
+    "model": [
+      {
+        "text": "Resumed — back to Arcane."
+      },
+      {
+        "toolCalls": [
+          {
+            "name": "tv_control",
+            "args": {
+              "action": "resume"
+            }
+          }
+        ]
+      },
+      {
+        "text": "Netflix is playing again on the TV."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Netflix is playing."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "tv_control",
+          "do": "resume"
+        }
+      ],
+      "reply": "playing",
+      "offered": ["tv_control"]
+    },
+    "live": {
+      "firstTool": "tv_control",
+      "firstArgs": {
+        "action": "resume"
+      }
+    }
+  },
+  {
+    "name": "a model that names the TV app in 'app' instead of 'target' still opens it",
+    "source": "seen live on the desktop (actions/tv.py: 'the model named the app in \"app\", not \"target\"')",
+    "context": {
+      "tvPaired": true
+    },
+    "user": "open youtube on the tv",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "tv_control",
+            "args": {
+              "action": "open_app",
+              "app": "youtube"
+            }
+          }
+        ]
+      },
+      {
+        "text": "YouTube is open on the TV."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Opened YouTube on the TV."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "tv_control",
+          "do": "open_app",
+          "target": "youtube"
+        }
+      ]
+    },
+    "live": {
+      "firstTool": "tv_control",
+      "firstArgs": {
+        "action": "open_app"
+      }
+    }
+  },
+  {
+    "name": "a reworded retry of a phone task that acted and failed is refused",
+    "source": "live 2026-10-19: 4 shutter taps reported failed, then a reworded task took 4 more photos",
+    "context": {},
+    "user": "click a photo",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "phone_task",
+            "args": {
+              "goal": "click a photo"
+            }
+          }
+        ]
+      },
+      {
+        "toolCalls": [
+          {
+            "name": "phone_task",
+            "args": {
+              "goal": "open the Camera app and press the shutter button once"
+            }
+          }
+        ]
+      },
+      {
+        "text": "I tapped the shutter but couldn't confirm a photo was saved — please check the gallery."
+      }
+    ],
+    "results": [
+      {
+        "ok": false,
+        "summary": "Nothing on screen is changing, sir — I've stopped.",
+        "error": "incomplete",
+        "data": {
+          "findings": [],
+          "verificationReceipt": "",
+          "acted": true
+        }
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "phone_task"
+        }
+      ],
+      "dispatched": 1,
+      "reply": "couldn't confirm"
+    },
+    "live": {
+      "firstTool": "phone_task"
+    }
+  },
+  {
+    "name": "a bare 'Done.' for Do Not Disturb without a tool call is rechecked",
+    "source": "the 'said it, didn't do it' guard (2026-10-18): bare OK/Done replies count as claims",
+    "context": {},
+    "user": "turn on do not disturb",
+    "model": [
+      {
+        "text": "Done."
+      },
+      {
+        "toolCalls": [
+          {
+            "name": "device_control",
+            "args": {
+              "action": "dnd_on"
+            }
+          }
+        ]
+      },
+      {
+        "text": "Do Not Disturb is on."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Do Not Disturb is on."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "device",
+          "do": "dnd_on"
+        }
+      ],
+      "reply": "Do Not Disturb is on"
+    },
+    "live": {
+      "firstTool": "device_control",
+      "firstArgs": {
+        "action": "dnd_on"
+      }
+    }
+  },
+  {
+    "name": "'send this to the TV' moves what's playing on the phone",
+    "source": "2026-10-19 feature: tv_control cast with no target",
+    "context": {
+      "tvPaired": true
+    },
+    "user": "send this to the tv",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "tv_control",
+            "args": {
+              "action": "cast"
+            }
+          }
+        ]
+      },
+      {
+        "text": "It's playing on the TV from where you were."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Playing “lofi hip hop radio” on YouTube on the TV from 12:34. Paused it on the phone."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "tv_control",
+          "do": "cast",
+          "target": ""
+        }
+      ]
+    },
+    "live": {
+      "firstTool": "tv_control",
+      "firstArgs": {
+        "action": "cast"
+      }
+    }
+  },
+  {
+    "name": "'turn on my PC' wakes it instead of sending it a task",
+    "source": "2026-10-19 feature: wake_pc",
+    "context": {
+      "pcPaired": true
+    },
+    "user": "turn on my pc",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "wake_pc",
+            "args": {}
+          }
+        ]
+      },
+      {
+        "text": "Your PC is on and connected."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Woke the PC — it's connected now."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "wake_pc"
+        }
+      ],
+      "offered": ["wake_pc", "pc_task"]
+    },
+    "live": {
+      "firstTool": "wake_pc"
+    }
+  },
+  {
+    "name": "'what's on my TV' looks at the screen",
+    "source": "2026-10-19 feature: tv_control look on the phone",
+    "context": {
+      "tvPaired": true
+    },
+    "user": "what's on my tv right now?",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "tv_control",
+            "args": {
+              "action": "look",
+              "target": "What's on the screen?"
+            }
+          }
+        ]
+      },
+      {
+        "text": "The YouTube home screen."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "The YouTube home screen, with a lofi stream highlighted."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "tv_control",
+          "do": "look"
+        }
+      ]
+    },
+    "live": {
+      "firstTool": "tv_control",
+      "firstArgs": {
+        "action": "look"
+      }
+    }
+  },
+  {
+    "name": "a planner request uses the planner tools the words loaded",
+    "source": "tool groups (2026-10-19): cue words pre-load a group so the common turn never pays load_tools",
+    "context": {},
+    "user": "every weekday at 7 give me the weather — make that a routine called morning",
+    "model": [
+      {
+        "toolCalls": [
+          {
+            "name": "manage_routine",
+            "args": {
+              "action": "add",
+              "name": "morning",
+              "prompt": "give me the weather",
+              "time": "07:00",
+              "days": "weekdays"
+            }
+          }
+        ]
+      },
+      {
+        "text": "Saved “morning” for 07:00 on weekdays."
+      }
+    ],
+    "results": [
+      {
+        "ok": true,
+        "summary": "Saved “morning” for 07:00 (weekdays)."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "routine",
+          "do": "add",
+          "time": "07:00",
+          "days": "weekdays"
+        }
+      ],
+      "offered": ["manage_routine"]
+    },
+    "live": {
+      "firstTool": "manage_routine",
+      "firstArgs": {
+        "action": "add"
+      }
+    }
+  }
+]

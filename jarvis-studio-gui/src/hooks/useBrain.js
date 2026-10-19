@@ -14,8 +14,18 @@ import { createBrain } from "../brain";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
-import { androidPlatform, pollRoutineTap } from "../brain/platform";
+import {
+  androidPlatform,
+  homeNetwork,
+  pollRoutineTap,
+  pollShare,
+  wolSend,
+} from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
+import { applyRemote, localChanges } from "../brain/memory/sync";
+import { digestDue, runDigest } from "../brain/memory/digest";
+import { configReady } from "../brain/config";
+import { makeProvider } from "../brain/providers";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
 import {
@@ -30,8 +40,8 @@ import {
   loadScreenConfig,
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
-import { RemotePC } from "../brain/remote/pc";
-import { nativeTvShell, tvAddresses } from "../brain/remote/tv";
+import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
+import { nativeTvShell, normMac, parseLink, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
@@ -94,9 +104,26 @@ const MAX_LISTEN_MS = 30_000;
 const CONFIG_KEY = "jarvis.android.config.v1";
 const PC_KEY = "jarvis.android.pc.v1";
 const TV_KEY = "jarvis.android.tv.v1";
+// The PC's network adapters for Wake-on-LAN, from its signed auth.ready. Kept apart
+// from PC_KEY: rewriting the pairing record would rebuild (and reconnect) the link.
+const PC_WAKE_KEY = "jarvis.android.pcwake.v1";
+// The last share from another app this WebView handled (ShareInbox.kt boot:seq).
+const SHARE_KEY = "jarvis.android.share.v1";
+// One memory with the PC (brain/memory/sync.ts): which PC, when this phone last sent
+// (phone clock), and the PC's cursor from its last reply (PC clock).
+const MEMORY_SYNC_KEY = "jarvis.android.memorysync.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
+
+// "When I get home" (ArrivalWatcher.kt): the TV or PC answering on its home address
+// means the phone's Wi-Fi is home. Told at most every 10 minutes; idempotent natively.
+let homeMarkedAt = 0;
+function markHomeNetwork() {
+  if (Date.now() - homeMarkedAt < 10 * 60_000) return;
+  homeMarkedAt = Date.now();
+  void homeNetwork("mark");
+}
 const pendingLegacyConfigSecrets = {};
 
 const nativeConfigSecretBridge = {
@@ -119,8 +146,9 @@ function saveCommands(list) {
   writeJson(kv, COMMANDS_KEY, list.slice(-80));
 }
 
-// The TV record is just its LAN address (plus the model it reported, for display).
-// The ADB key that lets this phone in lives natively (TvAdb.kt), never in WebView storage.
+// The TV record is just its LAN address (plus the model it reported, for display, and
+// its MAC, for waking it from off). The ADB key that lets this phone in lives natively
+// (TvAdb.kt), never in WebView storage.
 export function sanitizeTvConfig(value) {
   // One TV, one or more addresses: its home IP, then optionally its Tailscale IP.
   const host = tvAddresses(String(value?.host ?? "")).join(", ");
@@ -128,7 +156,8 @@ export function sanitizeTvConfig(value) {
   const model = String(value?.model ?? "")
     .trim()
     .slice(0, 80);
-  return model ? { host, model } : { host };
+  const mac = normMac(value?.mac);
+  return { host, ...(model ? { model } : {}), ...(mac ? { mac } : {}) };
 }
 
 // Paired-PC records are public routing/identity pins only. This allowlist is also
@@ -347,12 +376,18 @@ export function useBrain() {
   // the caption with no picture. onDispatched is the one hook that sees every tool
   // result, so collect here and attach when the message is built.
   const pendingCardsRef = useRef([]);
+  // One memory with the PC: set further down, once the memory view exists.
+  const syncMemoryRef = useRef(null);
+  const memorySyncedRef = useRef(null);
   const onDispatched = useCallback(
     (spec, result) => {
       logCommand(spec, result);
       // Re-read rather than trust result.data: a reset returns no config, and the
       // HUD kept the old look until the next launch.
       if (spec?.type === "screen" && result?.ok) setScreen(loadScreenConfig());
+      if (result?.ok && ["remember", "forget", "routine"].includes(spec?.type)) {
+        setTimeout(() => void syncMemoryRef.current?.(), 1500); // one memory with the PC
+      }
       const imageUrl = result?.data?.imageUrl;
       if (imageUrl && (spec?.type === "generate_image" || spec?.type === "qr_code")) {
         pendingCardsRef.current.push({
@@ -489,7 +524,7 @@ export function useBrain() {
   }, []);
 
   const onAgentEvent = useCallback((ev) => {
-    if (ev.event === "agent_task" && ev.data?.kind === "phone") {
+    if (ev.event === "agent_task" && (ev.data?.kind === "phone" || ev.data?.kind === "tv")) {
       phoneTaskStopRef.current = false;
     }
     setAgentTasks((prev) => reduceTaskCenterAgentEvent(prev, ev));
@@ -657,11 +692,29 @@ export function useBrain() {
   // reconnects authenticate with a signed auth.response.
   const pcPinRef = useRef("");
   const pcConfigured = Boolean(pcConfig && pcConfig.host);
+  const pcWakeRef = useRef(sanitizeWakeTargets(readJson(kv, PC_WAKE_KEY, [])));
 
   // ── The user's TV (network ADB) ─────────────────────────────────────────────
   const [tvConfig, setTvConfig] = useState(() => sanitizeTvConfig(readJson(kv, TV_KEY, null)));
   // null when no TV is set up, so `tv_control` isn't even advertised.
-  const tv = useMemo(() => (tvConfig ? nativeTvShell(tvConfig.host) : null), [tvConfig]);
+  const tv = useMemo(() => {
+    if (!tvConfig) return null;
+    // The TV's MAC is read over ADB the first time it answers, so it can be woken
+    // from off next time (Wake-on-LAN, remote/tv.ts wakeTv).
+    const onMac = (mac) => {
+      const cur = sanitizeTvConfig(readJson(kv, TV_KEY, null));
+      if (!cur || cur.host !== tvConfig.host || cur.mac === mac) return;
+      const next = { ...cur, mac };
+      writeJson(kv, TV_KEY, next);
+      setTvConfig(next);
+    };
+    return nativeTvShell(tvConfig.host, undefined, {
+      mac: tvConfig.mac,
+      onMac,
+      send: wolSend,
+      onLan: markHomeNetwork,
+    });
+  }, [tvConfig]);
   // Saved only once the TV actually answers, which on the first connection means the
   // user accepted "Allow USB debugging?" on the TV.
   const pairTV = useCallback(async (host) => {
@@ -672,10 +725,12 @@ export function useBrain() {
         summary: "That isn't a TV address — use the IP in the TV's network settings.",
       };
     }
-    const r = await nativeTvShell(clean.host)("getprop ro.product.model");
+    let mac = "";
+    const shell = nativeTvShell(clean.host, undefined, { onMac: (m) => (mac = m) });
+    const r = await shell("getprop ro.product.model");
     if (!r.ok || r.exitCode !== 0)
       return { ok: false, summary: r.summary || "The TV didn't answer." };
-    const next = sanitizeTvConfig({ ...clean, model: r.output });
+    const next = sanitizeTvConfig({ ...clean, model: r.output, mac });
     writeJson(kv, TV_KEY, next);
     setTvConfig(next);
     return { ok: true, summary: `Connected to ${next.model || "the TV"}.` };
@@ -746,6 +801,11 @@ export function useBrain() {
       pairingChallengeId: pcConfig.pairingChallengeId,
       pin: pcPinRef.current,
       deviceName: pcConfig.deviceName,
+      onWakeTargets: (targets) => {
+        if (JSON.stringify(targets) === JSON.stringify(pcWakeRef.current)) return;
+        pcWakeRef.current = targets;
+        writeJson(kv, PC_WAKE_KEY, targets);
+      },
       onStateChange: (s) => {
         setPcState(s);
         if (s !== "online") {
@@ -763,6 +823,11 @@ export function useBrain() {
           // before the host authorizes any restored subscription.
           queueMicrotask(() => {
             if (pcRef.current !== pc || !pc.isOnline) return;
+            void syncMemoryRef.current?.();
+            // Reached over its home address, not Tailscale: the phone is home.
+            if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(pc.activeHost || "")) {
+              markHomeNetwork();
+            }
             for (const { taskId, lastSeq } of loadKnownRemoteTaskCursors()) {
               pc.signal("task.subscribe", { task_id: taskId, resume_after_seq: lastSeq });
               pc.signal("task.status", { task_id: taskId });
@@ -773,6 +838,7 @@ export function useBrain() {
       },
       onEvent: (ev) => {
         const e = ev.event;
+        if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
         if (
           [
             "task.accepted",
@@ -1010,7 +1076,13 @@ export function useBrain() {
   // browser autopilot (which then Google-searches "online notepad" and fails).
   const remote = useMemo(() => {
     if (!pcConfigured) return null;
-    return { runTask: (goal, kind) => runPcTask(goal, kind) };
+    return {
+      runTask: (goal, kind) => runPcTask(goal, kind),
+      wake: () =>
+        pcRef.current
+          ? pcRef.current.wake(pcWakeRef.current, wolSend)
+          : Promise.resolve({ ok: false, summary: "The PC link isn't running." }),
+    };
   }, [pcConfigured, runPcTask]);
 
   // Optional TURN relay from the pairing config → ICE servers for internet use.
@@ -1144,7 +1216,8 @@ export function useBrain() {
   const stopPhoneTask = useCallback(() => {
     requestPhoneStop();
     const tasks = agentTasksRef.current.filter(
-      (task) => task.kind === "phone" && !TERMINAL_TASK_STATES.has(task.status),
+      (task) =>
+        (task.kind === "phone" || task.kind === "tv") && !TERMINAL_TASK_STATES.has(task.status),
     );
     setAgentTasks((prev) => tasks.reduce((next, task) => markTaskStopping(next, task.id), prev));
     const nativeIds = [...new Set(tasks.map((task) => task.nativeTaskId).filter(Boolean))];
@@ -1155,7 +1228,7 @@ export function useBrain() {
     (id) => {
       const task = agentTasksRef.current.find((item) => item.id === id || item.nativeTaskId === id);
       if (!task || TERMINAL_TASK_STATES.has(task.status)) return;
-      if (task.kind === "phone" || task.source === "phone") {
+      if (task.kind === "phone" || task.kind === "tv" || task.source === "phone") {
         setAgentTasks((prev) => markTaskStopping(prev, task.id));
         requestPhoneStop();
         if (task.nativeTaskId) void journaledPhone.cancelTask?.(task.nativeTaskId);
@@ -1182,7 +1255,9 @@ export function useBrain() {
   const stopAllTasks = useCallback(() => {
     requestPhoneStop();
     const active = agentTasksRef.current.filter((task) => !TERMINAL_TASK_STATES.has(task.status));
-    const phoneTasks = active.filter((task) => task.kind === "phone" || task.source === "phone");
+    const phoneTasks = active.filter(
+      (task) => task.kind === "phone" || task.kind === "tv" || task.source === "phone",
+    );
     setAgentTasks((prev) =>
       phoneTasks.reduce((next, task) => markTaskStopping(next, task.id), prev),
     );
@@ -1524,6 +1599,41 @@ export function useBrain() {
     };
   }, [sendMessage, secretsReady]);
 
+  // Share → JARVIS (ShareInbox.kt): a YouTube or Netflix link shared from another app
+  // plays on the TV, as an ordinary turn so the reply says what really happened.
+  // Polled (§5) whenever JARVIS comes forward — which a share makes it do — and every
+  // few seconds while it's in front.
+  const tvSetUp = Boolean(tvConfig);
+  useEffect(() => {
+    if (!secretsReady) return undefined;
+    const tick = async () => {
+      if (document.visibilityState !== "visible" || busyRef.current || !brainRef.current) return;
+      const share = await pollShare();
+      if (!share?.seq) return;
+      const key = `${share.boot}:${share.seq}`;
+      if (kv.get(SHARE_KEY) === key) return;
+      kv.set(SHARE_KEY, key);
+      const link = parseLink(share.text);
+      if (!link) {
+        pushWarning("Shared with JARVIS: only a YouTube or Netflix link can be played on the TV.");
+      } else if (!tvSetUp) {
+        pushWarning("Set up your TV under Remote PC & TV to play shared links on it.");
+      } else {
+        void sendMessage(
+          `Play this on the TV (tv_control cast): ${share.text}`,
+          `📺 ${share.text}`,
+        );
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 5_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [sendMessage, secretsReady, pushWarning, tvSetUp]);
+
   // Quick-action buttons fire a command without echoing a user bubble. On mobile we
   // just treat it as a normal turn (the brain decides whether to act/answer).
   const sendCommand = useCallback(
@@ -1691,6 +1801,99 @@ export function useBrain() {
       now: Date.now(),
     });
   }, []);
+  // ── One memory with the PC (brain/memory/sync.ts, desktop memory_sync.py) ─────
+  // Sent when the link comes up, every minute while it's up, and just after a memory
+  // or routine change; the PC answers with its own changes (memory.synced, below).
+  const memorySyncSentRef = useRef(0);
+  const syncMemory = useCallback(async () => {
+    const pc = pcRef.current;
+    const hostId = pcConfig?.hostId;
+    if (!pc?.isOnline || !hostId) return;
+    const cur = readJson(kv, MEMORY_SYNC_KEY, {});
+    const same = cur.host === hostId;
+    const startedAt = Date.now();
+    const changes = await localChanges(memoryRef.current, same ? cur.sent || 0 : 0);
+    memorySyncSentRef.current = startedAt;
+    pc.signal("memory.sync", { since: same ? cur.pc || 0 : 0, ...changes });
+  }, [pcConfig?.hostId]);
+  const memorySynced = useCallback(
+    async (data) => {
+      const hostId = pcConfig?.hostId;
+      if (!hostId || !data || typeof data.now !== "number") return;
+      const changed = await applyRemote(data, memoryRef.current, stored.vertexSaJson);
+      writeJson(kv, MEMORY_SYNC_KEY, {
+        host: hostId,
+        sent: memorySyncSentRef.current,
+        pc: data.now,
+      });
+      if (changed) {
+        await listMemory();
+        syncRoutineAlarms();
+      }
+    },
+    [pcConfig?.hostId, listMemory, stored.vertexSaJson],
+  );
+  useEffect(() => {
+    syncMemoryRef.current = syncMemory;
+    memorySyncedRef.current = memorySynced;
+  }, [syncMemory, memorySynced]);
+  useEffect(() => {
+    const id = setInterval(() => void syncMemoryRef.current?.(), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // The nightly memory digest (brain/memory/digest.ts): the first idle moment after
+  // 03:00 that JARVIS is open, one call on the active model; new facts reach the PC
+  // with the next memory sync.
+  useEffect(() => {
+    if (!secretsReady) return undefined;
+    let running = false;
+    const tick = async () => {
+      if (running || !digestDue() || document.visibilityState !== "visible") return;
+      if (busyRef.current || listeningRef.current) return;
+      const cfg = toBrainConfig(storedRef.current);
+      if (!configReady(cfg)) return;
+      running = true;
+      try {
+        const provider = makeProvider(cfg);
+        const complete = async (system, user) => {
+          try {
+            const r = await provider.chat(
+              [
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ],
+              [],
+            );
+            return r.text || "";
+          } catch {
+            return "";
+          }
+        };
+        const res = await runDigest(
+          memoryRef.current,
+          complete,
+          new Date(),
+          cfg.vertexServiceAccountJson,
+        );
+        if (res.added.length) {
+          await listMemory();
+          void syncMemoryRef.current?.();
+        }
+      } catch (err) {
+        console.error("[Digest] failed:", err);
+      } finally {
+        running = false;
+      }
+    };
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [secretsReady, listMemory]);
+
   const rememberFact = useCallback(
     async (text) => {
       const res = await memoryRef.current.remember(text, stored.vertexSaJson);
@@ -2140,6 +2343,8 @@ export function useBrain() {
     void stopScreen();
     pcPinRef.current = "";
     savePcConfig(null);
+    kv.remove(PC_WAKE_KEY);
+    pcWakeRef.current = [];
     clearKnownRemoteTaskCursors();
     setPcConfig(null);
     setAgentTasks((prev) => prev.filter((task) => task.source !== "pc"));

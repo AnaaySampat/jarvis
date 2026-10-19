@@ -13,6 +13,7 @@ import type {
   PhoneController,
 } from "../operator/controller";
 import { inTauri } from "../tools/httpClient";
+import type { PhoneMedia } from "../remote/tv";
 import { makeKV, readJson, writeJson } from "../memory/store";
 
 export interface TextToSpeech {
@@ -250,6 +251,25 @@ export interface RoutineSchedule {
   nextAt: number;
 }
 
+/** Home Wi-Fi as ArrivalWatcher.kt knows it: how many networks count as home, and
+ *  whether the phone is on one now. */
+export interface HomeNetwork {
+  ok: boolean;
+  summary: string;
+  homes: number;
+  here: boolean;
+}
+
+/** The "when I get home" routines (names) for the native arrival watcher. */
+export function syncArrivals(names: string[]): Promise<HomeNetwork | null> {
+  return phoneJson<HomeNetwork>("arrival_sync", { namesJson: JSON.stringify(names) });
+}
+
+/** "mark" the Wi-Fi the phone is on as home, "forget" them all, or "status". */
+export function homeNetwork(action: "mark" | "forget" | "status"): Promise<HomeNetwork | null> {
+  return phoneJson<HomeNetwork>("home_network", { action });
+}
+
 /** Replace every native routine alarm with `list`. Null off-device or on no reply. */
 export function scheduleRoutineAlarms(list: RoutineAlarm[]): Promise<RoutineSchedule | null> {
   return phoneJson<RoutineSchedule>("schedule_routines", { routinesJson: JSON.stringify(list) });
@@ -258,6 +278,30 @@ export function scheduleRoutineAlarms(list: RoutineAlarm[]): Promise<RoutineSche
 /** The last routine notification tapped; `seq` bumps once per tap (polled, §5). */
 export function pollRoutineTap(): Promise<{ seq: number; name: string; date: string } | null> {
   return phoneJson("poll_routine_tap", {});
+}
+
+// ── Wake-on-LAN (WakeOnLan.kt): switch the TV or the PC on from off ──
+
+/** Send a Wake-on-LAN packet for `mac`, also to the /24 broadcast of `near` (the
+ *  device's last known address). ok = it left the phone, never that the device
+ *  woke — the caller checks that by reaching it. */
+export function wolSend(mac: string, near = ""): Promise<ToolResult> {
+  return phoneInvoke("wol_send", { mac, near });
+}
+
+// ── "Send this to the TV": what's playing here, and links shared to JARVIS ──
+
+/** What Android's media sessions say is playing (DirectActions.mediaNow). Needs
+ *  notification access; says so otherwise. */
+export async function mediaNow(): Promise<PhoneMedia> {
+  const r = await phoneJson<PhoneMedia>("media_now", {});
+  return r ?? { ok: false, summary: "I couldn't read what's playing on the phone." };
+}
+
+/** The last text shared to JARVIS from another app (ShareInbox.kt); `seq` bumps once
+ *  per share (polled, §5). Null off-device. */
+export function pollShare(): Promise<{ seq: number; text: string; boot: number } | null> {
+  return phoneJson("poll_share", {});
 }
 
 // ── Read-only file access (Storage Access Framework) ──

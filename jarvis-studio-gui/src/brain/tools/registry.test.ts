@@ -108,6 +108,9 @@ describe("toolPalette", () => {
     const withPc = toolPalette(cfg, { pcPaired: true });
     expect(withoutPc.some((t) => t.name === "pc_task")).toBe(false);
     expect(withPc.some((t) => t.name === "pc_task")).toBe(true);
+    expect(withoutPc.some((t) => t.name === "wake_pc")).toBe(false);
+    expect(withPc.some((t) => t.name === "wake_pc")).toBe(true);
+    expect(toSpec("wake_pc", {})).toEqual({ type: "wake_pc" });
   });
 
   it("only advertises tv_control when a TV is set up, and lowers it to one spec", () => {

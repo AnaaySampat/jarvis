@@ -220,6 +220,22 @@ internal class TvShellArgs {
 }
 
 @InvokeArg
+internal class ArrivalSyncArgs {
+    var namesJson: String = "[]"
+}
+
+@InvokeArg
+internal class HomeNetworkArgs {
+    var action: String = "status"
+}
+
+@InvokeArg
+internal class WolSendArgs {
+    var mac: String = ""
+    var near: String = ""
+}
+
+@InvokeArg
 internal class IdentityAuthArgs {
     var hostId: String = ""
     var nonce: String = ""
@@ -1088,6 +1104,33 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                 put("output", r.output)
                 put("exitCode", r.exitCode)
                 put("summary", r.summary)
+            })
+        }
+    }
+
+    /** Wake-on-LAN for the TV or the PC (WakeOnLan.kt). ok = the packet left the phone. */
+    @Command
+    fun wolSend(invoke: Invoke) {
+        val args = invoke.parseArgs(WolSendArgs::class.java)
+        autonomyScope.launch {
+            val (ok, summary) = WakeOnLan.send(args.mac, args.near)
+            invoke.resolve(result(ok, summary))
+        }
+    }
+
+    /** A screenshot of the TV (TvAdb.capture), for tv_control look / task. */
+    @Command
+    fun tvCapture(invoke: Invoke) {
+        val args = invoke.parseArgs(TvShellArgs::class.java)
+        autonomyScope.launch {
+            val c = tvAdb.capture(args.host)
+            invoke.resolve(JSObject().apply {
+                put("ok", c.ok)
+                put("image", c.image)
+                put("blocked", c.blocked)
+                put("blank", c.blank)
+                put("sig", c.sig)
+                put("summary", c.summary)
             })
         }
     }
@@ -2121,6 +2164,57 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     fun deviceAction(invoke: Invoke) {
         val args = invoke.parseArgs(DeviceActionArgs::class.java)
         autonomyScope.launch { invoke.resolve(DirectActions.device(activity, args)) }
+    }
+
+    /** "When I get home" routines (names) for ArrivalWatcher to watch for. */
+    @Command
+    fun arrivalSync(invoke: Invoke) {
+        val args = invoke.parseArgs(ArrivalSyncArgs::class.java)
+        autonomyScope.launch {
+            ArrivalWatcher.sync(activity, args.namesJson)
+            invoke.resolve(homeState(true, "ok"))
+        }
+    }
+
+    /** Home Wi-Fi: "mark" the current one as home, "forget" them all, or "status". */
+    @Command
+    fun homeNetwork(invoke: Invoke) {
+        val args = invoke.parseArgs(HomeNetworkArgs::class.java)
+        autonomyScope.launch {
+            when (args.action) {
+                "mark" -> {
+                    val (ok, summary, _) = ArrivalWatcher.markHome(activity)
+                    invoke.resolve(homeState(ok, summary))
+                }
+                "forget" -> {
+                    ArrivalWatcher.forgetHomes(activity)
+                    invoke.resolve(homeState(true, "Forgot the home Wi-Fi."))
+                }
+                else -> invoke.resolve(homeState(true, "ok"))
+            }
+        }
+    }
+
+    private fun homeState(ok: Boolean, summary: String) = result(ok, summary).apply {
+        put("homes", ArrivalWatcher.homeCount(activity))
+        put("here", ArrivalWatcher.atHome(activity))
+    }
+
+    /** What's playing on the phone (DirectActions.mediaNow), for "send this to the TV". */
+    @Command
+    fun mediaNow(invoke: Invoke) {
+        autonomyScope.launch { invoke.resolve(DirectActions.mediaNow(activity)) }
+    }
+
+    /** The last text shared to JARVIS (ShareInbox); `seq` bumps once per share. */
+    @Command
+    fun pollShare(invoke: Invoke) {
+        val s = ShareInbox.shared
+        invoke.resolve(JSObject().apply {
+            put("seq", s.seq)
+            put("text", s.text)
+            put("boot", ShareInbox.boot)
+        })
     }
 
     @Command

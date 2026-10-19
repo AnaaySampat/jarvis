@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- "When I get home": which Wi-Fi the phone is on (gateway and subnet only, no SSID). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- WakeWordService (see PhonePlugin.startWakeWord) — a foreground service is the
          ONLY way Android lets an app keep using the microphone once it's no longer in
@@ -115,6 +117,11 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- "When I get home" routines: a Wi-Fi network became available (ArrivalWatcher.kt). -->
+        <receiver
+            android:name="com.jarvis.phone.ArrivalReceiver"
+            android:exported="false" />
 
         <receiver
             android:name="com.jarvis.phone.AutonomyBootReceiver"

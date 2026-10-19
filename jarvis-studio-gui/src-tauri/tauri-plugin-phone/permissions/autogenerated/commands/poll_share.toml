@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-poll-share"
+description = "Enables the poll_share command without any pre-configured scope."
+commands.allow = ["poll_share"]
+
+[[permission]]
+identifier = "deny-poll-share"
+description = "Denies the poll_share command without any pre-configured scope."
+commands.deny = ["poll_share"]

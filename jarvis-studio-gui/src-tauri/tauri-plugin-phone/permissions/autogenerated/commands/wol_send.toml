@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-wol-send"
+description = "Enables the wol_send command without any pre-configured scope."
+commands.allow = ["wol_send"]
+
+[[permission]]
+identifier = "deny-wol-send"
+description = "Denies the wol_send command without any pre-configured scope."
+commands.deny = ["wol_send"]

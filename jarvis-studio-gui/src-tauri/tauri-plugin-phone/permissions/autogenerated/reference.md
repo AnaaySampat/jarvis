@@ -57,6 +57,12 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-verify-host-challenge`
 - `allow-identity-verify-host-envelope`
 - `allow-tv-shell`
+- `allow-tv-capture`
+- `allow-wol-send`
+- `allow-media-now`
+- `allow-arrival-sync`
+- `allow-home-network`
+- `allow-poll-share`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
 - `allow-device-action`
@@ -71,6 +77,32 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`phone:allow-arrival-sync`
+
+</td>
+<td>
+
+Enables the arrival_sync command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-arrival-sync`
+
+</td>
+<td>
+
+Denies the arrival_sync command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>
@@ -439,6 +471,32 @@ Denies the home command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-home-network`
+
+</td>
+<td>
+
+Enables the home_network command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-home-network`
+
+</td>
+<td>
+
+Denies the home_network command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-identity-info`
 
 </td>
@@ -666,6 +724,32 @@ Enables the long_press command without any pre-configured scope.
 <td>
 
 Denies the long_press command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-media-now`
+
+</td>
+<td>
+
+Enables the media_now command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-media-now`
+
+</td>
+<td>
+
+Denies the media_now command without any pre-configured scope.
 
 </td>
 </tr>
@@ -926,6 +1010,32 @@ Enables the poll_routine_tap command without any pre-configured scope.
 <td>
 
 Denies the poll_routine_tap command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-poll-share`
+
+</td>
+<td>
+
+Enables the poll_share command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-poll-share`
+
+</td>
+<td>
+
+Denies the poll_share command without any pre-configured scope.
 
 </td>
 </tr>
@@ -1531,6 +1641,32 @@ Denies the task_status command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-tv-capture`
+
+</td>
+<td>
+
+Enables the tv_capture command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-tv-capture`
+
+</td>
+<td>
+
+Denies the tv_capture command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-tv-shell`
 
 </td>
@@ -1576,6 +1712,32 @@ Enables the type_text command without any pre-configured scope.
 <td>
 
 Denies the type_text command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-wol-send`
+
+</td>
+<td>
+
+Enables the wol_send command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-wol-send`
+
+</td>
+<td>
+
+Denies the wol_send command without any pre-configured scope.
 
 </td>
 </tr>

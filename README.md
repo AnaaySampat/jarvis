@@ -72,6 +72,27 @@ the app**, so the phone needs no server and no Python.
   TV, type its IP, tap Connect and accept the prompt on the TV. Two routers at home (a
   second one in router mode makes its Wi-Fi a separate network)? Switch the second one to
   Access Point mode, or install Tailscale on the TV and add its address after a comma.
+- **When I get home** — a routine can run when you get home ("when I get home, turn on
+  the TV and play lofi"). The phone recognises your home Wi-Fi by itself (the network
+  where your TV or PC answers; no location permission) and shows a notification as you
+  arrive: tap it and the routine runs.
+- **Nightly memory digest** — once a night JARVIS reads what you said to it (your own
+  words only) and keeps up to five new things worth remembering. They're ordinary
+  facts: see or forget them in Memory, or switch the digest off there.
+- **One memory** — what you tell JARVIS to remember, and your routines, are shared with
+  the paired PC: tell either one, both know. Forgetting works the same way. A timed
+  routine still goes off on the device you made it on.
+- **TV by sight** — "what's on my TV?" looks at the TV's screen, and "on YouTube, play the
+  second result for lofi" is done step by step, looking after each button press (nothing
+  inside Netflix can be seen: it blocks screenshots).
+- **Send this to the TV** — "send this to the TV" moves the YouTube video or Netflix show
+  playing on the phone to the TV at the same point and pauses the phone (needs
+  notification access). Or share a YouTube/Netflix link to JARVIS from any app's Share
+  button and it plays on the TV.
+- **Switching on from off** — "turn on the TV" also works when the TV is fully off
+  (turn on Remote start in its network settings), and "turn on my PC" wakes the paired PC
+  (Wake on LAN on in its BIOS and network adapter). Both use Wake-on-LAN, so the phone
+  has to be on the same home network.
 
 Known gaps and the things that still need a live on-device test are tracked in
 [docs/STATUS.md](docs/STATUS.md).
@@ -226,6 +247,21 @@ powershell -ExecutionPolicy Bypass -File scripts/emulator.ps1 -Build
 - **Browser preview:** `npm run dev` runs the HUD in a browser for layout and chat work.
   Native features (phone control, wake word, TTS) aren't there.
 - `scripts/build-android.ps1` wraps the build commands above (`-Debug`, `-Target arm64`).
+
+## Releasing
+
+Bump `version` in `jarvis-studio-gui/package.json` and `src-tauri/tauri.conf.json`,
+commit, then tag and push: `git tag v2.5.0 && git push origin v2.5.0`. The Release
+workflow (`.github/workflows/release.yml`) checks the app (typecheck, lint, tests),
+builds a signed arm64 APK and publishes it as a GitHub release, which the app's update
+notice then offers. It refuses a tag that doesn't match the version.
+
+It needs the key the installed app is signed with, as repository secrets:
+`ANDROID_KEYSTORE_BASE64` (the keystore, base64), `ANDROID_KEY_ALIAS` and
+`ANDROID_KEYSTORE_PASSWORD`. Without them nothing is published — an APK signed with
+another key can't update the app. (Built locally with the debug keystore so far? That's
+`~/.android/debug.keystore`, alias `androiddebugkey`, password `android`.) "Run workflow"
+on the Actions tab does a dry run with no release.
 
 ## Keys and security
 

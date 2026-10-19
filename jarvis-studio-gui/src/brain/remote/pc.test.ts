@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RemotePC, type DeviceIdentityBridge, type RemotePCOptions } from "./pc";
+import {
+  RemotePC,
+  sanitizeWakeTargets,
+  type DeviceIdentityBridge,
+  type RemotePCOptions,
+} from "./pc";
 
 type WireMessage = {
   v?: number;
@@ -18,6 +23,8 @@ class FakeWS {
   static outcome: (url: string) => "open" | "refuse" = () => "open";
   static autoAuthenticate = false;
   static hostCounter = 1;
+  /** Extra auth.ready fields the fake PC sends (its Wake-on-LAN adapters). */
+  static readyExtra: Record<string, unknown> = {};
   readyState = 0;
   onopen: ((ev: unknown) => void) | null = null;
   onclose: ((ev: { code?: number; reason?: string }) => void) | null = null;
@@ -46,6 +53,7 @@ class FakeWS {
                 {
                   device_id: "phone-0123456789abcdef0123456789abcdef",
                   scopes: ["tasks"],
+                  ...FakeWS.readyExtra,
                 },
                 1,
               ),
@@ -1031,5 +1039,86 @@ describe("RemotePC — durable v2 transport", () => {
     await vi.waitFor(() => expect(ws.readyState).toBe(3));
     expect(pc.state).not.toBe("unauthorized");
     expect(events.filter((event) => event === "task.snapshot")).toHaveLength(1);
+  });
+});
+
+describe("RemotePC — Wake-on-LAN", () => {
+  const ws = FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>;
+  const ADAPTER = { mac: "aa:bb:cc:dd:ee:01", ip: "192.168.1.20" };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWS.instances = [];
+    FakeWS.outcome = () => "open";
+    FakeWS.autoAuthenticate = false;
+    FakeWS.hostCounter = 1;
+    FakeWS.readyExtra = {};
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps only well-formed adapters from the PC", () => {
+    expect(
+      sanitizeWakeTargets([
+        { mac: "AA-BB-CC-DD-EE-01", ip: "192.168.1.20" },
+        { mac: "nope", ip: "192.168.1.21" },
+        { mac: "aa:bb:cc:dd:ee:02", ip: "not an ip" },
+        null,
+      ]),
+    ).toEqual([ADAPTER]);
+    expect(sanitizeWakeTargets("x")).toEqual([]);
+  });
+
+  it("learns the PC's adapters from its signed auth.ready", async () => {
+    FakeWS.readyExtra = { wake: [{ mac: "AA:BB:CC:DD:EE:01", ip: "192.168.1.20" }] };
+    const onWakeTargets = vi.fn();
+    const pc = new RemotePC({
+      host: "192.168.1.20",
+      ...autoAuthenticatedIdentity(),
+      onWakeTargets,
+      WebSocketImpl: ws,
+    });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(20);
+    await waitForOnline(pc);
+    expect(onWakeTargets).toHaveBeenCalledWith([ADAPTER]);
+  });
+
+  it("wakes a sleeping PC and only says so once it reconnects", async () => {
+    FakeWS.outcome = () => "refuse";
+    const pc = new RemotePC({
+      host: "192.168.1.20",
+      ...autoAuthenticatedIdentity(),
+      reconnectMs: 100,
+      WebSocketImpl: ws,
+    });
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const result = pc.wake([ADAPTER], send, 30_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(send).toHaveBeenCalledWith(ADAPTER.mac, ADAPTER.ip);
+    FakeWS.outcome = () => "open"; // the PC is back
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(result).resolves.toMatchObject({ ok: true });
+    expect(pc.state).toBe("online");
+  });
+
+  it("reports a PC that never came back, and one it can't wake yet", async () => {
+    FakeWS.outcome = () => "refuse";
+    const pc = new RemotePC({
+      host: "192.168.1.20",
+      ...autoAuthenticatedIdentity(),
+      reconnectMs: 100,
+      WebSocketImpl: ws,
+    });
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const none = await pc.wake([], send, 10_000);
+    expect(none).toMatchObject({ ok: false, error: "no_wake_target" });
+    expect(send).not.toHaveBeenCalled();
+
+    const result = pc.wake([ADAPTER], send, 10_000);
+    await vi.advanceTimersByTimeAsync(12_000);
+    await expect(result).resolves.toMatchObject({ ok: false, error: "pc_unreachable" });
   });
 });

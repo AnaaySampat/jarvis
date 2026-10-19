@@ -50,6 +50,10 @@ No phone? `.\scripts\emulator.ps1` (from the repo root) creates the `jarvis_test
 first run, boots it, installs the debug APK and launches it. `-Build` rebuilds the APK for
 arm64 + x86_64 first (one APK for phone and emulator); `-Mic` passes the laptop mic in.
 
+Releases: bump the version in `package.json` and `src-tauri/tauri.conf.json`, then push a
+tag `vX.Y.Z`; `.github/workflows/release.yml` checks, builds a signed APK and publishes
+the GitHub release (README ▸ Releasing has the signing secrets it needs).
+
 **`tauri android dev` hangs after building — do not use it.** Use `tauri android build`
 (it exits cleanly), then `adb install` + `adb shell am start` manually.
 
@@ -108,6 +112,10 @@ These are the ones that get broken by well-meaning changes. Details in ARCHITECT
    `poll_speaking` for completion. (§5)
 
 10. **Tests are colocated** — `foo.test.ts` next to `foo.ts`, not in a `tests/` tree.
+    Model behaviour has its own: `brain/replay/fixtures.json` holds real (or live-observed)
+    model replies that `replay.test.ts` plays through the real turn loop. When a model
+    surprises you on a device, add the turn there. `npm run test:live` asks a real model
+    the same questions (needs GEMINI_API_KEY or GROQ_API_KEY in the environment).
 
 11. **The phone operator loop is native — keep it there.** `OperatorCore.kt` runs the
     loop; JS only starts it (`operator_start`) and polls it (`operator_status`). A hidden

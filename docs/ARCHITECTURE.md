@@ -53,6 +53,7 @@ blueprint; it is never edited, imported or shipped.
 | Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` (+ `playbooks.ts`) | Three separate stores — check which one a feature reads (see §7) |
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
 | TV | `remote/tv.ts` → **Kotlin** `TvAdb.kt` | The user's Android TV over network ADB (see §6a) |
+| Wake-on-LAN | `platform/index.ts` `wolSend` → **Kotlin** `WakeOnLan.kt` | Switches the TV (`wakeTv`) or the paired PC (`RemotePC.wake`, the `wake_pc` tool) on from off |
 | Native bridge | `platform/*.ts` | The JS side of the Kotlin plugin (see §5) |
 | Scheduling | `schedule/{store,reminderTime,routines}.ts` → **Kotlin** `RoutineAlarms.kt` for timed routines | Reminders, alarms, timers, routines (see §5) |
 
@@ -644,6 +645,9 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
+| `ArrivalWatcher.kt` | "When I get home" routines. Home is a Wi-Fi network by gateway + subnet (no SSID, so no location permission), learned when the TV or PC answers on its home address (`home_network` "mark"). A PendingIntent network callback (`ArrivalReceiver`) sees a home Wi-Fi come up while JARVIS is closed; a 15-minute `ArrivalSampleWorker` records home/away so a blip at home isn't an arrival. Arriving posts `RoutineAlarms.post` — the tap-to-run notification a timed routine uses. Pure half JVM-tested (`ArrivalWatcherTest.kt`) |
+| `ShareInbox.kt` | Text shared to JARVIS from another app's Share sheet, taken by MainActivity (like a routine tap) and polled by JS (`poll_share`) |
+| `WakeOnLan.kt` | A Wake-on-LAN magic packet (six 0xFF, then the MAC ×16) to the broadcast address and the device's /24, ports 9 and 7, three times. `ok` means it left the phone; callers prove the wake by reaching the device. Pure half JVM-tested (`WakeOnLanTest.kt`) |
 | `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
 | `JarvisNotificationListener.kt` | Notification access: lists what's showing, and replies through a notification's own RemoteInput, confirmed only when the app updates or clears that notification |
 | `RoutineAlarms.kt` | Timed routines while the WebView is paused: JS hands it every timed routine on each save (`schedule_routines`); it keeps one exact `AlarmManager` alarm (`USE_EXACT_ALARM`) for the earliest, rolls each forward in SharedPreferences, re-works every time on a time zone change, and posts "Time for <name>". It never runs a routine — a tap opens JARVIS and the WebView runs it as an ordinary turn. The one in-app alarm: reminders and alarms go to the Clock app |
@@ -664,7 +668,9 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
-(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), and one-step actions
+(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, `tv_capture`, §6a), Wake-on-LAN
+(`wol_send`, §6a), "send this to the TV" (`media_now`, `poll_share`, §6a), "when I get home" (`arrival_sync`,
+`home_network`), and one-step actions
 (`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
 `Option`, and Tauri rejects a call missing any of them ("missing required key"), so JS
 sends every key. `platform/index.test.ts` parses `commands.rs` and checks each call;
@@ -750,6 +756,41 @@ and adds its address — over their tailnet.
   first can open a connection into the second (the PC timed out from a different subnet
   in the 2026-09-30 spike). A refusal from the TV ends the attempt: another path to the
   same TV won't change it. When nothing answers, the reply says that may be the cause.
+- **Waking it from off (Wake-on-LAN).** A TV in deep standby has its network down, so
+  ADB can't reach it. The TV's MAC is read once over ADB (`ip -o link`, the connected
+  interface, Ethernet first) the first time it answers and saved with the TV record.
+  Then `power_on`, `play` and `open_app` first probe with `echo ok`; only an
+  *unreachable* TV (not one that refused the phone) gets a magic packet (`wol_send`),
+  and the action goes ahead once ADB answers again, within 30 s. The PC does the same
+  for itself: the desktop puts its network adapters (`wake: [{mac, ip}]`, wired first)
+  in the host-signed `auth.ready`; the phone keeps them under their own storage key
+  (rewriting the pairing record would rebuild the link) and `wake_pc` sends to each,
+  then counts the PC awake only once the link is back online. A broadcast never
+  crosses a router, so both need the phone on the device's own network.
+- **"Send this to the TV" (`cast`).** A YouTube or Netflix link (`parseLink`, also inside
+  shared text), or with no link what's playing on the phone: `media_now`
+  (`DirectActions.mediaNow`) reads the playing media session — package, title, channel,
+  position extrapolated from `PlaybackState` — through notification access. YouTube has
+  no video id in its session, so `findYoutubeVideo` finds one by web search and keeps it
+  only if YouTube's own oEmbed title matches. YouTube opens at `watch?v=<id>&t=<s>s`;
+  the position the TV reports says whether it took the start time, and the reply says
+  so if not. The phone is paused only once the TV plays (Netflix the other way round:
+  paused first, so the profile resumes there). **Share → JARVIS**: MainActivity's
+  `ACTION_SEND text/plain` filter hands the text to `ShareInbox.kt`; JS polls
+  `poll_share` (keyed `boot:seq`, so a WebView reload doesn't replay it) and runs a
+  YouTube/Netflix link as an ordinary "play this on the TV" turn.
+- **By sight: `look` and `task` (2026-10-19, `remote/tvSight.ts`).** Ports of the
+  desktop's `tv.look` and `tv_operator.py`. `tv_capture` (`TvAdb.capture`) runs
+  `screencap -p` over dadb's binary `exec:` channel — shell output is text — and returns a
+  ≤1280 px JPEG, `blocked` (nothing captured, or black: a secure layer, which in Netflix
+  is everything), `blank`, and a 64×36 grey signature (`TvFrame.kt`, JVM-tested) the loop
+  compares to tell whether a press changed anything. The vision call goes over the route
+  ladder with the screenshot attached (`chatOverLadder`), which keeps it to models that
+  can see. The task loop runs **in the WebView**, unlike phone_task (§4): driving the TV
+  never takes the phone out of JARVIS, so nothing pauses it; with the screen off it
+  stalls and the 4-minute deadline ends it. Success is only the model's `done` on a
+  screenshot; STOP, three unchanged screens, a hidden screen and the step cap all end it
+  with a reason. No `ask`: an ambiguous goal fails with the question.
 - **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
   `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
   enters a command through `shellQuote()` or as a validated package name or title id, so
@@ -811,6 +852,29 @@ separate `jarvis.android.facts.at.v1` map so the fact list keeps its plain `stri
 shape; facts saved before it existed are undated and just don't appear on the timeline.
 
 ---
+
+
+**One memory with the PC (2026-10-19).** Facts (`store.ts`) and routines
+(`schedule/routines.ts`) — not playbooks, whose two shapes differ — merge with the paired
+PC's over the signed link (`memory/sync.ts`, the desktop's `memory_sync.py`). Facts are
+keyed by normalised text (`factKey`), routines by name (`routineKey`); the newest change
+wins, and forgetting leaves a dated tombstone (`jarvis.android.facts.gone.v1`,
+`…routines.gone.v1`, 90 days) so a deletion propagates instead of being re-added. A routine
+also carries `updatedAt` and `origin`: a timed routine synced from the PC is listed and
+runs by name here, but neither `routineAlarms` nor `dueRoutines` fire it — the PC's clock
+does (and the PC skips the phone's). The phone starts each exchange (`memory.sync`: its
+changes since it last sent, plus the PC's cursor) when the link comes up, every minute
+while it's up and just after a memory or routine tool runs; the PC answers
+`memory.synced` with its own changes and a new cursor (`jarvis.android.memorysync.v1`,
+keyed by the PC's host id, so a different PC starts from zero). Cursors are inclusive: a
+repeat is harmless, a miss isn't.
+
+**The nightly digest (2026-10-19)** — `memory/digest.ts`, the phone's half of the
+desktop's `memory_digest.py`. The first idle moment after 03:00 that JARVIS is open, one
+plain call on the active model reads the user's own messages not digested yet (FNV hashes
+of read ones are kept) and adds at most five new facts through `memory.remember`, so they
+sync like any other. Only user turns are read, never replies or tool output, so nothing
+JARVIS read can plant a fact; it adds and never deletes. Toggle: Memory ▸ Facts.
 
 ## 8. Desktop vs mobile splits
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   findEpisode,
   nativeTvShell,
@@ -8,6 +8,10 @@ import {
   shellQuote,
   titleNameIn,
   tvAddresses,
+  macFromIpLink,
+  normMac,
+  parseLink,
+  wakeTv,
   type ShellReply,
   type TvEnv,
 } from "./tv";
@@ -205,7 +209,8 @@ describe("runTvControl", () => {
   });
 
   it("has a handler for every action the registry advertises", async () => {
-    for (const action of TV_ACTIONS) {
+    // look and task see the screen: dispatch sends them to remote/tvSight.ts.
+    for (const action of TV_ACTIONS.filter((a) => a !== "look" && a !== "task")) {
       const tv = fakeTv([[/mCurrentFocus/, focus("com.netflix.ninja")]]);
       const r = await runTvControl(tv.shell, action, "1", "netflix", env);
       expect(r.summary, action).not.toMatch(/don't know the TV action/);
@@ -234,7 +239,10 @@ describe("helpers", () => {
     const page =
       String.raw`"__typename":"Show","title":"Stranger\x20Things","videoId":80057281,` +
       `"seasons":{"__typename":"SeasonsConnection","edges":[` +
-      season(ep(11, 1, "One") + "," + ep(12, 2, String.raw`Two\x21`), String.raw`Stranger\x20Things`) +
+      season(
+        ep(11, 1, "One") + "," + ep(12, 2, String.raw`Two\x21`),
+        String.raw`Stranger\x20Things`,
+      ) +
       "," +
       season(ep(21, 1, "Uno"), String.raw`Stranger\x20Things\x202`) +
       `]},"more":[` +
@@ -307,5 +315,262 @@ describe("nativeTvShell across networks", () => {
     const r = await nativeTvShell("192.168.1.20", async () => reply(false, UNREACHABLE))("echo");
     expect(r.ok).toBe(false);
     expect(r.summary).toContain("Access Point mode");
+  });
+});
+
+describe("waking the TV (Wake-on-LAN)", () => {
+  const DOWN: ShellReply = {
+    ok: false,
+    output: "",
+    exitCode: -1,
+    summary: "I can't reach the TV at 192.168.1.20:5555.",
+  };
+  const UP: ShellReply = { ok: true, output: "ok", exitCode: 0, summary: "" };
+
+  it("reads the connected interface's MAC, Ethernet first", () => {
+    const link = [
+      "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 link/loopback 00:00:00:00:00:00",
+      "3: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 link/ether 11:22:33:44:55:66 brd ff:ff:ff:ff:ff:ff",
+      "4: eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff",
+    ].join("\n");
+    expect(macFromIpLink(link)).toBe("11:22:33:44:55:66"); // eth0 is unplugged
+    expect(
+      macFromIpLink(link.replace("<NO-CARRIER,BROADCAST,MULTICAST,UP>", "<UP,LOWER_UP>")),
+    ).toBe("aa:bb:cc:dd:ee:ff");
+    expect(normMac("AA-BB-CC-DD-EE-FF")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(normMac("ff:ff:ff:ff:ff:ff")).toBe("");
+  });
+
+  it("does nothing to a TV that already answers", async () => {
+    const send = vi.fn();
+    const r = await wakeTv(
+      async () => UP,
+      "aa:bb:cc:dd:ee:ff",
+      "192.168.1.20",
+      send,
+      async () => {},
+    );
+    expect(r).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("wakes an unreachable TV and waits for ADB to come back", async () => {
+    const replies = [DOWN, DOWN, UP];
+    let t = 0;
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const r = await wakeTv(
+      async () => replies.shift() ?? UP,
+      "aa:bb:cc:dd:ee:ff",
+      "192.168.1.20:5555",
+      send,
+      async (ms) => void (t += ms),
+      () => t,
+    );
+    expect(send).toHaveBeenCalledWith("aa:bb:cc:dd:ee:ff", "192.168.1.20");
+    expect(r).toEqual({ ok: true, summary: "Woke the TV over the network." });
+  });
+
+  it("says how to fix it when the TV never comes back", async () => {
+    let t = 0;
+    const r = await wakeTv(
+      async () => DOWN,
+      "aa:bb:cc:dd:ee:ff",
+      "192.168.1.20",
+      async () => ({ ok: true, summary: "sent" }),
+      async (ms) => void (t += ms),
+      () => t,
+    );
+    expect(r?.ok).toBe(false);
+    expect(r?.summary).toContain("Remote start");
+  });
+
+  it("a TV that refused the phone isn't 'off': no packet, the command reports it", async () => {
+    const send = vi.fn();
+    const refused = { ...DOWN, summary: "The TV didn't allow this phone." };
+    expect(
+      await wakeTv(
+        async () => refused,
+        "aa:bb:cc:dd:ee:ff",
+        "",
+        send,
+        async () => {},
+      ),
+    ).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("power_on wakes first, and learns the MAC the first time the TV answers", async () => {
+    const replies: ShellReply[] = [DOWN, UP];
+    const commands: string[] = [];
+    const address = async (a: string, command: string): Promise<ShellReply> => {
+      commands.push(command);
+      if (a.startsWith("100.")) return DOWN; // a TV that's off isn't on Tailscale either
+      if (command === "echo ok") return replies.shift() ?? UP;
+      if (command.startsWith("dumpsys power")) return { ...UP, output: "mWakefulness=Awake" };
+      return UP;
+    };
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const shell = nativeTvShell("100.101.1.2, 192.168.1.20", address, {
+      mac: "aa:bb:cc:dd:ee:ff",
+      send,
+      wait: async () => {},
+    });
+    const r = await runTvControl(shell, "power_on", "", "", env);
+    expect(send).toHaveBeenCalledWith("aa:bb:cc:dd:ee:ff", "192.168.1.20"); // not Tailscale
+    expect(r).toEqual({ ok: true, summary: "Turned the TV on (woke it over the network)." });
+
+    let learned = "";
+    const fresh = nativeTvShell(
+      "192.168.1.20",
+      async (_a, c) =>
+        c === "ip -o link"
+          ? { ...UP, output: "3: wlan0: <UP,LOWER_UP> mtu 1500 link/ether 11:22:33:44:55:66 brd" }
+          : UP,
+      { onMac: (m) => (learned = m) },
+    );
+    await fresh("getprop ro.product.model");
+    expect(learned).toBe("11:22:33:44:55:66");
+    expect(fresh.wake).toBeUndefined(); // nothing to wake it with yet
+  });
+});
+
+describe("send this to the TV (cast)", () => {
+  /** A TV whose YouTube session reports `positionMs` (advancing) once it's opened. */
+  function youtubeTv(positionMs: number) {
+    const sent: string[] = [];
+    let reads = 0;
+    const shell = async (command: string): Promise<ShellReply> => {
+      sent.push(command);
+      if (command.includes("mCurrentFocus")) {
+        return {
+          ok: true,
+          output: "mCurrentFocus=Window{1 u0 com.google.android.youtube.tv/x}",
+          exitCode: 0,
+          summary: "",
+        };
+      }
+      if (command.includes("media_session")) {
+        reads++;
+        return {
+          ok: true,
+          output: `package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=${positionMs + reads * 2500}, buffered`,
+          exitCode: 0,
+          summary: "",
+        };
+      }
+      return { ok: true, output: "", exitCode: 0, summary: "" };
+    };
+    return { shell, sent };
+  }
+
+  it("reads YouTube and Netflix links in every shape, even inside a shared message", () => {
+    expect(parseLink("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=90")).toEqual({
+      service: "youtube",
+      id: "dQw4w9WgXcQ",
+      t: 90,
+    });
+    expect(parseLink("Watch this! https://youtu.be/dQw4w9WgXcQ?si=abc&t=1m5s")).toMatchObject({
+      id: "dQw4w9WgXcQ",
+      t: 65,
+    });
+    expect(parseLink("youtube.com/shorts/dQw4w9WgXcQ")).toMatchObject({ id: "dQw4w9WgXcQ" });
+    expect(parseLink("https://www.netflix.com/in/title/80057281?s=a")).toEqual({
+      service: "netflix",
+      kind: "title",
+      id: "80057281",
+    });
+    expect(parseLink("netflix.com/watch/80077209")).toMatchObject({
+      kind: "watch",
+      id: "80077209",
+    });
+    for (const bad of [
+      "",
+      "https://example.com",
+      "youtube.com/feed",
+      "youtube.com/watch?v=short",
+    ]) {
+      expect(parseLink(bad)).toBeNull();
+    }
+  });
+
+  it("plays a link at its start time and says so", async () => {
+    const { shell, sent } = youtubeTv(754_000);
+    const r = await runTvControl(shell, "cast", "https://youtu.be/dQw4w9WgXcQ?t=754", "", env);
+    expect(sent[0]).toContain("watch?v=dQw4w9WgXcQ&t=754s");
+    expect(r).toMatchObject({ ok: true });
+    expect(r.summary).toContain("from 12:34");
+  });
+
+  it("says when the TV's YouTube ignored the start time", async () => {
+    const { shell } = youtubeTv(0);
+    const r = await runTvControl(shell, "cast", "https://youtu.be/dQw4w9WgXcQ?t=754", "", env);
+    expect(r.summary).toContain("from the start");
+  });
+
+  it("moves YouTube from the phone at the same point, pausing the phone only after", async () => {
+    const { shell, sent } = youtubeTv(754_000);
+    const order: string[] = [];
+    const r = await runTvControl(shell, "cast", "", "", {
+      ...env,
+      phoneMedia: async () => ({
+        ok: true,
+        summary: "ok",
+        package: "com.google.android.youtube",
+        title: "lofi hip hop radio",
+        artist: "Lofi Girl",
+        playing: true,
+        position: 754_400,
+      }),
+      findYoutube: async (title, channel) => {
+        order.push(`find ${title} / ${channel}`);
+        return { id: "jfKfPfyJRdk" };
+      },
+      pausePhone: async () => {
+        order.push("pause");
+        return true;
+      },
+    });
+    expect(r.ok).toBe(true);
+    expect(sent[0]).toContain("watch?v=jfKfPfyJRdk&t=754s");
+    expect(order).toEqual(["find lofi hip hop radio / Lofi Girl", "pause"]);
+    expect(r.summary).toContain("Paused it on the phone.");
+  });
+
+  it("leaves the phone playing when the TV didn't take it, and refuses other apps", async () => {
+    const pausePhone = vi.fn(async () => true);
+    const media = {
+      ok: true,
+      summary: "ok",
+      title: "Song",
+      artist: "x",
+      playing: true,
+      position: 0,
+    };
+    const down = async (): Promise<ShellReply> => ({
+      ok: false,
+      output: "",
+      exitCode: -1,
+      summary: "I can't reach the TV.",
+    });
+    const r = await runTvControl(down, "cast", "", "", {
+      ...env,
+      phoneMedia: async () => ({ ...media, package: "com.google.android.youtube" }),
+      findYoutube: async () => ({ id: "jfKfPfyJRdk" }),
+      pausePhone,
+    });
+    expect(r.ok).toBe(false);
+    expect(pausePhone).not.toHaveBeenCalled();
+    const spotify = await runTvControl(down, "cast", "", "", {
+      ...env,
+      phoneMedia: async () => ({ ...media, package: "com.spotify.music" }),
+      pausePhone,
+    });
+    expect(spotify).toMatchObject({ ok: false });
+    expect(spotify.summary).toContain("only YouTube and Netflix");
+    const nothing = await runTvControl(down, "cast", "", "", {
+      ...env,
+      phoneMedia: async () => ({ ok: false, summary: "Nothing is playing on the phone." }),
+    });
+    expect(nothing).toEqual({ ok: false, summary: "Nothing is playing on the phone." });
   });
 });

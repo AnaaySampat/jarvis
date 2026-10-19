@@ -127,6 +127,9 @@ export const TV_ACTIONS = [
   "power_off",
   "key",
   "status",
+  "cast",
+  "look",
+  "task",
 ];
 
 /** Every `device_control` action; each has its branch in DirectActions.device
@@ -381,7 +384,9 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
         action: str("What to do.", ["add", "run", "list", "remove"]),
         name: str("The routine's name."),
         prompt: str("For 'add': the steps in plain English, e.g. 'give me the weather, today's agenda and top news'."),
-        time: str("For 'add': time of day to run it automatically. Omit for a routine that only runs when asked."),
+        time: str(
+          "For 'add': time of day to run it automatically, or 'home' to run it when the user gets home. Omit for a routine that only runs when asked.",
+        ),
         days: str("For 'add' with a time: 'daily', 'weekdays', 'weekends', or 'mon,wed,fri'."),
       },
       ["action"],
@@ -511,6 +516,12 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
             },
             ["goal"],
           ),
+          fn(
+            "wake_pc",
+            "Switch the user's PC on when it's asleep or shut down (Wake-on-LAN), e.g. 'turn " +
+              "on my PC'. Also when a pc_task failed because the PC couldn't be reached: wake " +
+              "it, then retry. Works only from the same home network as the PC.",
+          ),
         ]
       : []),
 
@@ -521,7 +532,13 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
             "tv_control",
             "Control the user's TV (an Android TV on the home Wi-Fi). Use for anything about " +
               "'the TV' or 'on my TV' — never the phone tools. 'play' puts a named show or " +
-              "film on Netflix, or a video/music search on YouTube, and plays it.",
+              "film on Netflix, or a video/music search on YouTube, and plays it. 'cast' moves " +
+              "what's playing on this phone (YouTube or Netflix) to the TV at the same point " +
+              "('send this to the TV'), or plays a YouTube/Netflix link there. 'look' sees " +
+              "the TV's screen and answers about it ('what's on my TV?'). 'task' does a " +
+              "multi-step job by sight — navigating menus, picking a particular search result, " +
+              "changing a TV setting — that no other action covers. Neither can see inside " +
+              "Netflix: it blocks screenshots.",
             {
               action: str("What to do on the TV.", TV_ACTIONS),
               target: str(
@@ -529,7 +546,10 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
                   "name. key: a remote button — up, down, left, right, ok, back, home, next, " +
                   "previous, fast forward, rewind, channel up, channel down, input, captions " +
                   "(add a number to press it several times, e.g. 'down 3'). set_volume: the " +
-                  "level 0-100. volume_up/volume_down: how many steps (default 5).",
+                  "level 0-100. volume_up/volume_down: how many steps (default 5). cast: a " +
+                  "YouTube or Netflix link, or omit for what's playing on this phone. look: the " +
+                  "question about the screen. task: the whole goal in plain English, e.g. 'on " +
+                  "YouTube, play the second result for lofi'.",
               ),
               app: str(
                 "For play: 'netflix' for shows and films (default), 'youtube' for videos, music " +
@@ -654,10 +674,12 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
     goal: a.goal ?? "",
     kind: a.kind === "computer" ? "computer" : "browser",
   }),
+  wake_pc: () => ({ type: "wake_pc" }),
   tv_control: (a) => ({
     type: "tv_control",
     do: a.action ?? "",
-    target: a.target ?? "",
+    // Live (desktop, then replay.test.ts): a model names the app to open in "app".
+    target: a.target || (a.action === "open_app" ? (a.app ?? "") : ""),
     app: a.app ?? "netflix",
     season: Number(a.season ?? 0),
     episode: Number(a.episode ?? 0),
@@ -737,7 +759,7 @@ export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: 
   planner: {
     blurb: "the agenda, routines, playbooks, and listing or cancelling alarms and timers",
     tools: ["manage_schedule", "manage_routine", "manage_playbook", "manage_clock"],
-    cue: /\b(schedule|agenda|calendar|meeting|appointment|routines?|playbooks?|every (?:day|morning|evening|night|week|weekday)|each (?:day|morning)|daily|weekdays?|weekends?|teach|recipe|alarms|timers|cancel|delete|dismiss)\b/i,
+    cue: /\b(schedule|agenda|calendar|meeting|appointment|routines?|playbooks?|every (?:day|morning|evening|night|week|weekday)|each (?:day|morning)|daily|weekdays?|weekends?|teach|recipe|alarms|timers|cancel|delete|dismiss|(?:get|come|arrive|i'?m) home|whenever i)\b/i,
   },
   hud: {
     blurb: "JARVIS's own screen: theme, background, panels, opening its views, clearing the chat",
