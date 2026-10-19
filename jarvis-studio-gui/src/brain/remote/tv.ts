@@ -23,7 +23,13 @@ export interface ShellReply {
   /** Why the TV couldn't be reached, when !ok. */
   summary: string;
 }
-export type TvShell = (command: string) => Promise<ShellReply>;
+export type TvShell = ((command: string) => Promise<ShellReply>) & {
+  /** Set once the TV's MAC is known: switch it on when it's fully off (wakeTv). */
+  wake?: () => Promise<ToolResult | null>;
+};
+
+/** Sends a Wake-on-LAN packet (platform wolSend → WakeOnLan.kt). */
+export type WolSend = (mac: string, near: string) => Promise<ToolResult>;
 
 export interface TvEnv {
   /** A show/film name → its Netflix title id, plus Netflix's own name for it. */
@@ -104,16 +110,30 @@ export const OTHER_NETWORK_HINT =
   "set the second router to Access Point mode, or install Tailscale on the TV and add " +
   "its 100.x address after a comma under Remote PC & TV.";
 
+export interface TvWakeOpts {
+  /** The TV's MAC, for waking it from off; "" / absent until known. */
+  mac?: string;
+  /** Called with the TV's MAC, read over ADB the first time the TV answers while
+   *  `mac` isn't known yet — the caller saves it for next time. */
+  onMac?: (mac: string) => void;
+  send?: WolSend;
+  wait?: (ms: number) => Promise<void>;
+}
+
 /**
  * The TV's shell. `host` may list several addresses for the same TV — its address on
  * the home Wi-Fi, and its Tailscale address for when the phone is on another router's
  * network. Each is tried in turn when the last couldn't be reached; the one that
  * answered goes first next time, so a network change costs one connect timeout, once.
  */
-export function nativeTvShell(host: string, shell: AddressShell = invokeTvShell): TvShell {
+export function nativeTvShell(
+  host: string,
+  shell: AddressShell = invokeTvShell,
+  opts: TvWakeOpts = {},
+): TvShell {
   const addresses = tvAddresses(host);
   let preferred = 0;
-  return async (command) => {
+  const run: TvShell = async (command) => {
     if (!addresses.length) {
       return { ok: false, output: "", exitCode: -1, summary: "That isn't a valid TV address." };
     }
@@ -130,6 +150,94 @@ export function nativeTvShell(host: string, shell: AddressShell = invokeTvShell)
       if (!unreachable(r.summary)) return r;
     }
     return { ...last!, summary: last!.summary + OTHER_NETWORK_HINT };
+  };
+  let askedMac = false;
+  const out: TvShell = async (command) => {
+    const r = await run(command);
+    if (r.ok && !opts.mac && opts.onMac && !askedMac) {
+      askedMac = true;
+      const link = await run("ip -o link");
+      const mac = link.ok ? macFromIpLink(link.output) : "";
+      if (mac) opts.onMac(mac);
+    }
+    return r;
+  };
+  const { mac, send } = opts;
+  if (mac && send) {
+    // The TV's home-network address (not its Tailscale one) gives the subnet broadcast.
+    const near = addresses.find((a) => PRIVATE_V4.test(a)) ?? "";
+    out.wake = () => wakeTv(run, mac, near, send, opts.wait ?? sleep);
+  }
+  return out;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const PRIVATE_V4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+/** "AA-BB-CC-DD-EE-FF" / "aabbccddeeff" → "aa:bb:cc:dd:ee:ff"; "" if it isn't one. */
+export function normMac(raw: unknown): string {
+  const hex = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  const m =
+    /^([0-9a-f]{2})[:-]?([0-9a-f]{2})[:-]?([0-9a-f]{2})[:-]?([0-9a-f]{2})[:-]?([0-9a-f]{2})[:-]?([0-9a-f]{2})$/.exec(
+      hex,
+    );
+  const mac = m ? m.slice(1).join(":") : "";
+  return mac === "00:00:00:00:00:00" || mac === "ff:ff:ff:ff:ff:ff" ? "" : mac;
+}
+
+/** The MAC of the TV's connected interface, from its `ip -o link`: Ethernet if it's
+ *  plugged in, else Wi-Fi. "" if none is up. */
+export function macFromIpLink(text: string): string {
+  const up = new Map<string, string>();
+  for (const line of (text ?? "").split("\n")) {
+    const m = /^\d+:\s*([\w.@-]+):\s*<([^>]*)>.*?link\/ether\s+([0-9a-f:]{17})/.exec(line.trim());
+    if (!m) continue;
+    const flags = m[2]!.split(",");
+    const mac = normMac(m[3]);
+    if (flags.includes("UP") && flags.includes("LOWER_UP") && mac)
+      up.set(m[1]!.split("@")[0]!, mac);
+  }
+  for (const prefix of ["eth", "wlan"]) {
+    for (const [name, mac] of up) if (name.startsWith(prefix)) return mac;
+  }
+  return up.values().next().value ?? "";
+}
+
+const WAKE_WAIT_MS = 30_000;
+
+/**
+ * If the TV can't be reached at all (fully off, or deep standby with its network
+ * down), send its MAC a Wake-on-LAN packet and wait for ADB to answer again. Null:
+ * it answered (or failed some other way, which the command itself will report) —
+ * carry on as usual. Mirrors the desktop's actions/tv.py `wake`.
+ */
+export async function wakeTv(
+  shell: TvShell,
+  mac: string,
+  near: string,
+  send: WolSend,
+  wait: (ms: number) => Promise<void>,
+  now: () => number = Date.now,
+): Promise<ToolResult | null> {
+  const probe = await shell("echo ok");
+  if (probe.ok || !unreachable(probe.summary)) return null;
+  const sent = await send(mac, near.split(":")[0] ?? "");
+  if (!sent.ok)
+    return { ok: false, summary: sent.summary || "The wake-up packet couldn't be sent." };
+  const deadline = now() + WAKE_WAIT_MS;
+  while (now() < deadline) {
+    await wait(2000);
+    if ((await shell("echo ok")).ok) return { ok: true, summary: "Woke the TV over the network." };
+  }
+  return {
+    ok: false,
+    error: "tv_unreachable",
+    summary:
+      "I sent the TV a wake-up packet, but it didn't come online within 30 seconds. On the " +
+      "TV, turn on Settings → Network → Remote start (it may be called 'Turn on with " +
+      "Wi-Fi/LAN'), and make sure the phone is on the same Wi-Fi network as the TV.",
   };
 }
 
@@ -221,6 +329,12 @@ export async function runTvControl(
   pick: EpisodePick = {},
 ): Promise<ToolResult> {
   const tv = new Tv(shell, env.wait);
+  // A TV that's fully off can't be reached at all: wake it first (when its MAC is known).
+  let woke: ToolResult | null = null;
+  if (shell.wake && ["power_on", "play", "open_app"].includes(action)) {
+    woke = await shell.wake();
+    if (woke && !woke.ok) return woke;
+  }
   try {
     switch (action) {
       case "open_app":
@@ -240,9 +354,14 @@ export async function runTvControl(
         return await tv.setVolume(parseInt(target, 10));
       case "mute":
         return await tv.toggleMute();
-      case "power_on":
+      case "power_on": {
+        const r = await tv.power(true);
+        return r.ok && woke
+          ? { ok: true, summary: "Turned the TV on (woke it over the network)." }
+          : r;
+      }
       case "power_off":
-        return await tv.power(action === "power_on");
+        return await tv.power(false);
       case "key":
         return await tv.key(target);
       case "status":

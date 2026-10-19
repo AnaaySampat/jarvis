@@ -122,6 +122,7 @@ phone_command!(config_secret_set(name: String, value: String) -> ActionResponse,
 phone_command!(config_secret_get(name: String) -> ConfigSecretResponse, ConfigSecretNameRequest);
 phone_command!(config_secret_delete(name: String) -> ActionResponse, ConfigSecretNameRequest);
 phone_command!(tv_shell(host: String, command: String) -> serde_json::Value, TvShellRequest);
+phone_command!(wol_send(mac: String, near: String) -> ActionResponse, WolSendRequest);
 phone_command!(schedule_routines(routines_json: String) -> ScheduleRoutinesResponse, ScheduleRoutinesRequest);
 phone_command!(poll_routine_tap() -> RoutineTapResponse);
 // One-step Android actions (DirectActions.kt). comm/notification replies carry

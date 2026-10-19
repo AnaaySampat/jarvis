@@ -373,6 +373,14 @@ pub struct TvShellRequest {
     pub command: String,
 }
 
+/// A Wake-on-LAN magic packet for `mac`, also sent to the /24 broadcast of `near` (the
+/// device's last known address) — see WakeOnLan.kt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WolSendRequest {
+    pub mac: String,
+    pub near: String,
+}
+
 /// Every timed routine, as JSON: `[{name, hour, minute, days: [0-6, 0 = Sunday], lastRun}]`
 /// (see RoutineAlarms.kt). Replaces whatever was scheduled before.
 #[derive(Debug, Clone, Serialize, Deserialize)]

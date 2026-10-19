@@ -53,6 +53,7 @@ blueprint; it is never edited, imported or shipped.
 | Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` (+ `playbooks.ts`) | Three separate stores — check which one a feature reads (see §7) |
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
 | TV | `remote/tv.ts` → **Kotlin** `TvAdb.kt` | The user's Android TV over network ADB (see §6a) |
+| Wake-on-LAN | `platform/index.ts` `wolSend` → **Kotlin** `WakeOnLan.kt` | Switches the TV (`wakeTv`) or the paired PC (`RemotePC.wake`, the `wake_pc` tool) on from off |
 | Native bridge | `platform/*.ts` | The JS side of the Kotlin plugin (see §5) |
 | Scheduling | `schedule/{store,reminderTime,routines}.ts` → **Kotlin** `RoutineAlarms.kt` for timed routines | Reminders, alarms, timers, routines (see §5) |
 
@@ -644,6 +645,7 @@ Settings 2026-09-25.
 | `AutonomyBootReceiver.kt` / `AutonomyRecoveryWorker.kt` | Reconcile task state after a reboot or an app upgrade |
 | `ActiveTaskRegistry.kt` / `NavigationWaitGate.kt` | Which task may act right now; and a pure decision gate so an *accepted* navigation action is never mistaken for a *verified* UI transition (STOP always wins a concurrent completion) |
 | `TvAdb.kt` | Network-ADB client for the user's TV (the `dadb` library, `dev.mobile:dadb`). Transport only: one shell command per call, one cached connection, one retry after the TV drops the socket in standby. Its RSA key sits in `noBackupFilesDir` |
+| `WakeOnLan.kt` | A Wake-on-LAN magic packet (six 0xFF, then the MAC ×16) to the broadcast address and the device's /24, ports 9 and 7, three times. `ok` means it left the phone; callers prove the wake by reaching the device. Pure half JVM-tested (`WakeOnLanTest.kt`) |
 | `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
 | `JarvisNotificationListener.kt` | Notification access: lists what's showing, and replies through a notification's own RemoteInput, confirmed only when the app updates or clears that notification |
 | `RoutineAlarms.kt` | Timed routines while the WebView is paused: JS hands it every timed routine on each save (`schedule_routines`); it keeps one exact `AlarmManager` alarm (`USE_EXACT_ALARM`) for the earliest, rolls each forward in SharedPreferences, re-works every time on a time zone change, and posts "Time for <name>". It never runs a routine — a tap opens JARVIS and the WebView runs it as an ordinary turn. The one in-app alarm: reminders and alarms go to the Clock app |
@@ -664,7 +666,8 @@ STOP overlay (`show_stop_overlay`, `hide_stop_overlay`, `poll_stop_overlay`,
 `task_checkpoint`, `task_status`, `task_finish`, `task_cancel`), calendar/clock
 (`calendar_action`, `clock_action`), device/file access (`get_device_stats`,
 `capture_screenshot`, `pick_folder`, `list_directory`, `read_file`), timed routines
-(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), and one-step actions
+(`schedule_routines`, `poll_routine_tap`), the TV (`tv_shell`, §6a), Wake-on-LAN
+(`wol_send`, §6a), and one-step actions
 (`device_action`, `comm_action`, `notification_action`, §3). Rust command arguments aren't
 `Option`, and Tauri rejects a call missing any of them ("missing required key"), so JS
 sends every key. `platform/index.test.ts` parses `commands.rs` and checks each call;
@@ -750,6 +753,17 @@ and adds its address — over their tailnet.
   first can open a connection into the second (the PC timed out from a different subnet
   in the 2026-09-30 spike). A refusal from the TV ends the attempt: another path to the
   same TV won't change it. When nothing answers, the reply says that may be the cause.
+- **Waking it from off (Wake-on-LAN).** A TV in deep standby has its network down, so
+  ADB can't reach it. The TV's MAC is read once over ADB (`ip -o link`, the connected
+  interface, Ethernet first) the first time it answers and saved with the TV record.
+  Then `power_on`, `play` and `open_app` first probe with `echo ok`; only an
+  *unreachable* TV (not one that refused the phone) gets a magic packet (`wol_send`),
+  and the action goes ahead once ADB answers again, within 30 s. The PC does the same
+  for itself: the desktop puts its network adapters (`wake: [{mac, ip}]`, wired first)
+  in the host-signed `auth.ready`; the phone keeps them under their own storage key
+  (rewriting the pairing record would rebuild the link) and `wake_pc` sends to each,
+  then counts the PC awake only once the link is back online. A broadcast never
+  crosses a router, so both need the phone on the device's own network.
 - **One command, `tv_shell(host, command)`.** Kotlin (`TvAdb.kt`) is transport only.
   `remote/tv.ts` builds every command from the typed `tv_control` actions. Model text only
   enters a command through `shellQuote()` or as a validated package name or title id, so

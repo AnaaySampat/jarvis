@@ -511,6 +511,12 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
             },
             ["goal"],
           ),
+          fn(
+            "wake_pc",
+            "Switch the user's PC on when it's asleep or shut down (Wake-on-LAN), e.g. 'turn " +
+              "on my PC'. Also when a pc_task failed because the PC couldn't be reached: wake " +
+              "it, then retry. Works only from the same home network as the PC.",
+          ),
         ]
       : []),
 
@@ -654,6 +660,7 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
     goal: a.goal ?? "",
     kind: a.kind === "computer" ? "computer" : "browser",
   }),
+  wake_pc: () => ({ type: "wake_pc" }),
   tv_control: (a) => ({
     type: "tv_control",
     do: a.action ?? "",

@@ -168,3 +168,17 @@ describe("one-step messages and calls", () => {
     expect(direct.device).toHaveBeenLastCalledWith({ action: "flashlight_on", value: 0 });
   });
 });
+
+describe("wake_pc", () => {
+  it("goes to the PC link's wake, and says so when no PC is paired", async () => {
+    const wake = vi.fn(async () => ({ ok: true, summary: "Woke the PC — it's connected now." }));
+    const remote = { runTask: vi.fn(), wake };
+    const deps = { ...makeDeps(undefined), remote };
+    await expect(dispatch({ type: "wake_pc" }, deps)).resolves.toMatchObject({ ok: true });
+    expect(wake).toHaveBeenCalledOnce();
+    await expect(dispatch({ type: "wake_pc" }, makeDeps(undefined))).resolves.toMatchObject({
+      ok: false,
+      summary: "No PC is paired yet.",
+    });
+  });
+});

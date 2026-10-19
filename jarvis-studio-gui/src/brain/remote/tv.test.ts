@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   findEpisode,
   nativeTvShell,
@@ -8,6 +8,9 @@ import {
   shellQuote,
   titleNameIn,
   tvAddresses,
+  macFromIpLink,
+  normMac,
+  wakeTv,
   type ShellReply,
   type TvEnv,
 } from "./tv";
@@ -307,5 +310,107 @@ describe("nativeTvShell across networks", () => {
     const r = await nativeTvShell("192.168.1.20", async () => reply(false, UNREACHABLE))("echo");
     expect(r.ok).toBe(false);
     expect(r.summary).toContain("Access Point mode");
+  });
+});
+
+describe("waking the TV (Wake-on-LAN)", () => {
+  const DOWN: ShellReply = {
+    ok: false,
+    output: "",
+    exitCode: -1,
+    summary: "I can't reach the TV at 192.168.1.20:5555.",
+  };
+  const UP: ShellReply = { ok: true, output: "ok", exitCode: 0, summary: "" };
+
+  it("reads the connected interface's MAC, Ethernet first", () => {
+    const link = [
+      "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 link/loopback 00:00:00:00:00:00",
+      "3: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 link/ether 11:22:33:44:55:66 brd ff:ff:ff:ff:ff:ff",
+      "4: eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff",
+    ].join("\n");
+    expect(macFromIpLink(link)).toBe("11:22:33:44:55:66"); // eth0 is unplugged
+    expect(macFromIpLink(link.replace("<NO-CARRIER,BROADCAST,MULTICAST,UP>", "<UP,LOWER_UP>"))).toBe(
+      "aa:bb:cc:dd:ee:ff",
+    );
+    expect(normMac("AA-BB-CC-DD-EE-FF")).toBe("aa:bb:cc:dd:ee:ff");
+    expect(normMac("ff:ff:ff:ff:ff:ff")).toBe("");
+  });
+
+  it("does nothing to a TV that already answers", async () => {
+    const send = vi.fn();
+    const r = await wakeTv(async () => UP, "aa:bb:cc:dd:ee:ff", "192.168.1.20", send, async () => {});
+    expect(r).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("wakes an unreachable TV and waits for ADB to come back", async () => {
+    const replies = [DOWN, DOWN, UP];
+    let t = 0;
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const r = await wakeTv(
+      async () => replies.shift() ?? UP,
+      "aa:bb:cc:dd:ee:ff",
+      "192.168.1.20:5555",
+      send,
+      async (ms) => void (t += ms),
+      () => t,
+    );
+    expect(send).toHaveBeenCalledWith("aa:bb:cc:dd:ee:ff", "192.168.1.20");
+    expect(r).toEqual({ ok: true, summary: "Woke the TV over the network." });
+  });
+
+  it("says how to fix it when the TV never comes back", async () => {
+    let t = 0;
+    const r = await wakeTv(
+      async () => DOWN,
+      "aa:bb:cc:dd:ee:ff",
+      "192.168.1.20",
+      async () => ({ ok: true, summary: "sent" }),
+      async (ms) => void (t += ms),
+      () => t,
+    );
+    expect(r?.ok).toBe(false);
+    expect(r?.summary).toContain("Remote start");
+  });
+
+  it("a TV that refused the phone isn't 'off': no packet, the command reports it", async () => {
+    const send = vi.fn();
+    const refused = { ...DOWN, summary: "The TV didn't allow this phone." };
+    expect(await wakeTv(async () => refused, "aa:bb:cc:dd:ee:ff", "", send, async () => {})).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("power_on wakes first, and learns the MAC the first time the TV answers", async () => {
+    const replies: ShellReply[] = [DOWN, UP];
+    const commands: string[] = [];
+    const address = async (a: string, command: string): Promise<ShellReply> => {
+      commands.push(command);
+      if (a.startsWith("100.")) return DOWN; // a TV that's off isn't on Tailscale either
+      if (command === "echo ok") return replies.shift() ?? UP;
+      if (command.startsWith("dumpsys power")) return { ...UP, output: "mWakefulness=Awake" };
+      return UP;
+    };
+    const send = vi.fn(async () => ({ ok: true, summary: "sent" }));
+    const shell = nativeTvShell("100.101.1.2, 192.168.1.20", address, {
+      mac: "aa:bb:cc:dd:ee:ff",
+      send,
+      wait: async () => {},
+    });
+    const r = await runTvControl(shell, "power_on", "", "", env);
+    expect(send).toHaveBeenCalledWith("aa:bb:cc:dd:ee:ff", "192.168.1.20"); // not Tailscale
+    expect(r).toEqual({ ok: true, summary: "Turned the TV on (woke it over the network)." });
+
+    let learned = "";
+    const fresh = nativeTvShell(
+      "192.168.1.20",
+      async (_a, c) =>
+        c === "ip -o link"
+          ? { ...UP, output: "3: wlan0: <UP,LOWER_UP> mtu 1500 link/ether 11:22:33:44:55:66 brd" }
+          : UP,
+      { onMac: (m) => (learned = m) },
+    );
+    await fresh("getprop ro.product.model");
+    expect(learned).toBe("11:22:33:44:55:66");
+    expect(fresh.wake).toBeUndefined(); // nothing to wake it with yet
   });
 });

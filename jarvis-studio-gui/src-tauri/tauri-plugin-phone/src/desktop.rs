@@ -206,6 +206,7 @@ impl<R: Runtime> Phone<R> {
     pub fn tv_shell(&self, _p: TvShellRequest) -> crate::Result<serde_json::Value> {
         Ok(serde_json::json!({ "ok": false, "output": "", "exitCode": -1, "summary": "TV control is only available on Android." }))
     }
+    unavailable_command!(wol_send(WolSendRequest));
     pub fn schedule_routines(&self, _p: ScheduleRoutinesRequest) -> crate::Result<ScheduleRoutinesResponse> {
         Ok(ScheduleRoutinesResponse {
             ok: false,

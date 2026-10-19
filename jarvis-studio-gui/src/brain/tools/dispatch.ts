@@ -49,7 +49,11 @@ export interface DispatchDeps {
   /** The user's location source for weather / places / "near me" search. */
   location: LocationService;
   /** Phase 3: a connected remote-PC link, or null when no PC is paired. */
-  remote?: { runTask(goal: string, kind?: "browser" | "computer"): Promise<ToolResult> } | null;
+  remote?: {
+    runTask(goal: string, kind?: "browser" | "computer"): Promise<ToolResult>;
+    /** Wake-on-LAN, then wait for the PC to reconnect (RemotePC.wake). */
+    wake?(): Promise<ToolResult>;
+  } | null;
   /** The user's TV (network ADB, remote/tv.ts), or null when none is set up. */
   tv?: TvShell | null;
   /** Optional activity feed sink. Receives agent_* shaped events. */
@@ -347,6 +351,10 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
         String(spec.goal ?? ""),
         spec.kind === "computer" ? "computer" : "browser",
       );
+    case "wake_pc":
+      if (!remote) return { ok: false, summary: "No PC is paired yet." };
+      if (!remote.wake) return { ok: false, summary: "Waking the PC isn't available here." };
+      return remote.wake();
 
     // ── The user's TV (network ADB) ──
     case "tv_control":

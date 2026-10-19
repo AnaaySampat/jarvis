@@ -260,6 +260,15 @@ export function pollRoutineTap(): Promise<{ seq: number; name: string; date: str
   return phoneJson("poll_routine_tap", {});
 }
 
+// ── Wake-on-LAN (WakeOnLan.kt): switch the TV or the PC on from off ──
+
+/** Send a Wake-on-LAN packet for `mac`, also to the /24 broadcast of `near` (the
+ *  device's last known address). ok = it left the phone, never that the device
+ *  woke — the caller checks that by reaching it. */
+export function wolSend(mac: string, near = ""): Promise<ToolResult> {
+  return phoneInvoke("wol_send", { mac, near });
+}
+
 // ── Read-only file access (Storage Access Framework) ──
 // Scoped to ONE user-granted folder tree at a time. The tree URI is persisted here
 // (not natively) so Settings can show/change it and every read_file/list_directory

@@ -220,6 +220,12 @@ internal class TvShellArgs {
 }
 
 @InvokeArg
+internal class WolSendArgs {
+    var mac: String = ""
+    var near: String = ""
+}
+
+@InvokeArg
 internal class IdentityAuthArgs {
     var hostId: String = ""
     var nonce: String = ""
@@ -1089,6 +1095,16 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                 put("exitCode", r.exitCode)
                 put("summary", r.summary)
             })
+        }
+    }
+
+    /** Wake-on-LAN for the TV or the PC (WakeOnLan.kt). ok = the packet left the phone. */
+    @Command
+    fun wolSend(invoke: Invoke) {
+        val args = invoke.parseArgs(WolSendArgs::class.java)
+        autonomyScope.launch {
+            val (ok, summary) = WakeOnLan.send(args.mac, args.near)
+            invoke.resolve(result(ok, summary))
         }
     }
 

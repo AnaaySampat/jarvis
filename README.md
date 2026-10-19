@@ -72,6 +72,10 @@ the app**, so the phone needs no server and no Python.
   TV, type its IP, tap Connect and accept the prompt on the TV. Two routers at home (a
   second one in router mode makes its Wi-Fi a separate network)? Switch the second one to
   Access Point mode, or install Tailscale on the TV and add its address after a comma.
+- **Switching on from off** — "turn on the TV" also works when the TV is fully off
+  (turn on Remote start in its network settings), and "turn on my PC" wakes the paired PC
+  (Wake on LAN on in its BIOS and network adapter). Both use Wake-on-LAN, so the phone
+  has to be on the same home network.
 
 Known gaps and the things that still need a live on-device test are tracked in
 [docs/STATUS.md](docs/STATUS.md).

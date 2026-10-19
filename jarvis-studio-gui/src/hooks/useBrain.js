@@ -14,7 +14,7 @@ import { createBrain } from "../brain";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
-import { androidPlatform, pollRoutineTap } from "../brain/platform";
+import { androidPlatform, pollRoutineTap, wolSend } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
@@ -30,8 +30,8 @@ import {
   loadScreenConfig,
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
-import { RemotePC } from "../brain/remote/pc";
-import { nativeTvShell, tvAddresses } from "../brain/remote/tv";
+import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
+import { nativeTvShell, normMac, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
@@ -94,6 +94,9 @@ const MAX_LISTEN_MS = 30_000;
 const CONFIG_KEY = "jarvis.android.config.v1";
 const PC_KEY = "jarvis.android.pc.v1";
 const TV_KEY = "jarvis.android.tv.v1";
+// The PC's network adapters for Wake-on-LAN, from its signed auth.ready. Kept apart
+// from PC_KEY: rewriting the pairing record would rebuild (and reconnect) the link.
+const PC_WAKE_KEY = "jarvis.android.pcwake.v1";
 const COMMANDS_KEY = "jarvis.android.commands.v1";
 
 const kv = makeKV();
@@ -119,8 +122,9 @@ function saveCommands(list) {
   writeJson(kv, COMMANDS_KEY, list.slice(-80));
 }
 
-// The TV record is just its LAN address (plus the model it reported, for display).
-// The ADB key that lets this phone in lives natively (TvAdb.kt), never in WebView storage.
+// The TV record is just its LAN address (plus the model it reported, for display, and
+// its MAC, for waking it from off). The ADB key that lets this phone in lives natively
+// (TvAdb.kt), never in WebView storage.
 export function sanitizeTvConfig(value) {
   // One TV, one or more addresses: its home IP, then optionally its Tailscale IP.
   const host = tvAddresses(String(value?.host ?? "")).join(", ");
@@ -128,7 +132,8 @@ export function sanitizeTvConfig(value) {
   const model = String(value?.model ?? "")
     .trim()
     .slice(0, 80);
-  return model ? { host, model } : { host };
+  const mac = normMac(value?.mac);
+  return { host, ...(model ? { model } : {}), ...(mac ? { mac } : {}) };
 }
 
 // Paired-PC records are public routing/identity pins only. This allowlist is also
@@ -657,11 +662,24 @@ export function useBrain() {
   // reconnects authenticate with a signed auth.response.
   const pcPinRef = useRef("");
   const pcConfigured = Boolean(pcConfig && pcConfig.host);
+  const pcWakeRef = useRef(sanitizeWakeTargets(readJson(kv, PC_WAKE_KEY, [])));
 
   // ── The user's TV (network ADB) ─────────────────────────────────────────────
   const [tvConfig, setTvConfig] = useState(() => sanitizeTvConfig(readJson(kv, TV_KEY, null)));
   // null when no TV is set up, so `tv_control` isn't even advertised.
-  const tv = useMemo(() => (tvConfig ? nativeTvShell(tvConfig.host) : null), [tvConfig]);
+  const tv = useMemo(() => {
+    if (!tvConfig) return null;
+    // The TV's MAC is read over ADB the first time it answers, so it can be woken
+    // from off next time (Wake-on-LAN, remote/tv.ts wakeTv).
+    const onMac = (mac) => {
+      const cur = sanitizeTvConfig(readJson(kv, TV_KEY, null));
+      if (!cur || cur.host !== tvConfig.host || cur.mac === mac) return;
+      const next = { ...cur, mac };
+      writeJson(kv, TV_KEY, next);
+      setTvConfig(next);
+    };
+    return nativeTvShell(tvConfig.host, undefined, { mac: tvConfig.mac, onMac, send: wolSend });
+  }, [tvConfig]);
   // Saved only once the TV actually answers, which on the first connection means the
   // user accepted "Allow USB debugging?" on the TV.
   const pairTV = useCallback(async (host) => {
@@ -672,10 +690,12 @@ export function useBrain() {
         summary: "That isn't a TV address — use the IP in the TV's network settings.",
       };
     }
-    const r = await nativeTvShell(clean.host)("getprop ro.product.model");
+    let mac = "";
+    const shell = nativeTvShell(clean.host, undefined, { onMac: (m) => (mac = m) });
+    const r = await shell("getprop ro.product.model");
     if (!r.ok || r.exitCode !== 0)
       return { ok: false, summary: r.summary || "The TV didn't answer." };
-    const next = sanitizeTvConfig({ ...clean, model: r.output });
+    const next = sanitizeTvConfig({ ...clean, model: r.output, mac });
     writeJson(kv, TV_KEY, next);
     setTvConfig(next);
     return { ok: true, summary: `Connected to ${next.model || "the TV"}.` };
@@ -746,6 +766,11 @@ export function useBrain() {
       pairingChallengeId: pcConfig.pairingChallengeId,
       pin: pcPinRef.current,
       deviceName: pcConfig.deviceName,
+      onWakeTargets: (targets) => {
+        if (JSON.stringify(targets) === JSON.stringify(pcWakeRef.current)) return;
+        pcWakeRef.current = targets;
+        writeJson(kv, PC_WAKE_KEY, targets);
+      },
       onStateChange: (s) => {
         setPcState(s);
         if (s !== "online") {
@@ -1010,7 +1035,13 @@ export function useBrain() {
   // browser autopilot (which then Google-searches "online notepad" and fails).
   const remote = useMemo(() => {
     if (!pcConfigured) return null;
-    return { runTask: (goal, kind) => runPcTask(goal, kind) };
+    return {
+      runTask: (goal, kind) => runPcTask(goal, kind),
+      wake: () =>
+        pcRef.current
+          ? pcRef.current.wake(pcWakeRef.current, wolSend)
+          : Promise.resolve({ ok: false, summary: "The PC link isn't running." }),
+    };
   }, [pcConfigured, runPcTask]);
 
   // Optional TURN relay from the pairing config → ICE servers for internet use.
@@ -2140,6 +2171,8 @@ export function useBrain() {
     void stopScreen();
     pcPinRef.current = "";
     savePcConfig(null);
+    kv.remove(PC_WAKE_KEY);
+    pcWakeRef.current = [];
     clearKnownRemoteTaskCursors();
     setPcConfig(null);
     setAgentTasks((prev) => prev.filter((task) => task.source !== "pc"));

@@ -57,6 +57,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-identity-verify-host-challenge`
 - `allow-identity-verify-host-envelope`
 - `allow-tv-shell`
+- `allow-wol-send`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
 - `allow-device-action`
@@ -1576,6 +1577,32 @@ Enables the type_text command without any pre-configured scope.
 <td>
 
 Denies the type_text command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-wol-send`
+
+</td>
+<td>
+
+Enables the wol_send command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-wol-send`
+
+</td>
+<td>
+
+Denies the wol_send command without any pre-configured scope.
 
 </td>
 </tr>
