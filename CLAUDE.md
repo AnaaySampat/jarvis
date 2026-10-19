@@ -50,6 +50,10 @@ No phone? `.\scripts\emulator.ps1` (from the repo root) creates the `jarvis_test
 first run, boots it, installs the debug APK and launches it. `-Build` rebuilds the APK for
 arm64 + x86_64 first (one APK for phone and emulator); `-Mic` passes the laptop mic in.
 
+Releases: bump the version in `package.json` and `src-tauri/tauri.conf.json`, then push a
+tag `vX.Y.Z`; `.github/workflows/release.yml` checks, builds a signed APK and publishes
+the GitHub release (README ▸ Releasing has the signing secrets it needs).
+
 **`tauri android dev` hangs after building — do not use it.** Use `tauri android build`
 (it exits cleanly), then `adb install` + `adb shell am start` manually.
 

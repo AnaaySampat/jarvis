@@ -1,0 +1,106 @@
+# Push a tag vX.Y.Z (matching jarvis-studio-gui/package.json and tauri.conf.json) and
+# this checks the app, builds a signed APK and publishes it as a GitHub release, which
+# the app's update notice (platform/update.ts) then offers. Run it by hand ("Run
+# workflow") for a dry run: same checks and build, the APK as a workflow artifact, no
+# release.
+#
+# Signing: the APK must carry the key the installed app was signed with, or Android
+# refuses the update. Add repository secrets ANDROID_KEYSTORE_BASE64 (the keystore file,
+# base64), ANDROID_KEY_ALIAS and ANDROID_KEYSTORE_PASSWORD (gen/android uses one password
+# for store and key). For the debug keystore the app may have been built with so far:
+# ~/.android/debug.keystore, alias androiddebugkey, password android.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    defaults:
+      run:
+        working-directory: jarvis-studio-gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches the app's version
+        if: env.PUBLISH == 'true'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$pkg" != "$tag" ] || [ "$conf" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME, but package.json says $pkg and tauri.conf.json says $conf. Bump both, then tag."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jarvis-studio-gui/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install packages
+        run: npm ci
+      - name: Typecheck, lint, tests
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            if [ "$PUBLISH" = "true" ]; then
+              echo "::error::No signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEYSTORE_PASSWORD). An APK signed with a throwaway key can't update the installed app, so nothing is published."
+              exit 1
+            fi
+            echo "::warning::No signing secrets: this dry run is signed with a throwaway debug key."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > src-tauri/gen/android/release.keystore
+          printf 'storeFile=../release.keystore\nkeyAlias=%s\npassword=%s\n' "$KEY_ALIAS" "$KEY_PASSWORD" \
+            > src-tauri/gen/android/keystore.properties
+
+      - name: Build the APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Name it
+        run: |
+          name="JARVIS-${GITHUB_REF_NAME//\//-}-arm64.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk "$name"
+          echo "APK=jarvis-studio-gui/$name" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        if: env.PUBLISH == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.APK }}
+          generate_release_notes: true
+
+      - name: Keep the dry run's APK
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-release-apk
+          path: ${{ env.APK }}

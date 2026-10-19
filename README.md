@@ -248,6 +248,21 @@ powershell -ExecutionPolicy Bypass -File scripts/emulator.ps1 -Build
   Native features (phone control, wake word, TTS) aren't there.
 - `scripts/build-android.ps1` wraps the build commands above (`-Debug`, `-Target arm64`).
 
+## Releasing
+
+Bump `version` in `jarvis-studio-gui/package.json` and `src-tauri/tauri.conf.json`,
+commit, then tag and push: `git tag v2.5.0 && git push origin v2.5.0`. The Release
+workflow (`.github/workflows/release.yml`) checks the app (typecheck, lint, tests),
+builds a signed arm64 APK and publishes it as a GitHub release, which the app's update
+notice then offers. It refuses a tag that doesn't match the version.
+
+It needs the key the installed app is signed with, as repository secrets:
+`ANDROID_KEYSTORE_BASE64` (the keystore, base64), `ANDROID_KEY_ALIAS` and
+`ANDROID_KEYSTORE_PASSWORD`. Without them nothing is published — an APK signed with
+another key can't update the app. (Built locally with the debug keystore so far? That's
+`~/.android/debug.keystore`, alias `androiddebugkey`, password `android`.) "Run workflow"
+on the Actions tab does a dry run with no release.
+
 ## Keys and security
 
 JARVIS needs at least one free key — [Google AI Studio](https://aistudio.google.com/)
