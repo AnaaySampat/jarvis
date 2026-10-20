@@ -491,7 +491,9 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   chat model had asked "want me to check?" for one and invented an uptime for another — and
   `loop.ts` gives a reply about the phone that called no tool one silent recheck round
   (`answeredPhoneWithoutLooking`, beside `claimedWithoutActing`): on its Groq fallback the
-  chat model answered "Android 14" for a phone on 16 without looking. When a turn runs out
+  chat model answered "Android 14" for a phone on 16 without looking. A question about the
+  TV gets the same round when `tv_control` is on offer (`answeredTvWithoutLooking`, 2026-10-19:
+  "nothing playing on the TV" with no tool call). When a turn runs out
   of tool rounds it no longer says only "I worked on that but couldn't fully finish it" —
   that threw away what the tools had found (a real "read my Chrome screen and search up the
   time" request ended that way): one last call answers from the results, and if the model

@@ -23,4 +23,13 @@ class ArrivalWatcherTest {
         assertFalse(ArrivalWatcher.isArrival("192.168.1.1|192.168.1.0/24", homes, "")) // nothing known yet
         assertFalse(ArrivalWatcher.isArrival("10.0.0.1|10.0.0.0/24", homes, "away")) // a café
     }
+
+    @Test
+    fun theSamplerArrivesTooWhenTheOneShotCallbackWasSpentElsewhere() {
+        val homes = setOf("192.168.1.1|192.168.1.0/24")
+        assertEquals("away" to false, ArrivalWatcher.sighting("", homes, "home")) // Wi-Fi off: arm
+        assertEquals("away" to false, ArrivalWatcher.sighting("10.0.0.1|10.0.0.0/24", homes, "away")) // a café
+        assertEquals("home" to true, ArrivalWatcher.sighting("192.168.1.1|192.168.1.0/24", homes, "away"))
+        assertEquals("home" to false, ArrivalWatcher.sighting("192.168.1.1|192.168.1.0/24", homes, "home"))
+    }
 }

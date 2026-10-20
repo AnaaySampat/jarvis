@@ -1622,7 +1622,7 @@ export function MemoryOverlay({
           <div className="memx-hd-txt">
             <span className="memx-kicker">MEMORY</span>
             <h2 className="memx-title">{IS_MOBILE ? "Memory" : "What JARVIS knows"}</h2>
-            <p className="memx-loc">Kept on this phone only.</p>
+            <p className="memx-loc">Kept on this phone and your paired PC.</p>
           </div>
           <button className="memx-close" onClick={onClose} aria-label="Close memory">
             <Icon name="close" size={18} />
@@ -1677,7 +1677,8 @@ export function MemoryOverlay({
           <div className="memx-main" ref={mainRef}>
             {IS_MOBILE && (
               <p className="memx-lede">
-                What JARVIS knows, kept on this phone only. Forgetting is permanent.
+                What JARVIS knows. Facts and routines are shared with your paired PC, and forgetting
+                one there or here is permanent on both.
               </p>
             )}
             <div className="memx-sec-hd">

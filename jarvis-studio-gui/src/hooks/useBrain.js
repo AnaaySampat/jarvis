@@ -726,7 +726,10 @@ export function useBrain() {
       };
     }
     let mac = "";
-    const shell = nativeTvShell(clean.host, undefined, { onMac: (m) => (mac = m) });
+    const shell = nativeTvShell(clean.host, undefined, {
+      onMac: (m) => (mac = m),
+      onLan: markHomeNetwork,
+    });
     const r = await shell("getprop ro.product.model");
     if (!r.ok || r.exitCode !== 0)
       return { ok: false, summary: r.summary || "The TV didn't answer." };
@@ -1062,7 +1065,14 @@ export function useBrain() {
     async (goal, kind = "browser") => {
       if (!pcRef.current) return { ok: false, summary: "No PC is paired yet, sir." };
       if (!(await requireBiometric("Confirm it's you to run a task on your PC"))) {
-        return { ok: false, summary: "I need your fingerprint to run that on your PC, sir." };
+        // Said plainly where the prompt was: a model paraphrased the old wording ("I need
+        // your fingerprint to run that on your PC") as "approve the prompt on your PC".
+        return {
+          ok: false,
+          summary:
+            "Nothing was sent to the PC: the fingerprint check on this phone was cancelled. " +
+            "Ask again and touch the phone's sensor when it asks, sir.",
+        };
       }
       return pcRef.current.runTask(goal, kind);
     },

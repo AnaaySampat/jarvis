@@ -20,7 +20,12 @@ vi.mock("./tools/dispatch", () => ({
   },
 }));
 
-import { answeredPhoneWithoutLooking, claimedWithoutActing, runTurn } from "./loop";
+import {
+  answeredPhoneWithoutLooking,
+  answeredTvWithoutLooking,
+  claimedWithoutActing,
+  runTurn,
+} from "./loop";
 import type { DispatchDeps } from "./tools/dispatch";
 import { turnPalette } from "./tools/registry";
 import type { ToolDeclaration, ToolResult } from "./types";
@@ -68,6 +73,24 @@ describe("runTurn — a phone task that acted and failed is not re-run", () => {
     });
     await ask("click a photo");
     expect(dispatched).toEqual(["phone_task", "phone_task"]);
+  });
+});
+
+describe("runTurn — STOP", () => {
+  it("ends the turn on the task's own words, with no model round to recast it", async () => {
+    // Live 2026-10-20: STOP mid TV task, then "I wasn't able to complete that task on
+    // your TV. Would you like me to try again…?"
+    results.push({ ok: false, summary: "Stopped.", error: "cancelled" });
+    replies.push(
+      {
+        text: "",
+        toolCalls: [{ id: "c1", name: "tv_control", args: { action: "task", goal: "play rain" } }],
+      },
+      { text: "I wasn't able to complete that task on your TV.", toolCalls: [] },
+    );
+    const out = await ask("On YouTube on the TV, search for rain sounds and play the third result");
+    expect(out.reply).toBe("Stopped.");
+    expect(seen).toHaveLength(1);
   });
 });
 
@@ -180,6 +203,14 @@ describe("runTurn — answered about the phone without looking", () => {
       "what's the phone number for Pizza Hut?"]) {
       expect(answeredPhoneWithoutLooking(q, false), q).toBe(false);
     }
+  });
+
+  it("asks again about the TV the same way", () => {
+    // Live 2026-10-19: "nothing playing on the TV" with no tool call.
+    expect(answeredTvWithoutLooking("what's on my TV right now?", false)).toBe(true);
+    expect(answeredTvWithoutLooking("is the tv on?", false)).toBe(true);
+    expect(answeredTvWithoutLooking("what's on my TV right now?", true)).toBe(false);
+    expect(answeredTvWithoutLooking("what's a good TV show to watch?", false)).toBe(false);
   });
 });
 

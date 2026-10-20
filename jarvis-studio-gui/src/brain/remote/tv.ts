@@ -323,10 +323,13 @@ export async function wakeTv(
   return {
     ok: false,
     error: "tv_unreachable",
+    // Both causes, not just "off": on 2026-10-20 the TV was on (the phone could reach it)
+    // while the PC couldn't for minutes at a time, and Remote start was already on.
     summary:
-      "I sent the TV a wake-up packet, but it didn't come online within 30 seconds. On the " +
-      "TV, turn on Settings → Network → Remote start (it may be called 'Turn on with " +
-      "Wi-Fi/LAN'), and make sure the phone is on the same Wi-Fi network as the TV.",
+      "I couldn't reach the TV, so I sent it a wake-up packet, but it still didn't answer " +
+      "within 30 seconds. If it's off, Settings → Network → Remote start on the TV (it may " +
+      "be called 'Turn on with Wi-Fi/LAN') lets me wake it; if it's on, the phone can't " +
+      "reach it over the Wi-Fi right now.",
   };
 }
 
@@ -647,6 +650,8 @@ export function appLabel(pkg: string): string {
 interface Session {
   state: number;
   position: number;
+  /** When the app last reported its state (the TV's uptime, ms). */
+  updated: number;
 }
 
 export class Tv {
@@ -695,6 +700,8 @@ export class Tv {
   async openApp(name: string): Promise<ToolResult> {
     const pkg = await this.resolveApp(name);
     if (!pkg) return { ok: false, summary: `There's no app called “${name}” on the TV.` };
+    const on = await this.screenOn();
+    if (on && !on.ok) return on;
     const label = APP_NAMES[pkg] ?? name.trim();
     // TV apps register under LEANBACK_LAUNCHER; a phone-style app only under LAUNCHER.
     let out = await this.sh(`monkey -p ${pkg} -c android.intent.category.LEANBACK_LAUNCHER 1`);
@@ -721,7 +728,9 @@ export class Tv {
       const p = /^\s*package=([A-Za-z0-9_.]+)/.exec(line);
       if (p) pkg = p[1];
       const s = /state=PlaybackState \{state=(-?\d+), position=(-?\d+)/.exec(line);
-      if (s && pkg && !map.has(pkg)) map.set(pkg, { state: Number(s[1]), position: Number(s[2]) });
+      const u = /updated=(-?\d+)/.exec(line);
+      if (s && pkg && !map.has(pkg))
+        map.set(pkg, { state: Number(s[1]), position: Number(s[2]), updated: Number(u?.[1] ?? 0) });
     }
     return map;
   }
@@ -729,19 +738,22 @@ export class Tv {
   /**
    * Playing = state 3 AND the position moving between two reads. State alone lies:
    * Netflix reports state 3 at position 0 while its "Who's watching?" screen is up.
+   * YouTube's TV app reports its position only when its state changes (2026-10-20:
+   * 902099 for 95 s while playing), so for it state 3 in both reads is enough — but
+   * after a new link only once it has reported since (`since`, its session before the
+   * link): the last video's leftover state 3 isn't the new one playing.
    */
   private async playingNow(
     pkg: string,
+    since?: Session,
   ): Promise<{ playing: boolean; before?: Session; after?: Session }> {
     const before = (await this.sessions()).get(pkg);
     if (!before || before.state !== 3) return { playing: false, before };
     await this.wait(2500);
     const after = (await this.sessions()).get(pkg);
-    return {
-      playing: Boolean(after && after.state === 3 && after.position > before.position + 500),
-      before,
-      after,
-    };
+    const reported = !!after && pkg === YOUTUBE && after.updated !== since?.updated;
+    const moved = !!after && (after.position > before.position + 500 || reported);
+    return { playing: Boolean(after && after.state === 3 && moved), before, after };
   }
 
   /**
@@ -800,6 +812,8 @@ export class Tv {
   /** Open a Netflix `title/<id>` or `watch/<id>` link and confirm it plays. */
   async netflixOpen(path: string, name: string): Promise<ToolResult> {
     const found = { name };
+    const on = await this.screenOn();
+    if (on && !on.ok) return on;
     const cold = !(await this.sh(`pidof ${NETFLIX}`)).trim();
     const before = cold ? undefined : await this.playingNow(NETFLIX);
     const sentAt = Date.now();
@@ -858,18 +872,34 @@ export class Tv {
       return { ok: false, summary: "That isn't a YouTube video." };
     const start = Math.max(Math.floor(startS || 0), 0);
     const url = `https://www.youtube.com/watch?v=${link.id}${start >= 5 ? `&t=${start}s` : ""}`;
-    await this.sh(`am start -a android.intent.action.VIEW -d ${shellQuote(url)} ${YOUTUBE}`);
+    const on = await this.screenOn();
+    if (on && !on.ok) return on;
+    let gate = await this.youtubeGate(!!on);
+    const prior = (await this.sessions()).get(YOUTUBE);
+    const linkCmd = `am start -a android.intent.action.VIEW -d ${shellQuote(url)} ${YOUTUBE}`;
+    await this.sh(linkCmd);
     if (!(await this.waitForFocus(YOUTUBE))) {
       return { ok: false, summary: "I asked the TV to open YouTube, but it didn't come up." };
     }
     for (let i = 0; i < 8; i++) {
       await this.wait(2000);
-      const now = await this.playingNow(YOUTUBE);
-      if (!now.playing) continue;
+      const now = await this.playingNow(YOUTUBE, prior);
+      if (!now.playing) {
+        if (gate && i === 2) {
+          // Still nothing: past "Who's watching?", then the link again.
+          gate = false;
+          await this.keyevent(KEYS.ok);
+          await this.wait(4000);
+          await this.sh(linkCmd);
+        }
+        continue;
+      }
+      // Not "from the start": a TV already playing this video just carries on where it
+      // was (seen 2026-10-20).
       if (start >= 5 && now.after && now.after.position < (start - 10) * 1000) {
         return {
           ok: true,
-          summary: `Playing ${label} on YouTube on the TV, but from the start: it didn't take the start time (${clock(start)}).`,
+          summary: `Playing ${label} on YouTube on the TV, but not from ${clock(start)}: it didn't take the start time.`,
         };
       }
       return {
@@ -887,7 +917,12 @@ export class Tv {
   async youtubePlay(query: string): Promise<ToolResult> {
     const q = query.trim().slice(0, 200);
     const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
-    await this.sh(`am start -a android.intent.action.VIEW -d ${shellQuote(url)} ${YOUTUBE}`);
+    const on = await this.screenOn();
+    if (on && !on.ok) return on;
+    let gate = await this.youtubeGate(!!on);
+    const prior = (await this.sessions()).get(YOUTUBE);
+    const searchCmd = `am start -a android.intent.action.VIEW -d ${shellQuote(url)} ${YOUTUBE}`;
+    await this.sh(searchCmd);
     if (!(await this.waitForFocus(YOUTUBE))) {
       return { ok: false, summary: "I asked the TV to open YouTube, but it didn't come up." };
     }
@@ -895,8 +930,15 @@ export class Tv {
     await this.keyevent(KEYS.ok);
     for (let i = 0; i < 6; i++) {
       await this.wait(2000);
-      if ((await this.playingNow(YOUTUBE)).playing) {
+      if ((await this.playingNow(YOUTUBE, prior)).playing) {
         return { ok: true, summary: `Playing the top YouTube result for “${q}” on the TV.` };
+      }
+      if (gate && i === 1) {
+        // That OK picked the account on "Who's watching?": search again.
+        gate = false;
+        await this.sh(searchCmd);
+        await this.wait(5000);
+        await this.keyevent(KEYS.ok);
       }
     }
     return {
@@ -982,6 +1024,28 @@ export class Tv {
       ok: false,
       summary: `I sent the TV the ${on ? "wake" : "sleep"} key, but it didn't change.`,
     };
+  }
+
+  /**
+   * Before starting anything. A TV in standby with its network up answers ADB but shows
+   * nothing, so an app opened there plays to a dark screen (2026-10-20: with Remote
+   * start on, this TV never goes further than that). Unknown → carry on. Returns what
+   * it did (null: nothing needed).
+   */
+  async screenOn(): Promise<ToolResult | null> {
+    if (!["Asleep", "Dozing"].includes(await this.wakefulness())) return null;
+    return this.power(true);
+  }
+
+  /**
+   * Whether YouTube will likely ask "Who's watching?" first: it does after the TV wakes
+   * and on a cold start, and swallows the link (2026-10-20). ADB can't see it
+   * (uiautomator finds nothing in YouTube's TV app), so cast/youtubePlay press OK once
+   * if nothing starts — the highlighted, last-used account (the user's choice, like
+   * Netflix's profile gate) — and send the link again.
+   */
+  private async youtubeGate(woke: boolean): Promise<boolean> {
+    return woke || !(await this.sh(`pidof ${YOUTUBE}`)).trim();
   }
 
   async key(spec: string): Promise<ToolResult> {

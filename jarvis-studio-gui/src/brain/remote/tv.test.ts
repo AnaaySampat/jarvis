@@ -316,6 +316,20 @@ describe("nativeTvShell across networks", () => {
     expect(r.ok).toBe(false);
     expect(r.summary).toContain("Access Point mode");
   });
+
+  it("tells the caller the phone is home only when a home address answered", async () => {
+    let home = 0;
+    const lan = nativeTvShell(
+      "100.101.1.2, 192.168.1.20",
+      async (a) => (a === "192.168.1.20" ? reply(true) : reply(false, UNREACHABLE)),
+      { onLan: () => home++ },
+    );
+    await lan("echo");
+    expect(home).toBe(1);
+    const tailnet = nativeTvShell("100.101.1.2", async () => reply(true), { onLan: () => home++ });
+    await tailnet("echo");
+    expect(home).toBe(1);
+  });
 });
 
 describe("waking the TV (Wake-on-LAN)", () => {
@@ -435,8 +449,8 @@ describe("waking the TV (Wake-on-LAN)", () => {
 });
 
 describe("send this to the TV (cast)", () => {
-  /** A TV whose YouTube session reports `positionMs` (advancing) once it's opened. */
-  function youtubeTv(positionMs: number) {
+  /** A TV whose YouTube session reports `positionMs` (advancing by `step`) once opened. */
+  function youtubeTv(positionMs: number, step = 2500) {
     const sent: string[] = [];
     let reads = 0;
     const shell = async (command: string): Promise<ShellReply> => {
@@ -453,7 +467,8 @@ describe("send this to the TV (cast)", () => {
         reads++;
         return {
           ok: true,
-          output: `package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=${positionMs + reads * 2500}, buffered`,
+          // It reports its state once the link is sent.
+          output: `package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=${positionMs + reads * step}, buffered position=0, speed=1.0, updated=${reads > 1 ? 1 : 0}, actions=379`,
           exitCode: 0,
           summary: "",
         };
@@ -496,15 +511,111 @@ describe("send this to the TV (cast)", () => {
   it("plays a link at its start time and says so", async () => {
     const { shell, sent } = youtubeTv(754_000);
     const r = await runTvControl(shell, "cast", "https://youtu.be/dQw4w9WgXcQ?t=754", "", env);
-    expect(sent[0]).toContain("watch?v=dQw4w9WgXcQ&t=754s");
+    expect(sent.find((c) => c.startsWith("am start"))).toContain("watch?v=dQw4w9WgXcQ&t=754s");
     expect(r).toMatchObject({ ok: true });
     expect(r.summary).toContain("from 12:34");
+  });
+
+  it("counts YouTube as playing though it doesn't report its position while it plays", async () => {
+    // Seen 2026-10-20: YouTube's TV app sat at position=902099 for 95 s while playing.
+    const { shell } = youtubeTv(600_503, 0);
+    const r = await runTvControl(shell, "cast", "https://youtu.be/dQw4w9WgXcQ?t=600", "", env);
+    expect(r).toMatchObject({ ok: true });
+    expect(r.summary).toContain("from 10:00");
+  });
+
+  it("switches a TV in standby on before sending the link", async () => {
+    // Seen 2026-10-20: with Remote start on, "off" is standby with ADB up; the link opened
+    // YouTube on a dark screen ("couldn't confirm it started playing").
+    const sent: string[] = [];
+    let awake = false;
+    const shell = async (command: string): Promise<ShellReply> => {
+      sent.push(command);
+      const reply = (output: string) => ({ ok: true, output, exitCode: 0, summary: "" });
+      if (command === "input keyevent 224") awake = true;
+      if (command.includes("mWakefulness"))
+        return reply(`mWakefulness=${awake ? "Awake" : "Asleep"}`);
+      if (command.includes("mCurrentFocus"))
+        return reply("mCurrentFocus=Window{1 u0 com.google.android.youtube.tv/x}");
+      if (command.includes("media_session") && awake)
+        return reply(
+          `package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=0, buffered position=0, speed=1.0, updated=${sent.length}, actions=379`,
+        );
+      return reply("");
+    };
+    const r = await runTvControl(shell, "cast", "https://youtu.be/rru2passumI", "", env);
+    expect(r).toMatchObject({ ok: true });
+    expect(sent.indexOf("input keyevent 224")).toBeGreaterThanOrEqual(0);
+    expect(sent.indexOf("input keyevent 224")).toBeLessThan(
+      sent.findIndex((c) => c.startsWith("am start")),
+    );
+  });
+
+  /** A cold YouTube that asks "Who's watching?" and swallows links until OK is pressed. */
+  function pickerTv(oksNeeded: number) {
+    const sent: string[] = [];
+    let oks = 0;
+    let links = 0;
+    const shell = async (command: string): Promise<ShellReply> => {
+      sent.push(command);
+      const reply = (output: string) => ({ ok: true, output, exitCode: 0, summary: "" });
+      if (command.startsWith("am start")) links++;
+      if (command === "input keyevent 23") oks++;
+      if (command.includes("mCurrentFocus"))
+        return reply("mCurrentFocus=Window{1 u0 com.google.android.youtube.tv/x}");
+      if (command.includes("media_session") && oks >= oksNeeded && links >= 2)
+        return reply(
+          "package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=120000, buffered position=0, speed=1.0, updated=5, actions=379",
+        );
+      return reply(""); // pidof: YouTube not running, a cold start
+    };
+    return { shell, sent };
+  }
+
+  it("gets past YouTube's “Who's watching?” with one OK, then sends the link again", async () => {
+    // Seen 2026-10-20: after waking, the picker swallowed the link. The user chose: pick
+    // the highlighted account, as Netflix's profile gate does.
+    const { shell, sent } = pickerTv(1);
+    const r = await runTvControl(shell, "cast", "https://youtu.be/rru2passumI?t=120", "", env);
+    expect(r).toMatchObject({ ok: true });
+    const links = sent.flatMap((c, i) => (c.startsWith("am start") ? [i] : []));
+    expect(links).toHaveLength(2);
+    expect(sent.indexOf("input keyevent 23")).toBeGreaterThan(links[0]!);
+    expect(sent.indexOf("input keyevent 23")).toBeLessThan(links[1]!);
+  });
+
+  it("searches again when the first OK went to “Who's watching?”", async () => {
+    const { shell, sent } = pickerTv(2);
+    const r = await runTvControl(shell, "play", "lofi", "youtube", env);
+    expect(r).toMatchObject({ ok: true });
+    expect(sent.filter((c) => c.startsWith("am start"))).toHaveLength(2);
+  });
+
+  it("doesn't take the last video's leftover session for the new one", async () => {
+    // Seen 2026-10-20: the lofi video's state 3 (position 436, not reported since) was
+    // taken for the shared link playing, so the reply said the TV ignored ?t=120 while it
+    // was at 2:00.
+    let reads = 0;
+    const shell = async (command: string): Promise<ShellReply> => {
+      const reply = (output: string) => ({ ok: true, output, exitCode: 0, summary: "" });
+      if (command.includes("mCurrentFocus"))
+        return reply("mCurrentFocus=Window{1 u0 com.google.android.youtube.tv/x}");
+      if (!command.includes("media_session")) return reply("");
+      const [pos, upd] = ++reads <= 3 ? [436, 100] : [120_393, 200];
+      return reply(
+        `package=com.google.android.youtube.tv\n  state=PlaybackState {state=3, position=${pos}, buffered position=0, speed=1.0, updated=${upd}, actions=379`,
+      );
+    };
+    const r = await runTvControl(shell, "cast", "https://youtu.be/rru2passumI?t=120", "", env);
+    expect(r).toMatchObject({ ok: true });
+    expect(r.summary).toContain("from 2:00");
+    expect(r.summary).not.toContain("not from");
   });
 
   it("says when the TV's YouTube ignored the start time", async () => {
     const { shell } = youtubeTv(0);
     const r = await runTvControl(shell, "cast", "https://youtu.be/dQw4w9WgXcQ?t=754", "", env);
-    expect(r.summary).toContain("from the start");
+    expect(r.summary).toContain("not from 12:34: it didn't take the start time");
   });
 
   it("moves YouTube from the phone at the same point, pausing the phone only after", async () => {
@@ -531,7 +642,7 @@ describe("send this to the TV (cast)", () => {
       },
     });
     expect(r.ok).toBe(true);
-    expect(sent[0]).toContain("watch?v=jfKfPfyJRdk&t=754s");
+    expect(sent.find((c) => c.startsWith("am start"))).toContain("watch?v=jfKfPfyJRdk&t=754s");
     expect(order).toEqual(["find lofi hip hop radio / Lofi Girl", "pause"]);
     expect(r.summary).toContain("Paused it on the phone.");
   });

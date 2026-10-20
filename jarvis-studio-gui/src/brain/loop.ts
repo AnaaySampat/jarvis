@@ -146,6 +146,22 @@ export function answeredPhoneWithoutLooking(userText: string, ranTools: boolean)
   return !ranTools && PHONE_REF_RE.test(userText);
 }
 
+/** A question or request about the TV. Live 2026-10-19 on a fallback model (Groq
+ *  qwen3.8-27b): "what's on my TV right now?" got "there's nothing playing on the TV"
+ *  with no tool call, while the TV wasn't even reachable. */
+const TV_REF_RE = /\b(?:my|the) (?:tv|television)\b/i;
+
+/** "Answered about the TV without looking" — the TV twin of the phone check below. */
+export function answeredTvWithoutLooking(userText: string, ranTools: boolean): boolean {
+  return !ranTools && TV_REF_RE.test(userText);
+}
+
+const TV_CHECK_NOTE =
+  "(Automatic check, not from the user.) The user asked about their TV, but you called no " +
+  "tool in this turn, so your reply didn't come from the TV. Call tv_control now: status for " +
+  "what's playing, look to see the screen, or the action they asked for. Otherwise answer " +
+  "again without stating anything about the TV you haven't read.";
+
 const PHONE_CHECK_NOTE =
   "(Automatic check, not from the user.) The user asked about their phone, but you called " +
   "no tool in this turn, so your reply didn't come from the phone. If the answer depends on " +
@@ -176,6 +192,8 @@ export async function runTurn(
   const userText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   let claimChecked = false;
   let phoneActedAndFailed = false;
+  // tv_control is only on offer with a TV set up; without one there's nothing to look at.
+  const tvOffered = [...tools, ...(fullTools ?? [])].some((t) => t.name === "tv_control");
   // Loaded groups widen the palette for the rest of the turn. A round spent only on
   // load_tools doesn't count against the cap, once.
   const loaded = new Set<string>();
@@ -194,7 +212,9 @@ export async function runTurn(
           ? CLAIM_CHECK_NOTE
           : answeredPhoneWithoutLooking(userText, ranTools)
             ? PHONE_CHECK_NOTE
-            : null;
+            : tvOffered && answeredTvWithoutLooking(userText, ranTools)
+              ? TV_CHECK_NOTE
+              : null;
       if (note) {
         claimChecked = true;
         console.warn("[turn] reply made no tool call where one was due — rechecking");
@@ -232,6 +252,11 @@ export async function runTurn(
         result = await dispatch(toSpec(call.name, call.args), deps);
         toolResults.push(result);
         if (isPhoneTask && actedAndFailed(result)) phoneActedAndFailed = true;
+        // The user pressed STOP: the turn ends on the task's own words. Another round
+        // called it "I wasn't able to complete that task" and offered a retry (TV task,
+        // live 2026-10-20).
+        if (result.error === "cancelled")
+          return { reply: result.summary, toolResults, calledTools };
       }
       convo.push({
         role: "tool",

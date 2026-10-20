@@ -144,14 +144,19 @@ internal class TvAdb(context: Context) {
         fun describe(e: Exception?, target: Pair<String, Int>): String {
             val where = "${target.first}:${target.second}"
             val msg = e?.message.orEmpty()
+            // dadb wraps a failed connect in AdbConnectException("Failed to connect to …") with
+            // the socket's exception as its cause. Judged by the wrapper alone, a switched-off TV
+            // read "The TV connection failed", which tv.ts doesn't take for unreachable: no
+            // Wake-on-LAN, no second address, no two-router hint (seen live 2026-10-19).
+            val chain = generateSequence<Throwable>(e) { it.cause }.take(5).toList()
             return when {
                 msg.contains("unauthorized", true) || msg.contains("authentication", true) ->
                     "The TV didn't allow this phone. Accept \"Allow USB debugging?\" on the TV " +
                         "(tick Always allow), then try again."
-                e is SocketTimeoutException ->
+                chain.any { it is SocketTimeoutException } ->
                     "The TV at $where didn't answer in time. If it's showing \"Allow USB debugging?\", " +
                         "accept it (tick Always allow) and try again."
-                e is ConnectException || e is NoRouteToHostException || e is UnknownHostException ->
+                chain.any { it is ConnectException || it is NoRouteToHostException || it is UnknownHostException } ->
                     "I can't reach the TV at $where. Check it's on, on the same Wi-Fi as this phone, " +
                         "with USB debugging on."
                 else -> "The TV connection failed: ${msg.ifEmpty { e?.javaClass?.simpleName ?: "unknown error" }}"

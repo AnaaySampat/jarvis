@@ -49,6 +49,26 @@ describe("nightly memory digest", () => {
     expect([res.read, calls]).toEqual([0, 0]);
   });
 
+  it("never brings back a fact the user had forgotten, however it's voiced", async () => {
+    // Seen live 2026-10-20: forgotten on the PC, back the next morning from the digest.
+    await memory.remember("The user's favourite colour is teal.");
+    await memory.forget("teal");
+    await memory.appendTurn({ role: "user", content: "remember that my favourite colour is teal" });
+    const asked: string[] = [];
+    const res = await runDigest(
+      memory,
+      async (_s, user) => {
+        asked.push(user);
+        return '{"facts": ["My favourite colour is teal.", "My name is Sam"]}';
+      },
+      night(25),
+    );
+    // Not "first under the heading": beforeEach's own forgets can share its millisecond.
+    expect(asked[0]).toContain("FORGOTTEN (the user deleted these; never add them back):\n");
+    expect(asked[0]).toContain("\n- the user's favourite colour is teal\n");
+    expect(res.added).toEqual(["My name is Sam"]);
+  });
+
   it("off means off, and never before 3 am", () => {
     expect(digestDue(new Date(2026, 9, 24, 2, 0))).toBe(false);
     setDigestEnabled(false);

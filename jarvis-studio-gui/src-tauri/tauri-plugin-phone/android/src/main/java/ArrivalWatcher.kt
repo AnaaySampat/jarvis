@@ -31,7 +31,10 @@ import java.util.concurrent.TimeUnit
  * Arriving = a home Wi-Fi network becoming available after the phone was last seen
  * away. A PendingIntent network callback catches the first part while JARVIS is closed;
  * a 15-minute sampler ([ArrivalSampleWorker]) records home/away, so a Wi-Fi blip at
- * home never counts as arriving. Arriving posts the same notification as a timed
+ * home never counts as arriving. The callback is one-shot (see [listen]), so the
+ * sampler arms it again whenever it finds the phone away, and counts home-after-away
+ * as an arrival itself when the callback was spent elsewhere (on another Wi-Fi on the
+ * way). Arriving posts the same notification as a timed
  * routine (RoutineAlarms.post): nothing runs until it's tapped, and a routine runs at
  * most once a day.
  */
@@ -59,6 +62,10 @@ object ArrivalWatcher {
     fun isArrival(fp: String, homes: Set<String>, last: String): Boolean =
         fp.isNotEmpty() && fp in homes && last == "away"
 
+    /** Seeing Wi-Fi [fp] ("" = none): the new last sample, and whether it's arriving. */
+    fun sighting(fp: String, homes: Set<String>, last: String): Pair<String, Boolean> =
+        (if (fp.isNotEmpty() && fp in homes) "home" else "away") to isArrival(fp, homes, last)
+
     // ── Android ──
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -78,13 +85,19 @@ object ArrivalWatcher {
         return fingerprint(gw, v4.address.hostAddress ?: "", v4.prefixLength)
     }
 
-    /** The Wi-Fi network the phone is on now, by fingerprint; "" when not on Wi-Fi. */
+    /** The Wi-Fi network the phone is on now, by fingerprint; "" when not on Wi-Fi.
+     *  Not `activeNetwork`: with a VPN up (Tailscale, which PC pairing uses) that is the
+     *  VPN, whose link has no home gateway — on 2026-10-19 marking home said "The phone
+     *  isn't on Wi-Fi" while it was. */
     fun currentWifi(ctx: Context): String {
         val cm = cm(ctx)
-        val net = cm.activeNetwork ?: return ""
-        val caps = cm.getNetworkCapabilities(net) ?: return ""
-        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return ""
-        return fingerprintOf(cm.getLinkProperties(net))
+        @Suppress("DEPRECATION") // allNetworks: the one call that lists networks without a callback
+        val wifi = cm.allNetworks.firstOrNull { net ->
+            val caps = cm.getNetworkCapabilities(net)
+            caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+        } ?: return ""
+        return fingerprintOf(cm.getLinkProperties(wifi))
     }
 
     /** Remember the current Wi-Fi as home. (ok, summary, homes, here) */
@@ -116,28 +129,40 @@ object ArrivalWatcher {
     /** Register (or drop) the network callback and the sampler for the stored list —
      *  also after a reboot, which drops PendingIntent callbacks. */
     fun rearm(ctx: Context) {
-        val pi = callbackIntent(ctx)
         val wm = WorkManager.getInstance(ctx)
-        try {
-            cm(ctx).unregisterNetworkCallback(pi)
-        } catch (_: Exception) {
-            // not registered yet
-        }
         if (routines(ctx).isEmpty()) {
+            unlisten(ctx)
             wm.cancelUniqueWork(WORK)
             return
         }
-        try {
-            cm(ctx).registerNetworkCallback(
-                NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), pi,
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "network callback refused: ${e.message}")
-        }
+        listen(ctx)
         wm.enqueueUniquePeriodicWork(
             WORK, ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<ArrivalSampleWorker>(15, TimeUnit.MINUTES).build(),
         )
+    }
+
+    /** Arm the network callback. It fires once — at once, for a Wi-Fi network already
+     *  up — and the system drops it ~5 s after delivering it (2026-10-20: REGISTER
+     *  11:22:41.865, RELEASE 11:22:46.915, so the real arrival found nothing listening). */
+    private fun listen(ctx: Context) {
+        unlisten(ctx)
+        try {
+            cm(ctx).registerNetworkCallback(
+                NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(),
+                callbackIntent(ctx),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "network callback refused: ${e.message}")
+        }
+    }
+
+    private fun unlisten(ctx: Context) {
+        try {
+            cm(ctx).unregisterNetworkCallback(callbackIntent(ctx))
+        } catch (_: Exception) {
+            // not registered
+        }
     }
 
     private fun callbackIntent(ctx: Context): PendingIntent {
@@ -147,22 +172,26 @@ object ArrivalWatcher {
         return PendingIntent.getBroadcast(ctx, 7211, Intent(ctx, ArrivalReceiver::class.java), flags)
     }
 
-    /** The sampler: home or away right now. */
+    /** The sampler: home or away right now; away arms the callback for coming home. */
     fun sample(ctx: Context) {
-        val here = currentWifi(ctx)
-        prefs(ctx).edit().putString("last", if (here.isNotEmpty() && here in homes(ctx)) "home" else "away").apply()
+        if (seen(ctx, currentWifi(ctx)) == "away" && routines(ctx).isNotEmpty()) listen(ctx)
     }
 
     /** A Wi-Fi network became available. */
     fun onNetwork(ctx: Context, network: Network?) {
         val fp = fingerprintOf(network?.let { cm(ctx).getLinkProperties(it) })
-        if (fp.isEmpty()) return
-        val homes = homes(ctx)
-        val last = prefs(ctx).getString("last", "") ?: ""
-        prefs(ctx).edit().putString("last", if (fp in homes) "home" else "away").apply()
-        if (!isArrival(fp, homes, last)) return
-        val today = RoutineAlarms.isoDate(System.currentTimeMillis(), TimeZone.getDefault())
-        for (name in routines(ctx)) RoutineAlarms.post(ctx, name, today, "You're home: $name")
+        if (fp.isNotEmpty()) seen(ctx, fp)
+    }
+
+    /** Record a sighting and post the routines on arriving. Returns the new last sample. */
+    private fun seen(ctx: Context, fp: String): String {
+        val (now, arriving) = sighting(fp, homes(ctx), prefs(ctx).getString("last", "") ?: "")
+        prefs(ctx).edit().putString("last", now).apply()
+        if (arriving) {
+            val today = RoutineAlarms.isoDate(System.currentTimeMillis(), TimeZone.getDefault())
+            for (name in routines(ctx)) RoutineAlarms.post(ctx, name, today, "You're home: $name")
+        }
+        return now
     }
 }
 

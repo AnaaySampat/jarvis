@@ -383,5 +383,49 @@
         "action": "add"
       }
     }
+  },
+  {
+    "name": "a question about the TV answered without looking is rechecked, then checked for real",
+    "source": "live 2026-10-19 on SM-E156B (Groq qwen3.8-27b): 'what's on my TV right now?' got 'nothing playing on the TV' with no tool call; the TV was unreachable",
+    "context": {
+      "tvPaired": true
+    },
+    "user": "what's on my TV right now?",
+    "model": [
+      {
+        "text": "Right now there's nothing playing on the TV — the activity notification area is empty. Looks like whatever was on previously has stopped. Want me to put something on it?"
+      },
+      {
+        "toolCalls": [
+          {
+            "name": "tv_control",
+            "args": {
+              "action": "status"
+            }
+          }
+        ]
+      },
+      {
+        "text": "I can't reach the TV right now — it may be switched off."
+      }
+    ],
+    "results": [
+      {
+        "ok": false,
+        "summary": "I can't reach the TV at 192.168.1.50:5555."
+      }
+    ],
+    "expect": {
+      "specs": [
+        {
+          "type": "tv_control",
+          "do": "status"
+        }
+      ],
+      "reply": "can't reach"
+    },
+    "live": {
+      "firstTool": "tv_control"
+    }
   }
 ]
