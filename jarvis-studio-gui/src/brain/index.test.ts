@@ -81,3 +81,19 @@ describe("askFromPc (a command the paired PC sent)", () => {
     expect((await brain.askFromPc("timer and flashlight")).ok).toBe(false);
   });
 });
+
+describe("askFromWhatsApp (a listed contact, answered on the phone)", () => {
+  it("adds lookups to the PC's tools and names the sender", async () => {
+    runTurn.mockClear();
+    const memory = new PersistentStore();
+    const brain = createBrain({ getConfig: () => cfg, memory });
+    await brain.askFromWhatsApp("what's the weather in Pune?", "Asha");
+    const [messages, , deps] = runTurn.mock.calls[0]!;
+    expect(deps!.onlyTools!.has("web_search")).toBe(true);
+    expect(deps!.onlyTools!.has("set_alarm")).toBe(true);
+    expect(deps!.onlyTools!.has("send_message")).toBe(false);
+    expect(messages[0]!.content).toMatch(/THIS REQUEST CAME ON WHATSAPP\nFrom "Asha"/);
+    const [user] = await memory.recentTurns();
+    expect(user).toMatchObject({ display: "💬 WhatsApp from Asha: what's the weather in Pune?" });
+  });
+});

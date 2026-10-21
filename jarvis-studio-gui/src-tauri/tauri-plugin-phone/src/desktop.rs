@@ -219,6 +219,15 @@ impl<R: Runtime> Phone<R> {
     pub fn home_network(&self, _p: HomeNetworkRequest) -> crate::Result<serde_json::Value> {
         Ok(serde_json::json!({ "ok": false, "summary": "Home Wi-Fi is only known on Android.", "homes": 0, "here": false }))
     }
+    pub fn whatsapp_config(&self, _p: WhatsAppConfigRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "WhatsApp on the phone is only available on Android.", "access": false }))
+    }
+    pub fn poll_whatsapp(&self, _p: WhatsAppPollRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "boot": 0, "seq": 0, "access": false, "commands": [] }))
+    }
+    pub fn whatsapp_reply(&self, _p: WhatsAppReplyRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "ok": false, "summary": "WhatsApp on the phone is only available on Android." }))
+    }
     pub fn poll_share(&self) -> crate::Result<ShareResponse> {
         Ok(ShareResponse { seq: 0, text: String::new(), boot: 0 })
     }

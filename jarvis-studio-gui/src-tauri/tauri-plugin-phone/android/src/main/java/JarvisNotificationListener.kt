@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * reply button — the one way a third-party app can answer a WhatsApp/Telegram message
  * with nothing opening on screen. Enabled by the user in Settings ▸ Notification
  * access (a restricted setting for sideloaded installs). Never posts or dismisses.
+ * WhatsAppInbox reads the WhatsApp ones as they arrive, for commands to JARVIS.
  */
 class JarvisNotificationListener : NotificationListenerService() {
 
@@ -55,6 +56,12 @@ class JarvisNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn?.let { changedAt[it.key] = SystemClock.elapsedRealtime() }
+        // A WhatsApp message for JARVIS from a listed contact (Settings ▸ PC & WhatsApp).
+        try {
+            sbn?.let { WhatsAppInbox.offer(this, it) }
+        } catch (e: Exception) {
+            android.util.Log.w("JarvisNotifications", "WhatsApp check failed: ${e.message}")
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {

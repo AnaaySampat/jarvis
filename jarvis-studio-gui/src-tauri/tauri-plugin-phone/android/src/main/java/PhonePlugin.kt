@@ -96,6 +96,23 @@ internal class TypeTextArgs {
 }
 
 @InvokeArg
+internal class WhatsAppConfigArgs {
+    var enabled: Boolean = false
+    var allowed: String = ""
+}
+
+@InvokeArg
+internal class WhatsAppPollArgs {
+    var since: Int = 0
+}
+
+@InvokeArg
+internal class WhatsAppReplyArgs {
+    var seq: Int = 0
+    var text: String = ""
+}
+
+@InvokeArg
 internal class ScrollArgs {
     var direction: String = "down"
 }
@@ -2204,6 +2221,39 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun mediaNow(invoke: Invoke) {
         autonomyScope.launch { invoke.resolve(DirectActions.mediaNow(activity)) }
+    }
+
+    /** WhatsApp on the phone (WhatsAppInbox): Settings ▸ PC & WhatsApp keeps it in step. */
+    @Command
+    fun whatsappConfig(invoke: Invoke) {
+        val args = invoke.parseArgs(WhatsAppConfigArgs::class.java)
+        WhatsAppInbox.configure(activity, args.enabled, args.allowed)
+        invoke.resolve(result(true, if (args.enabled) "WhatsApp on." else "WhatsApp off.").apply {
+            put("access", JarvisNotificationListener.enabled(activity))
+        })
+    }
+
+    /** WhatsApp commands after `since` (WhatsAppInbox), and whether notification access
+     *  is on (without it none arrive). */
+    @Command
+    fun pollWhatsapp(invoke: Invoke) {
+        val args = invoke.parseArgs(WhatsAppPollArgs::class.java)
+        invoke.resolve(JSObject().apply {
+            put("boot", WhatsAppInbox.boot)
+            put("seq", WhatsAppInbox.seq)
+            put("access", JarvisNotificationListener.enabled(activity))
+            put("commands", WhatsAppInbox.toJson(WhatsAppInbox.poll(args.since)))
+        })
+    }
+
+    /** Answer one WhatsApp command in its chat, through WhatsApp's notification. */
+    @Command
+    fun whatsappReply(invoke: Invoke) {
+        val args = invoke.parseArgs(WhatsAppReplyArgs::class.java)
+        autonomyScope.launch {
+            val (ok, summary) = WhatsAppInbox.reply(args.seq, args.text)
+            invoke.resolve(result(ok, summary))
+        }
     }
 
     /** The last text shared to JARVIS (ShareInbox); `seq` bumps once per share. */

@@ -63,6 +63,9 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-arrival-sync`
 - `allow-home-network`
 - `allow-poll-share`
+- `allow-whatsapp-config`
+- `allow-poll-whatsapp`
+- `allow-whatsapp-reply`
 - `allow-schedule-routines`
 - `allow-poll-routine-tap`
 - `allow-device-action`
@@ -1121,6 +1124,32 @@ Denies the poll_wake_word command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-poll-whatsapp`
+
+</td>
+<td>
+
+Enables the poll_whatsapp command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-poll-whatsapp`
+
+</td>
+<td>
+
+Denies the poll_whatsapp command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-read-clipboard`
 
 </td>
@@ -1712,6 +1741,58 @@ Enables the type_text command without any pre-configured scope.
 <td>
 
 Denies the type_text command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-whatsapp-config`
+
+</td>
+<td>
+
+Enables the whatsapp_config command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-whatsapp-config`
+
+</td>
+<td>
+
+Denies the whatsapp_config command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-whatsapp-reply`
+
+</td>
+<td>
+
+Enables the whatsapp_reply command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-whatsapp-reply`
+
+</td>
+<td>
+
+Denies the whatsapp_reply command without any pre-configured scope.
 
 </td>
 </tr>

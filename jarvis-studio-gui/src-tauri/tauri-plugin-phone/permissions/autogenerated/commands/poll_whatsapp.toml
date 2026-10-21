@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-poll-whatsapp"
+description = "Enables the poll_whatsapp command without any pre-configured scope."
+commands.allow = ["poll_whatsapp"]
+
+[[permission]]
+identifier = "deny-poll-whatsapp"
+description = "Denies the poll_whatsapp command without any pre-configured scope."
+commands.deny = ["poll_whatsapp"]

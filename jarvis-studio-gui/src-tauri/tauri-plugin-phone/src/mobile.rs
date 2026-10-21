@@ -98,6 +98,9 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(arrival_sync(payload: ArrivalSyncRequest) -> serde_json::Value, "arrivalSync");
     mobile_command!(home_network(payload: HomeNetworkRequest) -> serde_json::Value, "homeNetwork");
     mobile_command!(poll_share() -> ShareResponse, "pollShare");
+    mobile_command!(whatsapp_config(payload: WhatsAppConfigRequest) -> serde_json::Value, "whatsappConfig");
+    mobile_command!(poll_whatsapp(payload: WhatsAppPollRequest) -> serde_json::Value, "pollWhatsapp");
+    mobile_command!(whatsapp_reply(payload: WhatsAppReplyRequest) -> serde_json::Value, "whatsappReply");
     mobile_command!(schedule_routines(payload: ScheduleRoutinesRequest) -> ScheduleRoutinesResponse, "scheduleRoutines");
     mobile_command!(poll_routine_tap() -> RoutineTapResponse, "pollRoutineTap");
     mobile_command!(device_action(payload: DeviceActionRequest) -> ActionResponse, "deviceAction");

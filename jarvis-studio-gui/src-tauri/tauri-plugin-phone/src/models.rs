@@ -413,6 +413,27 @@ pub struct WolSendRequest {
     pub near: String,
 }
 
+/// WhatsApp on the phone (WhatsAppInbox.kt): on/off and the contacts that may command
+/// JARVIS (names or numbers, comma- or line-separated).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WhatsAppConfigRequest {
+    pub enabled: bool,
+    pub allowed: String,
+}
+
+/// WhatsApp commands queued after `since` (WhatsAppInbox.kt).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WhatsAppPollRequest {
+    pub since: i32,
+}
+
+/// The answer to WhatsApp command `seq`, sent through WhatsApp's notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WhatsAppReplyRequest {
+    pub seq: i32,
+    pub text: String,
+}
+
 /// Every timed routine, as JSON: `[{name, hour, minute, days: [0-6, 0 = Sunday], lastRun}]`
 /// (see RoutineAlarms.kt). Replaces whatever was scheduled before.
 #[derive(Debug, Clone, Serialize, Deserialize)]

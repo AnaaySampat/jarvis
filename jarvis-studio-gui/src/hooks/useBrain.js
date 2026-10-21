@@ -19,12 +19,16 @@ import {
   homeNetwork,
   pollRoutineTap,
   pollShare,
+  pollWhatsapp,
+  whatsappConfig,
+  whatsappReply,
   wolSend,
 } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
 import { applyRemote, localChanges } from "../brain/memory/sync";
 import { digestDue, runDigest } from "../brain/memory/digest";
 import { configReady } from "../brain/config";
+import { WA_ASLEEP_REPLY, whatsappDecision } from "../brain/whatsapp";
 import { makeProvider } from "../brain/providers";
 import { LocationService } from "../brain/tools/location";
 import { getTodaySchedule, onScheduleChange } from "../brain/schedule/store";
@@ -281,6 +285,9 @@ async function shrinkToJpeg(file, maxSide = 1536) {
 const uid = () => `${Date.now()}_${Math.floor(performance.now() * 1000) % 100000}`;
 // How long a command from the PC waits for a turn in progress (the PC gives up at 45 s).
 const PC_COMMAND_WAIT_MS = 30_000;
+// WhatsApp on the phone (brain/whatsapp.ts): how often JS looks for commands.
+const WA_POLL_MS = 1_500;
+const WA_MODES = new Set(["off", "pc_off", "always"]);
 
 // True for a same-LAN address (RFC-1918 private range or loopback). Tailscale's
 // 100.64.0.0/10 CGNAT range, public IPs and hostnames all read as "remote" — used to
@@ -690,6 +697,8 @@ export function useBrain() {
 
   const [pcConfig, setPcConfig] = useState(loadPcConfig);
   const [pcState, setPcState] = useState("idle");
+  // WhatsApp on the phone: notification access (null until the native side says).
+  const [waAccess, setWaAccess] = useState(null);
   const pcRef = useRef(null);
   // The one-shot pairing PIN. Kept in a ref (never persisted to storage) and fed to
   // the RemotePC below; it's only needed for the first pairing.claim, after which
@@ -1442,8 +1451,11 @@ export function useBrain() {
       allowed_dirs: [],
       calendar_sync: stored.calendarSync !== false,
       pc_commands: stored.pcCommands !== false,
+      wa_mode: WA_MODES.has(stored.waMode) ? stored.waMode : "off",
+      wa_allowed: typeof stored.waAllowed === "string" ? stored.waAllowed : "",
+      wa_access: waAccess,
     };
-  }, [hasKey, secretsReady, stored, availableModels, routing]);
+  }, [hasKey, secretsReady, stored, availableModels, routing, waAccess]);
 
   // While the Remote Desktop live view is open, every command (typed OR spoken)
   // is meant for the PC on screen — so it goes STRAIGHT to the desktop's own
@@ -1602,6 +1614,96 @@ export function useBrain() {
   useEffect(() => {
     pcCommandRef.current = runPcCommand;
   }, [runPcCommand]);
+
+  // ── WhatsApp on the phone (WhatsAppInbox.kt) ─────────────────────────────────
+  // Commands from the contacts listed in Settings ▸ PC & WhatsApp, read off WhatsApp's
+  // notifications. "When my PC is offline" leaves them to the PC while the link to it
+  // is up (its own WhatsApp channel answers there). Each runs as a turn limited to
+  // FROM_WHATSAPP_TOOLS, shown in the chat but not spoken, and the answer goes back
+  // through the notification's reply button.
+  const waMode = WA_MODES.has(stored.waMode) ? stored.waMode : "off";
+  const waAllowed = typeof stored.waAllowed === "string" ? stored.waAllowed : "";
+  useEffect(() => {
+    if (!inTauri()) return;
+    void whatsappConfig(waMode !== "off", waAllowed).then((r) => {
+      if (r) setWaAccess(Boolean(r.access));
+    });
+  }, [waMode, waAllowed]);
+  const pcStateRef = useRef(pcState);
+  useEffect(() => {
+    pcStateRef.current = pcState;
+  }, [pcState]);
+  const waModeRef = useRef(waMode);
+  useEffect(() => {
+    waModeRef.current = waMode;
+  }, [waMode]);
+  const runWhatsApp = useCallback(
+    async (c) => {
+      const decision = whatsappDecision(waModeRef.current, pcStateRef.current, c.at, Date.now());
+      if (decision !== "run") {
+        // "" leaves it for the PC's channel, which answers while the link is up.
+        await whatsappReply(c.seq, decision === "stale" ? WA_ASLEEP_REPLY : "");
+        return;
+      }
+      const until = Date.now() + PC_COMMAND_WAIT_MS;
+      while (busyRef.current && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (busyRef.current || !brainRef.current) {
+        await whatsappReply(c.seq, "I'm busy with something else right now — try again in a minute.");
+        return;
+      }
+      busyRef.current = true;
+      setStatus("thinking");
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: `💬 WhatsApp from ${c.sender}: ${c.text}`, id: uid() },
+      ]);
+      let reply = "";
+      try {
+        const res = await brainRef.current.askFromWhatsApp(c.text, c.sender);
+        reply = res.reply;
+      } catch (err) {
+        reply = `That failed on the phone: ${err?.message || err}`;
+      } finally {
+        busyRef.current = false;
+        setStatus("idle");
+      }
+      setMessages((prev) => [
+        ...prev,
+        { role: "jarvis", text: reply, actions: drainCards(), finalized: true, id: uid() },
+      ]);
+      const sent = await whatsappReply(c.seq, reply);
+      if (!sent.ok) pushWarning(`Couldn't answer ${c.sender} on WhatsApp: ${sent.summary}`);
+    },
+    [drainCards, pushWarning],
+  );
+  // Which commands are handled: the native queue restarts its seq with the process.
+  const waCursorRef = useRef({ boot: 0, seq: 0 });
+  useEffect(() => {
+    if (waMode === "off" || !inTauri()) return undefined;
+    let running = false;
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const res = await pollWhatsapp(0);
+        if (!res) return;
+        setWaAccess(Boolean(res.access));
+        if (res.boot !== waCursorRef.current.boot) waCursorRef.current = { boot: res.boot, seq: 0 };
+        for (const c of res.commands || []) {
+          if (c.seq <= waCursorRef.current.seq) continue;
+          waCursorRef.current = { ...waCursorRef.current, seq: c.seq };
+          await runWhatsApp(c);
+        }
+      } finally {
+        running = false;
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), WA_POLL_MS);
+    return () => clearInterval(id);
+  }, [waMode, runWhatsApp]);
 
   // A photo for JARVIS to look at, from the chat's attach button.
   const sendUpload = useCallback(
@@ -1772,6 +1874,8 @@ export function useBrain() {
           next.conversationMode = cfg.conversation_mode;
         if (typeof cfg.calendar_sync === "boolean") next.calendarSync = cfg.calendar_sync;
         if (typeof cfg.pc_commands === "boolean") next.pcCommands = cfg.pc_commands;
+        if (WA_MODES.has(cfg.wa_mode)) next.waMode = cfg.wa_mode;
+        if (typeof cfg.wa_allowed === "string") next.waAllowed = cfg.wa_allowed.slice(0, 1_000);
         if (typeof cfg.wake_word === "boolean") next.wakeWord = cfg.wake_word;
         if (typeof cfg.auto_switch_models === "boolean")
           next.autoSwitchModels = cfg.auto_switch_models;

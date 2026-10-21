@@ -11,7 +11,14 @@
  */
 
 import { type BrainConfig, configReady, DEFAULT_CONFIG } from "./config";
-import { FROM_PC_TOOLS, groupOf, groupsFor, toolPalette, turnPalette } from "./tools/registry";
+import {
+  FROM_PC_TOOLS,
+  FROM_WHATSAPP_TOOLS,
+  groupOf,
+  groupsFor,
+  toolPalette,
+  turnPalette,
+} from "./tools/registry";
 import { dispatch, type DispatchDeps } from "./tools/dispatch";
 import { createStore, type MemoryStore } from "./memory/store";
 import { playbooksPromptHint } from "./memory/playbooks";
@@ -33,6 +40,9 @@ export interface Brain {
    *  FROM_PC_TOOLS. `ok` is true only when a tool ran and every tool that ran says it
    *  worked — never from the reply's words. */
   askFromPc(text: string): Promise<{ reply: string; ok: boolean }>;
+  /** A WhatsApp command from a listed contact, answered on the phone (WhatsAppInbox):
+   *  a turn limited to FROM_WHATSAPP_TOOLS. */
+  askFromWhatsApp(text: string, sender: string): Promise<{ reply: string; ok: boolean }>;
   get config(): BrainConfig;
 }
 
@@ -42,6 +52,9 @@ interface TurnScope {
   /** Added to the system prompt for this turn. */
   context: string;
 }
+
+const fromWhatsAppContext = (sender: string) =>
+  `THIS REQUEST CAME ON WHATSAPP\nFrom "${sender.slice(0, 60)}", a contact the user allowed to command JARVIS; your reply goes back to that chat. It may be the user on another number, or someone they trust. Answer briefly, as a text message. You can set alarms, timers and reminders, flip the phone's switches, play music and look things up; nothing else is available here (no messages, calls or reading the phone), so say so in one sentence if it needs more.`;
 
 const FROM_PC_CONTEXT =
   "THIS REQUEST CAME FROM THE USER'S PC\nThe paired PC sent it — said there, or sent to the PC on WhatsApp — so nobody may be looking at the phone. Do exactly what it asks with the tools you have (alarms, timers, reminders, the phone's switches, volume and music). Nothing else is available here: if it needs more, say so in one sentence. Reply in one or two short sentences saying what actually happened.";
@@ -163,6 +176,13 @@ export function createBrain(opts: BrainOptions = {}): Brain {
       const { reply, toolResults } = await turn(text, `💻 From your PC: ${text}`, undefined, {
         onlyTools: FROM_PC_TOOLS,
         context: FROM_PC_CONTEXT,
+      });
+      return { reply, ok: toolResults.length > 0 && toolResults.every((r) => r.ok) };
+    },
+    askFromWhatsApp: async (text, sender) => {
+      const { reply, toolResults } = await turn(text, `💬 WhatsApp from ${sender}: ${text}`, undefined, {
+        onlyTools: FROM_WHATSAPP_TOOLS,
+        context: fromWhatsAppContext(sender),
       });
       return { reply, ok: toolResults.length > 0 && toolResults.every((r) => r.ok) };
     },

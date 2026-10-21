@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import { IS_MOBILE } from "../hooks/useAssistant";
-import { getGrantedFolder, pickGrantedFolder, requestCalendarPermission } from "../brain/platform";
+import {
+  getGrantedFolder,
+  pickGrantedFolder,
+  requestCalendarPermission,
+  requestNotificationAccess,
+} from "../brain/platform";
 import { modelClassFor } from "../brain/modelPolicy";
 import * as quota from "../brain/quota";
 import Icon from "./Icon";
@@ -360,6 +365,8 @@ export default function Settings({
   const [sysAlerts, setSysAlerts] = useState(!!sysInfo.system_alerts);
   const [calendarSync, setCalendarSync] = useState(sysInfo.calendar_sync !== false);
   const [pcCommands, setPcCommands] = useState(sysInfo.pc_commands !== false);
+  const [waMode, setWaMode] = useState(sysInfo.wa_mode || "off");
+  const [waAllowed, setWaAllowed] = useState(sysInfo.wa_allowed || "");
   const [autopilotModel, setAutopilotModel] = useState(sysInfo.autopilot_model ?? "");
   const [autopilotThinking, setAutopilotThinking] = useState(
     (sysInfo.autopilot_thinking ?? -1) === 0 ? "off" : "dynamic",
@@ -407,7 +414,11 @@ export default function Settings({
     };
     cfg.auto_switch_models = autoSwitch;
     if (IS_MOBILE) cfg.wake_word = wakeWordOn;
-    if (IS_MOBILE) cfg.pc_commands = pcCommands;
+    if (IS_MOBILE) {
+      cfg.pc_commands = pcCommands;
+      cfg.wa_mode = waMode;
+      cfg.wa_allowed = waAllowed;
+    }
     // Offline-only fields — sent just for the offline edition so switching modes
     // doesn't trigger needless model re-discovery.
     if (providerMode === "offline") {
@@ -1064,6 +1075,64 @@ export default function Settings({
     </Group>
   );
 
+  // WhatsApp on this phone (WhatsAppInbox.kt): answers listed contacts through
+  // WhatsApp's own notifications, e.g. while the PC is off.
+  const whatsappGroup = (
+    <Group title="WhatsApp on this phone">
+      <Field
+        label="Answer WhatsApp here"
+        hint="Messages that start with “Jarvis” from the contacts below get an answer through WhatsApp's notification, with nothing opening on screen. With your PC's WhatsApp on too, “when my PC is offline” lets the PC answer while this phone is connected to it."
+      >
+        <select className="sp-input" value={waMode} onChange={(e) => setWaMode(e.target.value)}>
+          <option value="off">Off</option>
+          <option value="pc_off">When my PC is offline</option>
+          <option value="always">Always</option>
+        </select>
+      </Field>
+      {waMode !== "off" && (
+        <>
+          <Field
+            label="Who may command JARVIS"
+            hint="Contact names exactly as saved, or numbers, separated by commas. Groups and everyone else are ignored."
+          >
+            <textarea
+              className="sp-input"
+              rows={2}
+              value={waAllowed}
+              placeholder="My work number, +91 98765 43210"
+              onChange={(e) => setWaAllowed(e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+          {sysInfo.wa_access === false && (
+            <div className="sp-field">
+              <Warn>JARVIS needs notification access to see WhatsApp messages.</Warn>
+              <button
+                type="button"
+                className="sp-btn"
+                onClick={() => void requestNotificationAccess()}
+              >
+                Turn on notification access
+              </button>
+            </div>
+          )}
+          <div className="sp-field">
+            <More label="Talking to JARVIS from your own WhatsApp">
+              WhatsApp never notifies you about your own messages, so your “Message yourself”
+              chat can&apos;t reach JARVIS on this phone (the PC&apos;s linked WhatsApp can). To
+              chat with it here, give JARVIS its own number — WhatsApp Business with a second
+              number on this phone works — and list your main number above. JARVIS answers only
+              while Android lets it run: when it has been in the background a while, a “tap to
+              run” notification appears instead, and opening JARVIS answers it. It can set
+              alarms, timers and reminders, flip the phone&apos;s switches, play music and look
+              things up — it never messages anyone else or reads your phone.
+            </More>
+          </div>
+        </>
+      )}
+    </Group>
+  );
+
   const calendarPage = (
     <Group>
       <Toggle
@@ -1288,9 +1357,14 @@ export default function Settings({
         id: "linked",
         title: "PC & WhatsApp",
         icon: "chat",
-        value: pcCommands ? "PC can ask" : "Off",
-        tone: pcCommands ? "on" : "off",
-        body: linkedPage,
+        value: waMode !== "off" ? "WhatsApp on" : pcCommands ? "PC can ask" : "Off",
+        tone: pcCommands || waMode !== "off" ? "on" : "off",
+        body: (
+          <>
+            {linkedPage}
+            {whatsappGroup}
+          </>
+        ),
       },
       {
         id: "files",

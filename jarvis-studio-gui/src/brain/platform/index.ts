@@ -304,6 +304,55 @@ export function pollShare(): Promise<{ seq: number; text: string; boot: number }
   return phoneJson("poll_share", {});
 }
 
+// ── WhatsApp on the phone (WhatsAppInbox.kt) ──
+// Commands from the contacts the user listed, read off WhatsApp's notifications; the
+// answer goes back through the notification's reply button. Polled (§5), never pushed.
+
+export interface WhatsAppCommand {
+  seq: number;
+  sender: string;
+  text: string;
+  /** When it was sent (epoch ms). */
+  at: number;
+  app: string;
+}
+
+export interface WhatsAppPoll {
+  boot: number;
+  seq: number;
+  /** Notification access is on (without it no command arrives). */
+  access: boolean;
+  commands: WhatsAppCommand[];
+}
+
+/** Turn WhatsApp on the phone on or off, with the contacts who may command JARVIS. */
+export function whatsappConfig(
+  enabled: boolean,
+  allowed: string,
+): Promise<{ ok?: boolean; access?: boolean } | null> {
+  return phoneJson("whatsapp_config", { enabled, allowed });
+}
+
+/** Commands queued after `since`. Null off-device. */
+export function pollWhatsapp(since: number): Promise<WhatsAppPoll | null> {
+  return phoneJson("poll_whatsapp", { since });
+}
+
+/** Answer command `seq` in its chat. ok only once WhatsApp took the reply. */
+export async function whatsappReply(seq: number, text: string): Promise<ToolResult> {
+  return toResult(await phoneJson<NativeReply>("whatsapp_reply", { seq, text }));
+}
+
+/** Open Android's notification-access screen for JARVIS (no-op when it's on). */
+export async function requestNotificationAccess(): Promise<ToolResult> {
+  return toResult(
+    await phoneJson<NativeReply>("notification_action", {
+      ...NOTIFICATION_KEYS,
+      action: "request_access",
+    }),
+  );
+}
+
 // ── Read-only file access (Storage Access Framework) ──
 // Scoped to ONE user-granted folder tree at a time. The tree URI is persisted here
 // (not natively) so Settings can show/change it and every read_file/list_directory

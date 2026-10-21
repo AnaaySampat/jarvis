@@ -761,6 +761,19 @@ export const FROM_PC_TOOLS: ReadonlySet<string> = new Set([
   "get_weather",
 ]);
 
+/**
+ * What a WhatsApp command on the phone may use (useBrain, WhatsAppInbox.kt): the PC's
+ * list plus lookups. It comes from someone else's number, even when that someone is
+ * the user on a second one, so the same never-list holds.
+ */
+export const FROM_WHATSAPP_TOOLS: ReadonlySet<string> = new Set([
+  ...FROM_PC_TOOLS,
+  "web_search",
+  "get_news",
+  "find_places",
+  "get_directions",
+]);
+
 export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: RegExp }> = {
   files: {
     blurb: "files and the clipboard: read a file, list a folder, open a saved file",
