@@ -32,6 +32,8 @@ service, and then only to that service.
 | Your own messages since the last digest, and the facts already remembered | The AI provider you chose, once a night (the memory digest; Memory ▸ Facts turns it off) | After 03:00, the first time JARVIS is open and idle |
 | Remembered facts and routines | Your own paired PC, over the same signed link | Every minute while connected, so both devices share one memory |
 | A Wake-on-LAN packet (the device's MAC address) | Your own home network, as a broadcast | When you ask to switch the TV or the PC on |
+| The answer to a request from your PC ("set an alarm on my phone") | Your own paired PC, over the same signed link | When the PC sends one (Settings ▸ PC & WhatsApp turns this off) |
+| JARVIS's answer to a WhatsApp command | The listed contact who sent it, through WhatsApp's own reply button | Only with WhatsApp turned on in Settings ▸ PC & WhatsApp |
 | Screenshots of the TV | The AI provider you chose (a model that can see images) | When you ask what's on the TV, or for a TV task done by sight |
 | The title of the YouTube video playing on the phone | Your web-search provider, then YouTube's public oEmbed endpoint (the video id) | When you ask to send it to the TV |
 
@@ -91,6 +93,7 @@ Settings. Read your provider's privacy terms, because a phone task can send them
 | Calendar (read/write) | Calendar questions and adding events |
 | Set alarm | Alarms and timers |
 | Notifications, vibrate | The listening notification and the wake-word cue |
+| Notification access (a setting you turn on) | Reading notifications you ask about, replying through one you approved, and — with WhatsApp turned on — seeing commands from the contacts you listed |
 | Run at startup (`RECEIVE_BOOT_COMPLETED`) | Clean up a phone task that was cut off by a reboot or app update |
 | Internet | Talking to the AI providers and tools above |
 
@@ -116,6 +119,13 @@ These are open, documented below in detail, and worth knowing before you install
   without Tailscale, the connection is not encrypted.
 - **Release builds you compile yourself are signed with your machine's debug key** unless
   you set up `keystore.properties` (see the README).
+- **Requests from your PC and from WhatsApp run without asking on the phone.** The PC is
+  your paired, signed device, and on WhatsApp a contact counts only if you listed it —
+  by the name WhatsApp shows, so a listed name is trusted as far as your address book
+  is. Both are limited to a short list of tools (alarms, timers, reminders, the phone's
+  switches, volume, music, and for WhatsApp lookups): nothing that messages or calls
+  anyone, reads the phone, or drives an app. A listed contact can still set alarms or
+  turn on Do Not Disturb on your phone; list only people you trust with that.
 
 ### Using it safely
 

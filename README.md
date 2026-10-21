@@ -89,6 +89,17 @@ the app**, so the phone needs no server and no Python.
   playing on the phone to the TV at the same point and pauses the phone (needs
   notification access). Or share a YouTube/Netflix link to JARVIS from any app's Share
   button and it plays on the TV.
+- **Requests from your PC** — "set an alarm on my phone" said at the PC, or sent to the
+  PC on WhatsApp (also from another number you allowed there), reaches the paired phone,
+  which sets it and reports back. Only alarms, timers, reminders, the phone's switches,
+  volume and music; JARVIS has to be open or recently used on the phone. Off in
+  Settings ▸ PC & WhatsApp.
+- **WhatsApp on the phone** — with the PC off, JARVIS can answer "Jarvis, …" messages
+  from contacts you list (Settings ▸ PC & WhatsApp, needs notification access) through
+  WhatsApp's own reply button. WhatsApp doesn't notify you about your own messages, so
+  your "Message yourself" chat can't reach it here; give JARVIS its own number (WhatsApp
+  Business on the phone works) to chat with it from yours. Built, not yet tested on a
+  device.
 - **Switching on from off** — "turn on the TV" also works when the TV is fully off
   (turn on Remote start in its network settings), and "turn on my PC" wakes the paired PC
   (Wake on LAN on in its BIOS and network adapter). Both use Wake-on-LAN, so the phone

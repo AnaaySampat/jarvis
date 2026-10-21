@@ -277,6 +277,16 @@ Roughly what's dispatched today: `weather`, `news`, `search_web`, `places`, `dir
 actions (`device`, `navigate`, `play_media`, `message`, `call`, `notifications` — below),
 plus the two big ones: `phone_task` (§4) and `pc_task` (§6).
 
+### A turn can be limited to some tools (2026-10-21)
+
+A request that didn't come from the user at the phone — one the paired PC sends
+(`phone.command`, §6) or a WhatsApp command (`WhatsAppInbox.kt`, §6) — runs through the
+same `runTurn`, with `deps.onlyTools` set (`FROM_PC_TOOLS` / `FROM_WHATSAPP_TOOLS` in
+`registry.ts`). The palette is filtered to those tools, and `runTurn` refuses any other
+call before `dispatch`, advertised or not, feeding the model "Not run: that tool isn't
+available". `brain.askFromPc` / `askFromWhatsApp` return `ok` only when a tool ran and
+every tool that ran said it worked.
+
 ### One-step phone actions go around the operator (2026-10-18)
 
 Gemini switches the flashlight or texts Mom in one call; JARVIS used to send all of that
@@ -739,6 +749,19 @@ forwards whole tasks to it.
 - **Approvals are keyed by task, not a single slot.** Several tasks can be subscribed at
   once and each raises its own signed challenge, so `activeApprovals` is a
   `Map<taskId, …>`. A newer challenge supersedes an older one only *for the same task*.
+
+- **Requests from the PC (2026-10-21).** The desktop can send `phone.command` {id, text}
+  over the same link ("set an alarm on my phone", also when it came to the PC on
+  WhatsApp). `useBrain` runs it as a scoped turn (§3) and answers `phone.result` {id, ok,
+  reply} with `signalConfirmed`; the desktop accepts the answer only from the device it
+  asked. Nothing is queued: a paused WebView doesn't answer, and the PC says so.
+- **WhatsApp on the phone (2026-10-21).** Not a link to the PC: `JarvisNotificationListener`
+  hands each WhatsApp notification to `WhatsAppInbox.kt`, which queues commands from
+  listed contacts with a `seq`; JS polls `poll_whatsapp` (1.5 s, §5), runs each as a
+  scoped turn and answers with `whatsapp_reply` (the notification's RemoteInput, as
+  `send_message` already does). An empty reply drops a command the PC's own channel
+  answers. When JS hasn't polled for 6 s (paused), the inbox posts a "tap to run"
+  notification instead; nothing is ever answered natively.
 
 > There was once a second phone↔PC channel (`platform/remoteLink.ts`, PeerJS-mediated). It
 > never got past a stub and has been deleted along with the dependency. The live path is
