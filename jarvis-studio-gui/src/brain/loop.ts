@@ -54,6 +54,15 @@ function actedAndFailed(r: ToolResult): boolean {
   return !r.ok && (r.data as { acted?: boolean } | undefined)?.acted === true;
 }
 
+/** Fed back for a call outside a scoped turn's tools (deps.onlyTools), never run. */
+const NOT_OFFERED: ToolResult = {
+  ok: false,
+  error: "not_offered",
+  summary:
+    "Not run: that tool isn't available for this request. Do it with the tools you have, " +
+    "or say plainly that it can't be done from here.",
+};
+
 /** Fed back in place of a phone_task that was refused, never run. */
 const PHONE_RETRY_REFUSED: ToolResult = {
   ok: false,
@@ -246,6 +255,8 @@ export async function runTurn(
         result = groups.length
           ? { ok: true, summary: `Now available: ${added.join(", ") || "already loaded"}.` }
           : { ok: false, summary: "No such group." };
+      } else if (deps.onlyTools && !deps.onlyTools.has(call.name)) {
+        result = NOT_OFFERED; // nothing ran, so it isn't one of toolResults
       } else if (isPhoneTask && phoneActedAndFailed) {
         result = PHONE_RETRY_REFUSED; // nothing ran, so it isn't one of toolResults
       } else {

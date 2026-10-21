@@ -359,6 +359,7 @@ export default function Settings({
   const [mapsKey, setMapsKey] = useState("");
   const [sysAlerts, setSysAlerts] = useState(!!sysInfo.system_alerts);
   const [calendarSync, setCalendarSync] = useState(sysInfo.calendar_sync !== false);
+  const [pcCommands, setPcCommands] = useState(sysInfo.pc_commands !== false);
   const [autopilotModel, setAutopilotModel] = useState(sysInfo.autopilot_model ?? "");
   const [autopilotThinking, setAutopilotThinking] = useState(
     (sysInfo.autopilot_thinking ?? -1) === 0 ? "off" : "dynamic",
@@ -406,6 +407,7 @@ export default function Settings({
     };
     cfg.auto_switch_models = autoSwitch;
     if (IS_MOBILE) cfg.wake_word = wakeWordOn;
+    if (IS_MOBILE) cfg.pc_commands = pcCommands;
     // Offline-only fields — sent just for the offline edition so switching modes
     // doesn't trigger needless model re-discovery.
     if (providerMode === "offline") {
@@ -1051,6 +1053,17 @@ export default function Settings({
     </Group>
   );
 
+  const linkedPage = (
+    <Group title="Your PC">
+      <Toggle
+        label="Let my PC ask this phone to do things"
+        checked={pcCommands}
+        onChange={setPcCommands}
+        hint="“Set an alarm on my phone”, said at the PC or sent to it on WhatsApp (also from a number you allowed there): alarms, timers, reminders, the flashlight, ringer, Do Not Disturb, volume and music. Never messages or calls anyone, and never reads the phone. JARVIS needs to be open, or recently used, to answer."
+      />
+    </Group>
+  );
+
   const calendarPage = (
     <Group>
       <Toggle
@@ -1270,6 +1283,14 @@ export default function Settings({
         value: calendarSync ? "Syncing" : "In app only",
         tone: calendarSync ? "on" : "off",
         body: calendarPage,
+      },
+      IS_MOBILE && {
+        id: "linked",
+        title: "PC & WhatsApp",
+        icon: "chat",
+        value: pcCommands ? "PC can ask" : "Off",
+        tone: pcCommands ? "on" : "off",
+        body: linkedPage,
       },
       {
         id: "files",

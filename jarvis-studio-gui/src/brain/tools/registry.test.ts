@@ -5,6 +5,7 @@ import {
   capabilitiesFor,
   toolPalette,
   DEVICE_ACTIONS,
+  FROM_PC_TOOLS,
   groupsFor,
   LOAD_TOOLS,
   requestedGroups,
@@ -218,5 +219,26 @@ describe("tool groups", () => {
   it("reads groups from a list or a comma string", () => {
     expect(requestedGroups({ groups: "files, hud" })).toEqual(["files", "hud"]);
     expect(requestedGroups({ groups: ["places", "bogus"] })).toEqual(["places"]);
+  });
+});
+
+describe("FROM_PC_TOOLS (what a command from the paired PC may use)", () => {
+  it("names real tools, and none that messages, calls, reads or drives an app", () => {
+    const cfg = { tier: "gemini" as const, model: "", keys: { gemini: ["k"] } };
+    const names = new Set(
+      toolPalette(cfg, { pcPaired: true, tvPaired: true }).map((t) => t.name),
+    );
+    for (const t of FROM_PC_TOOLS) expect(names.has(t), t).toBe(true);
+    const never = [
+      "send_message",
+      "call_contact",
+      "read_notifications",
+      "read_file",
+      "read_clipboard",
+      "phone_task",
+      "pc_task",
+      "remember_fact",
+    ];
+    for (const t of never) expect(FROM_PC_TOOLS.has(t), t).toBe(false);
   });
 });

@@ -84,6 +84,9 @@ export interface DispatchDeps {
    *  spoken "make the HUD red" persisted without re-rendering. Hanging those
    *  concerns here instead of on one call site is what stops that recurring. */
   onDispatched?: (spec: ActionSpec, result: ToolResult) => void;
+  /** A turn limited to these tools (a command from the paired PC: FROM_PC_TOOLS). The
+   *  turn loop refuses any other call, advertised or not, before it is dispatched. */
+  onlyTools?: ReadonlySet<string>;
 }
 
 /**

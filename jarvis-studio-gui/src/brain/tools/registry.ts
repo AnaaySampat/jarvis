@@ -740,6 +740,27 @@ function upperTypes(schema: unknown): unknown {
 
 export const LOAD_TOOLS = "load_tools";
 
+/**
+ * What a command from the paired PC may use (useBrain `phone.command`, desktop
+ * phone_link.py): "set an alarm on my phone", said at the PC or sent to it on WhatsApp —
+ * possibly from someone else's phone the user allowed. Clock, reminders and the one-step
+ * switches only: nothing that messages or calls anyone, reads what's on the phone, or
+ * drives an app (phone_task).
+ */
+export const FROM_PC_TOOLS: ReadonlySet<string> = new Set([
+  "set_alarm",
+  "set_timer",
+  "set_reminder",
+  "manage_clock",
+  "device_control",
+  "set_volume",
+  "play_media",
+  "manage_schedule",
+  "get_time",
+  "get_day",
+  "get_weather",
+]);
+
 export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: RegExp }> = {
   files: {
     blurb: "files and the clipboard: read a file, list a folder, open a saved file",

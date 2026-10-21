@@ -279,6 +279,8 @@ async function shrinkToJpeg(file, maxSide = 1536) {
 }
 
 const uid = () => `${Date.now()}_${Math.floor(performance.now() * 1000) % 100000}`;
+// How long a command from the PC waits for a turn in progress (the PC gives up at 45 s).
+const PC_COMMAND_WAIT_MS = 30_000;
 
 // True for a same-LAN address (RFC-1918 private range or loopback). Tailscale's
 // 100.64.0.0/10 CGNAT range, public IPs and hostnames all read as "remote" — used to
@@ -379,6 +381,8 @@ export function useBrain() {
   // One memory with the PC: set further down, once the memory view exists.
   const syncMemoryRef = useRef(null);
   const memorySyncedRef = useRef(null);
+  // A command the paired PC sent (phone.command): set further down, with sendMessage.
+  const pcCommandRef = useRef(null);
   const onDispatched = useCallback(
     (spec, result) => {
       logCommand(spec, result);
@@ -842,6 +846,7 @@ export function useBrain() {
       onEvent: (ev) => {
         const e = ev.event;
         if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
+        if (e === "phone.command") void pcCommandRef.current?.(ev.data);
         if (
           [
             "task.accepted",
@@ -1436,6 +1441,7 @@ export function useBrain() {
         : null,
       allowed_dirs: [],
       calendar_sync: stored.calendarSync !== false,
+      pc_commands: stored.pcCommands !== false,
     };
   }, [hasKey, secretsReady, stored, availableModels, routing]);
 
@@ -1541,6 +1547,61 @@ export function useBrain() {
     },
     [runPcTask, drainCards],
   );
+
+  // ── Commands from the paired PC (desktop phone_link.py) ────────────────────────
+  // "Set an alarm on my phone", said at the PC or sent to it on WhatsApp — maybe from
+  // someone else's phone the user allowed. The link already proved it's the paired PC
+  // (pc.ts verifies every host message). It runs as a turn limited to FROM_PC_TOOLS and
+  // is shown in the chat; the answer goes back on the same link, `ok` from the tools'
+  // own results. Not spoken: nobody may be holding the phone.
+  const pcCommandsSeenRef = useRef(new Set());
+  const runPcCommand = useCallback(
+    async (data) => {
+      const pc = pcRef.current;
+      const id = typeof data?.id === "string" ? data.id.slice(0, 64) : "";
+      const text = typeof data?.text === "string" ? data.text.trim().slice(0, 500) : "";
+      if (!pc || !id || !text || pcCommandsSeenRef.current.has(id)) return;
+      pcCommandsSeenRef.current.add(id);
+      const answer = (ok, reply) => void pc.signalConfirmed("phone.result", { id, ok, reply });
+      if (storedRef.current?.pcCommands === false) {
+        answer(false, "This phone is set not to take requests from the PC (Settings ▸ PC & WhatsApp).");
+        return;
+      }
+      // One turn at a time: give one in progress a little while to finish.
+      const until = Date.now() + PC_COMMAND_WAIT_MS;
+      while (busyRef.current && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (busyRef.current || !brainRef.current) {
+        answer(false, "The phone is busy with another request — try again in a moment.");
+        return;
+      }
+      busyRef.current = true;
+      setStatus("thinking");
+      setMessages((prev) => [...prev, { role: "user", text: `💻 From your PC: ${text}`, id: uid() }]);
+      let ok = false;
+      let reply = "";
+      try {
+        const res = await brainRef.current.askFromPc(text);
+        ok = res.ok;
+        reply = res.reply;
+      } catch (err) {
+        reply = `That failed on the phone: ${err?.message || err}`;
+      } finally {
+        busyRef.current = false;
+        setStatus("idle");
+      }
+      setMessages((prev) => [
+        ...prev,
+        { role: "jarvis", text: reply, actions: drainCards(), finalized: true, id: uid() },
+      ]);
+      answer(ok, reply);
+    },
+    [drainCards],
+  );
+  useEffect(() => {
+    pcCommandRef.current = runPcCommand;
+  }, [runPcCommand]);
 
   // A photo for JARVIS to look at, from the chat's attach button.
   const sendUpload = useCallback(
@@ -1710,6 +1771,7 @@ export function useBrain() {
         if (typeof cfg.conversation_mode === "boolean")
           next.conversationMode = cfg.conversation_mode;
         if (typeof cfg.calendar_sync === "boolean") next.calendarSync = cfg.calendar_sync;
+        if (typeof cfg.pc_commands === "boolean") next.pcCommands = cfg.pc_commands;
         if (typeof cfg.wake_word === "boolean") next.wakeWord = cfg.wake_word;
         if (typeof cfg.auto_switch_models === "boolean")
           next.autoSwitchModels = cfg.auto_switch_models;

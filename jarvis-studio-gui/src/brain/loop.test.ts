@@ -257,3 +257,23 @@ describe("runTurn — load_tools", () => {
     expect(seen[1]!.at(-1)).toBe('{"ok":false,"summary":"No such group."}');
   });
 });
+
+describe("runTurn — a turn limited to some tools (a command from the PC)", () => {
+  it("never dispatches a tool outside the scope, even one the model names anyway", async () => {
+    const scoped = { config: {}, onlyTools: new Set(["set_alarm"]) } as unknown as DispatchDeps;
+    replies.push(
+      {
+        text: "",
+        toolCalls: [
+          { id: "c1", name: "send_message", args: { to: "Mom", text: "hi" } },
+          { id: "c2", name: "set_alarm", args: { hour: 7, minute: 0 } },
+        ],
+      },
+      { text: "Alarm set for 7; I can't send messages from here.", toolCalls: [] },
+    );
+    const out = await runTurn([{ role: "user", content: "alarm at 7 and text mom" }], [], scoped);
+    expect(dispatched).toEqual(["clock"]);
+    expect(out.toolResults).toHaveLength(1);
+    expect(seen[1]!.some((c) => /Not run: that tool isn't available/.test(c))).toBe(true);
+  });
+});
