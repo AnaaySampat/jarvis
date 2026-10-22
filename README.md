@@ -104,6 +104,15 @@ the app**, so the phone needs no server and no Python.
   (turn on Remote start in its network settings), and "turn on my PC" wakes the paired PC
   (Wake on LAN on in its BIOS and network adapter). Both use Wake-on-LAN, so the phone
   has to be on the same home network.
+- **Agents** — turn on agent mode (the robot button in the chat) and pick who takes a
+  request: Phone, Research, Files, Scheduler, Content, or, with a PC paired, its Desktop
+  and Browser agents ("@files …" or "tell the research agent to …" works from anywhere).
+  The chat shows them working together: a card when the phone hands a job to a PC agent
+  or asks it something, and another with what it brings back. Without a PC, the Research
+  agent searches and then reads the best two or three pages itself (a page that only
+  shows up with JavaScript running is skipped). Not yet run on a phone.
+- **The desktop's look** — the home screen, menus, Settings and command palette match the
+  Windows app, its Modern and Iron Man themes included.
 
 Known gaps and the things that still need a live on-device test are tracked in
 [docs/STATUS.md](docs/STATUS.md).
