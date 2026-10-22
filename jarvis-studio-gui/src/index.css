@@ -3164,6 +3164,51 @@ button.cap-row:active {
   border: 1px solid color-mix(in srgb, var(--agent) 45%, transparent);
   opacity: 0.85;
 }
+/* Agents talking to each other in the chat (HudPanels AgentMessage) */
+.cv-msg--agents {
+  flex-direction: column;
+  gap: 5px;
+}
+.agentmsg-hd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.agentmsg-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--agent);
+}
+.agentmsg-says {
+  font-weight: 500;
+  color: var(--text-sec);
+}
+.agentmsg-bubble {
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--text-pri);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--from) 12%, transparent),
+    color-mix(in srgb, var(--to) 12%, transparent)
+  );
+  border: 1px dashed color-mix(in srgb, var(--from) 40%, transparent);
+  border-left: 3px solid var(--from);
+}
+.agentmsg--ask .agentmsg-bubble {
+  font-style: italic;
+}
+.agentmsg-items {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-sec);
+}
 .cv-compose {
   display: flex;
   align-items: center;

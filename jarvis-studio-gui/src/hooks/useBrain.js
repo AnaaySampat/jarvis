@@ -535,6 +535,11 @@ export function useBrain() {
   }, []);
 
   const onAgentEvent = useCallback((ev) => {
+    if (ev.event === "agent_message") {
+      // One agent handing work to another (dispatch's pc_task) — a card in the chat.
+      setMessages((prev) => [...prev, { ...ev.data, role: "agents", id: uid() }]);
+      return;
+    }
     if (ev.event === "agent_task" && (ev.data?.kind === "phone" || ev.data?.kind === "tv")) {
       phoneTaskStopRef.current = false;
     }

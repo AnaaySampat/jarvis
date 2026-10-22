@@ -328,7 +328,7 @@ export function JarvisHUD({
     reactor ? "the reactor" : "the orb",
   );
   const busy = shownStatus !== "idle" && shownStatus !== "listening";
-  const lastReplyAt = messages.map((m) => m.role !== "user").lastIndexOf(true);
+  const lastReplyAt = messages.map((m) => m.role === "jarvis").lastIndexOf(true);
   const lastReply = lastReplyAt >= 0 ? messages[lastReplyAt] : null;
   const lastAsk = messages
     .slice(0, lastReplyAt >= 0 ? lastReplyAt : messages.length)

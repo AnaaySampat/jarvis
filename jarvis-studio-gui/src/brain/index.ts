@@ -188,7 +188,7 @@ export function createBrain(opts: BrainOptions = {}): Brain {
         // The whole request goes to that agent on the PC, through dispatch like any
         // pc_task (remote.runTask asks for the fingerprint first).
         const result = await dispatch(
-          { type: "pc_task", goal: request, kind: route.pc },
+          { type: "pc_task", goal: request, kind: route.pc, picked: true },
           makeDeps(getConfig()),
         );
         const reply =

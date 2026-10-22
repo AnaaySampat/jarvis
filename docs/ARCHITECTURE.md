@@ -298,6 +298,10 @@ spec to `dispatch`, so `remote.runTask`'s fingerprint gate still comes first; `k
 "research"` exists only for this (the model's own `pc_task` still picks browser or
 computer). The desktop's coordinator — plans across agents, hand-offs — stays on the PC.
 
+Every `pc_task` goes through `dispatch`, so that's where the chat hears about it: an `agent_message` event
+(the phone asking a PC agent, or handing a picked one the request, and the answer it brings back) through
+`onAgentEvent`, which useBrain turns into a card in the chat (2026-10-22).
+
 ### One-step phone actions go around the operator (2026-10-18)
 
 Gemini switches the flashlight or texts Mom in one call; JARVIS used to send all of that

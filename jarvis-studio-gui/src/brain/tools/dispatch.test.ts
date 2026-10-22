@@ -182,3 +182,38 @@ describe("wake_pc", () => {
     });
   });
 });
+
+describe("pc_task hand-off cards", () => {
+  it("shows the phone asking a PC agent mid-turn and what it hands back", async () => {
+    const runTask = vi.fn(async () => ({
+      ok: true,
+      summary: "₹4,210 on IndiGo.",
+      data: { findings: ["6E 5321, Fri 06:10 (google.com/flights)"] },
+    }));
+    const said: unknown[] = [];
+    const deps = {
+      ...makeDeps(undefined),
+      remote: { runTask },
+      onAgentEvent: (ev: { event: string; data?: unknown }) => said.push(ev),
+    };
+    await dispatch({ type: "pc_task", goal: "find the cheapest flight", kind: "research" }, deps);
+    expect(said).toEqual([
+      { event: "agent_message", data: { from: "phone", to: "research", kind: "ask", text: "find the cheapest flight", items: [] } },
+      {
+        event: "agent_message",
+        data: { from: "research", to: "phone", kind: "answer", text: "₹4,210 on IndiGo.", items: ["6E 5321, Fri 06:10 (google.com/flights)"] },
+      },
+    ]);
+  });
+
+  it("a picked PC agent just gets the request — its result is the reply", async () => {
+    const said: { event: string; data?: Record<string, unknown> }[] = [];
+    const deps = {
+      ...makeDeps(undefined),
+      remote: { runTask: vi.fn(async () => ({ ok: true, summary: "Done." })) },
+      onAgentEvent: (ev: { event: string; data?: Record<string, unknown> }) => said.push(ev),
+    };
+    await dispatch({ type: "pc_task", goal: "open Notepad", kind: "computer", picked: true }, deps);
+    expect(said.map((e) => [e.data?.from, e.data?.to, e.data?.kind])).toEqual([["phone", "desktop", "handover"]]);
+  });
+});

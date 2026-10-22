@@ -206,3 +206,28 @@ describe("webSearch — Tavily backs up Gemini grounding", () => {
     expect(r.summary).toMatch(/432/);
   });
 });
+
+describe("reading a web page (research without a PC)", () => {
+  it("keeps the article's words, not its scripts, menus or entities", async () => {
+    const { pageText } = await import("./http");
+    const html =
+      "<html><head><title>Pixel 8a review &amp; verdict</title><style>p{}</style></head><body>" +
+      "<nav>Home | Phones</nav><script>var x = '<p>no</p>';</script>" +
+      "<article><h1>The Pixel 8a</h1>" +
+      `<p data-mw='{"a":"x<br />y"}'>Battery: 4,492&nbsp;mAh &#8212; lasts a day.</p></article>` +
+      "<footer>© site</footer></body></html>";
+    const { title, text } = pageText(html);
+    expect(title).toBe("Pixel 8a review & verdict");
+    expect(text).toBe("The Pixel 8a\nBattery: 4,492 mAh — lasts a day.");
+  });
+
+  it("never reads this phone's network or a non-web address", async () => {
+    const { isPrivateHost, readWebPage } = await import("./http");
+    for (const h of ["localhost", "192.168.0.1", "10.2.3.4", "172.20.0.1", "printer.local", "[::1]"])
+      expect(isPrivateHost(h)).toBe(true);
+    expect(isPrivateHost("en.wikipedia.org")).toBe(false);
+    expect(isPrivateHost("172.32.0.1")).toBe(false);
+    await expect(readWebPage("http://192.168.0.1/admin")).resolves.toMatchObject({ ok: false });
+    await expect(readWebPage("file:///sdcard/a.txt")).resolves.toMatchObject({ ok: false });
+  });
+});

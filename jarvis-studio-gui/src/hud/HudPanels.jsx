@@ -931,7 +931,45 @@ export function PowerOverlay({ open, onClose, runAction, d = {}, appControlOn })
 // One message, memoized: during streaming only the live message's object identity
 // changes (useWebSocket replaces just that entry), so finalized messages skip both
 // re-render and ResponseRenderer's re-parse. runAction is a stable useCallback.
+const AGENT_SAYS = { handover: "hands this to", ask: "asks", answer: "answers" };
+
+// One agent talking to another (brain/agents.ts agentMessage): the phone handing work
+// to the PC's agents and what they hand back, in both agents' colours.
+function AgentMessage({ m }) {
+  const from = agentById(m.from);
+  const to = agentById(m.to);
+  const who = (a) => (
+    <span className="agentmsg-who" style={{ "--agent": a.color }}>
+      <span className="agent-dot" aria-hidden="true" />
+      {a.name} agent{a.pc && a.id !== "research" ? " (PC)" : ""}
+    </span>
+  );
+  return (
+    <div
+      className={`cv-msg cv-msg--agents agentmsg--${m.kind}`}
+      style={{ "--from": from.color, "--to": to.color }}
+    >
+      <div className="agentmsg-hd">
+        {who(from)}
+        <span className="agentmsg-says">{AGENT_SAYS[m.kind] || "→"}</span>
+        {who(to)}
+      </div>
+      <div className="cv-bubble agentmsg-bubble">
+        {m.text}
+        {m.items?.length > 0 && (
+          <ul className="agentmsg-items">
+            {m.items.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy }) {
+  if (m.role === "agents") return <AgentMessage m={m} />;
   const user = m.role === "user";
   return (
     <div className={`cv-msg cv-msg--${user ? "user" : "jarvis"}`}>

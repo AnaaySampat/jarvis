@@ -42,6 +42,7 @@ import type { HttpToolCtx } from "./http";
 import { runTvControl, tvEnv, type TvShell } from "../remote/tv";
 import { lookAtTv, runTvTask, type Sight } from "../remote/tvSight";
 import { chatOverLadder } from "../ask";
+import { agentMessage, PC_AGENT, type AgentMessage } from "../agents";
 
 export interface DispatchDeps {
   platform: Platform;
@@ -122,6 +123,8 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
       return http.getNews(String(spec.topic ?? ""));
     case "search_web":
       return http.webSearch(String(spec.query ?? ""), httpCtx);
+    case "read_webpage":
+      return http.readWebPage(String(spec.url ?? ""));
     case "places":
       return http.findPlaces(String(spec.query ?? ""), httpCtx);
     case "directions":
@@ -350,13 +353,24 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
       return deps.platform.openAccessibilitySettings();
 
     // ── Remote-control the PC (Phase 3) ──
-    case "pc_task":
+    case "pc_task": {
       if (!remote) return { ok: false, summary: "No PC is paired yet." };
-      return remote.runTask(
-        String(spec.goal ?? ""),
-        // "research" only comes from the agent row (agents.ts); the model picks the two.
-        spec.kind === "computer" || spec.kind === "research" ? spec.kind : "browser",
-      );
+      // "research" only comes from the agent row (agents.ts); the model picks the two.
+      const kind = spec.kind === "computer" || spec.kind === "research" ? spec.kind : "browser";
+      const goal = String(spec.goal ?? "");
+      // The chat shows the hand-off: a picked PC agent gets the request ("handover", and
+      // its result is the reply); the phone's turn asking one mid-turn gets its answer.
+      const say = (m: AgentMessage) =>
+        deps.onAgentEvent?.({ event: "agent_message", data: { ...m } });
+      const pcAgent = PC_AGENT[kind]!;
+      say(agentMessage("phone", pcAgent, spec.picked ? "handover" : "ask", goal));
+      const res = await remote.runTask(goal, kind);
+      if (!spec.picked) {
+        const found = (res.data as { findings?: unknown[] } | undefined)?.findings ?? [];
+        say(agentMessage(pcAgent, "phone", "answer", res.summary, found));
+      }
+      return res;
+    }
     case "wake_pc":
       if (!remote) return { ok: false, summary: "No PC is paired yet." };
       if (!remote.wake) return { ok: false, summary: "Waking the PC isn't available here." };

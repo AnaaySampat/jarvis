@@ -323,6 +323,14 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       ["action"],
     ),
     ...locationTools(cap),
+    fn(
+      "read_webpage",
+      "Read the text of one public web page — to research a topic, open the best two or " +
+        "three sources a web_search named and read them, and say which page each fact came " +
+        "from. Doesn't run the page's scripts: if a page comes back empty, use another.",
+      { url: str("The page's full https:// address.") },
+      ["url"],
+    ),
 
     // ── Brain-local tools (memory, schedule, time, chat) ──
     fn(
@@ -581,6 +589,7 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
   close_application: (a) => ({ type: "close_app", target: a.name ?? "" }),
   open_website: (a) => ({ type: "open_url", url: a.url ?? "" }),
   web_search: (a) => ({ type: "search_web", query: a.query ?? "" }),
+  read_webpage: (a) => ({ type: "read_webpage", url: a.url ?? "" }),
   set_volume: (a) => ({ type: "set_volume", level: a.level }),
   device_control: (a) => ({ type: "device", do: a.action ?? "", value: a.value }),
   send_message: (a) => ({
@@ -803,6 +812,11 @@ export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: 
     blurb: "JARVIS's own screen: theme, background, panels, opening its views, clearing the chat",
     tools: ["customize_screen", "control_interface", "clear_conversation"],
     cue: /\b(theme|colou?r|background|panels?|hud|layout|density|compact|interface|clear|reset|minimi[sz]e|expand|collapse|settings|memory|customi[sz]e|conversation mode|mute|unmute|new chat)\b/i,
+  },
+  web: {
+    blurb: "reading a web page's text (research: the sources a search found)",
+    tools: ["read_webpage"],
+    cue: /\b(research|deep[- ]dive|investigate|look into|sources?|articles?|read (?:the |this |that )?(?:page|site|link|website)|https?:\/\/)/i,
   },
   system: {
     blurb: "news headlines, the time or date, forgetting a remembered fact",

@@ -31,7 +31,7 @@ describe("routeFor", () => {
     expect(routeFor("browser", false)).toEqual({ pc: "browser" });
     expect(routeFor("research", true)).toEqual({ pc: "research" });
     expect(routeFor("research", false)).toMatchObject({
-      groups: [],
+      groups: ["web"], // reads the sources itself (read_webpage)
       context: expect.stringMatching(/RESEARCH/),
     });
     expect(routeFor("scheduling", false)).toMatchObject({ groups: ["planner"] });

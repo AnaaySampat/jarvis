@@ -1765,10 +1765,14 @@ function terminalResult(data: unknown): ToolResult {
       : ok
         ? "Done on your PC, sir."
         : "I couldn't verify completion of that PC task, sir.");
+  // What the PC's agent noted (its sources, for research) — shown when it hands back.
+  const findings = Array.isArray(d.findings)
+    ? d.findings.filter((f): f is string => typeof f === "string" && f.trim() !== "")
+    : [];
   return {
     ok,
     summary,
-    data: proof ? { proof } : undefined,
+    data: proof || findings.length ? { ...(proof ? { proof } : {}), findings } : undefined,
     error: ok ? undefined : state === "succeeded" ? "unverified_success" : state || "unverified_failure",
   };
 }

@@ -57,8 +57,9 @@ export const AGENTS: readonly AgentDef[] = [
     color: "#a07cff",
     hint: "Reads several sites (on your PC's background browser when it's paired) and reports with sources",
     pc: "research",
+    groups: ["web"],
     brief:
-      "AGENT: RESEARCH\nYou are JARVIS's Research agent. Look the topic up from several angles with web_search (at least three searches), compare what the sources say, and answer with the key findings, naming the source of each.",
+      "AGENT: RESEARCH\nYou are JARVIS's Research agent. Look the topic up with web_search from a couple of angles, then open the two or three best sources it named with read_webpage and read them — more only when they disagree. Answer with the key findings, naming the page each came from.",
   },
   {
     id: "files",
@@ -163,6 +164,35 @@ export function mention(text: string): { agent: AgentId | ""; rest: string } {
   const after = spoken ? t.slice(spoken[0].length).trim() : "";
   if (bySpoken && after) return { agent: bySpoken, rest: after };
   return { agent: "", rest: t };
+}
+
+/** The phone's agent for a pc_task kind. */
+export const PC_AGENT: Record<string, AgentId> = {
+  computer: "desktop",
+  browser: "browser",
+  research: "research",
+};
+
+export interface AgentMessage {
+  from: AgentId;
+  to: AgentId;
+  /** "handover" (passes the request on), "ask" (a question mid-turn), "answer". */
+  kind: "handover" | "ask" | "answer";
+  text: string;
+  items: string[];
+}
+
+/** One agent talking to another, for the chat (the desktop's agents.message): the user
+ *  sees the phone hand work to the PC's agents and what comes back. */
+export function agentMessage(
+  from: AgentId,
+  to: AgentId,
+  kind: AgentMessage["kind"],
+  text: string,
+  items: unknown[] = [],
+): AgentMessage {
+  const flat = (s: unknown, n: number) => String(s ?? "").split(/\s+/).filter(Boolean).join(" ").slice(0, n);
+  return { from, to, kind, text: flat(text, 300), items: items.map((f) => flat(f, 200)).filter(Boolean).slice(0, 5) };
 }
 
 /** How a picked agent runs a request: on the PC, as a scoped phone turn, or (null) as
