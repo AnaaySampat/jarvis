@@ -488,7 +488,10 @@
 }
 .home--phone .home-tools .tb-group { padding: 0 3px; }
 .home--phone .home-tools .hud-fixed-btn { width: 38px; height: 38px; }
-.home--phone .home-main { padding: 12px 14px 20px; gap: 12px; overscroll-behavior: contain; scrollbar-width: none; }
+/* overflow-x: the column only ever scrolls up and down; nothing in it may slide it sideways */
+.home--phone .home-main { padding: 12px 14px 20px; gap: 12px; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
+/* the agent row as wide as the ask box (the desktop's rule), scrolling inside itself */
+.home-hero .agent-row { width: min(100%, 560px); flex-shrink: 0; margin-bottom: -4px; }
 .home--phone .home-hero { padding: 14px 0 6px; gap: 16px; }
 .home--phone .hero-starter { height: 34px; }
 .home--phone .ask input { font-size: 16px; } /* under 16px Android zooms the page on focus */

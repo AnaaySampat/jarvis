@@ -3122,6 +3122,7 @@ button.cap-row:active {
   overflow-x: auto;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
+  max-width: 100%; /* scroll inside itself, never widen what holds it */
   padding: 2px;
   mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
 }
