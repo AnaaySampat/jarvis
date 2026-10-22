@@ -10,7 +10,7 @@ import { useAndroidBack } from "../hooks/useAndroidBack";
 export const WIDE_QUERY = "(min-width: 760px)";
 
 /**
- * @param {{open: boolean, title: string, onClose: () => void, onBack?: () => void,
+ * @param {{open: boolean, title: string, sub?: string, onClose: () => void, onBack?: () => void,
  *   backLabel?: string, actions?: any, footer?: any, className?: string,
  *   bodyRef?: any, children?: any}} props
  * `onBack` replaces the title with a back button (a sub-view inside the sheet);
@@ -19,6 +19,7 @@ export const WIDE_QUERY = "(min-width: 760px)";
 export default function Sheet({
   open,
   title,
+  sub,
   onClose,
   onBack,
   backLabel,
@@ -55,7 +56,10 @@ export default function Sheet({
               <span>{backLabel || title}</span>
             </button>
           ) : (
-            <h2 className="sp-title">{title}</h2>
+            <div className="sp-hdr-txt">
+              <h2 className="sp-title">{title}</h2>
+              {sub && <p className="sp-sub">{sub}</p>}
+            </div>
           )}
           <div className="sp-hdr-actions">
             {actions}

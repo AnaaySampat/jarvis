@@ -10,7 +10,7 @@ import { modelClassFor } from "../brain/modelPolicy";
 import * as quota from "../brain/quota";
 import Icon from "./Icon";
 import StateMessage from "./StateMessage";
-import { Field, Group, More, Toggle, WIDE_QUERY, Warn } from "./Sheet";
+import { ActionRow, Field, Group, More, Toggle, WIDE_QUERY, Warn } from "./Sheet";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 
 // Fallback model groups — used only until the backend's per-key discovery arrives
@@ -289,6 +289,7 @@ export default function Settings({
   onRefreshModels,
   onRerankModels,
   onRepairSetup,
+  onOpenCustomize,
 }) {
   // Re-discover models when the panel opens so the dropdown is current (e.g. a
   // local Ollama model pulled since launch, or a key just added in another client).
@@ -300,6 +301,7 @@ export default function Settings({
   // ponytail: read once on open; resizing across the breakpoint mid-session keeps the first layout.
   const [wide] = useState(() => window.matchMedia?.(WIDE_QUERY).matches ?? false);
   const [page, setPage] = useState(initialPage || (wide ? "models" : null));
+  const [query, setQuery] = useState(""); // the index's search box, as on the desktop
 
   // Android back: leave the page first, then close Settings.
   useAndroidBack(true, () => (!wide && page ? setPage(null) : onClose()));
@@ -1118,14 +1120,14 @@ export default function Settings({
           )}
           <div className="sp-field">
             <More label="Talking to JARVIS from your own WhatsApp">
-              WhatsApp never notifies you about your own messages, so your “Message yourself”
-              chat can&apos;t reach JARVIS on this phone (the PC&apos;s linked WhatsApp can). To
-              chat with it here, give JARVIS its own number — WhatsApp Business with a second
-              number on this phone works — and list your main number above. JARVIS answers only
-              while Android lets it run: when it has been in the background a while, a “tap to
-              run” notification appears instead, and opening JARVIS answers it. It can set
-              alarms, timers and reminders, flip the phone&apos;s switches, play music and look
-              things up — it never messages anyone else or reads your phone.
+              WhatsApp never notifies you about your own messages, so your “Message yourself” chat
+              can&apos;t reach JARVIS on this phone (the PC&apos;s linked WhatsApp can). To chat
+              with it here, give JARVIS its own number — WhatsApp Business with a second number on
+              this phone works — and list your main number above. JARVIS answers only while Android
+              lets it run: when it has been in the background a while, a “tap to run” notification
+              appears instead, and opening JARVIS answers it. It can set alarms, timers and
+              reminders, flip the phone&apos;s switches, play music and look things up — it never
+              messages anyone else or reads your phone.
             </More>
           </div>
         </>
@@ -1284,21 +1286,25 @@ export default function Settings({
   const restingCount = quota.snapshot().benched?.length ?? 0;
 
   // tone: "on" = configured/active, "off" = inactive, "warn" = needs attention.
-  // Each inner array is one group in the nav.
-  const sections = [
+  // Every page; the nav groups them below.
+  const pages = [
     [
       {
         id: "models",
-        title: "Models",
-        icon: "sparkle",
+        title: "Intelligence",
+        icon: "spark",
+        desc: "Where JARVIS thinks, and with which model.",
+        words: "model provider llm vertex gemini groq auto level",
         value: model !== "auto" ? model : PROVIDER_NAME[providerMode] || providerMode,
         tone: "on",
         body: modelsPage,
       },
       {
         id: "routing",
-        title: "Routing",
+        title: "Routing & Quota",
         icon: "route",
+        desc: "How requests are spread across your models and keys.",
+        words: "rate limit benched rank quota",
         value: restingCount
           ? `${restingCount} resting`
           : rankedCount
@@ -1309,8 +1315,12 @@ export default function Settings({
       },
       {
         id: "keys",
-        title: "API keys",
+        title: "API Keys",
         icon: "key",
+        desc: IS_MOBILE
+          ? "Credentials for model providers. Encrypted on this phone."
+          : "Credentials for model providers and services.",
+        words: "groq gemini openrouter nvidia mistral tavily credentials",
         value: keyCount ? `${keyCount} connected` : "None",
         tone: keyCount ? "on" : "warn",
         body: keysPage,
@@ -1320,7 +1330,9 @@ export default function Settings({
       {
         id: "voice",
         title: "Voice",
-        icon: "mic",
+        icon: "volume",
+        desc: "How JARVIS sounds, wakes up and speaks up on its own.",
+        words: "wake word speech tts hey jarvis",
         value: IS_MOBILE
           ? wakeWordOn
             ? "Wake word on"
@@ -1329,10 +1341,31 @@ export default function Settings({
         tone: (IS_MOBILE ? wakeWordOn : tts !== "off") ? "on" : "off",
         body: voicePage,
       },
+      onOpenCustomize && {
+        id: "interface",
+        title: "Interface",
+        icon: "layout",
+        desc: "The home screen's look and layout.",
+        words: "home screen customize theme iron man look cards",
+        value: "",
+        tone: null,
+        body: (
+          <Group title="Home screen">
+            <ActionRow
+              icon="palette"
+              title="Customize the home screen"
+              desc="Theme, colours, Modern or Iron Man, background, and which cards show."
+              onClick={onOpenCustomize}
+            />
+          </Group>
+        ),
+      },
       !IS_MOBILE && {
         id: "automation",
-        title: "Automation",
-        icon: "robot",
+        title: "Autopilot",
+        icon: "cursor",
+        desc: "The operator that drives the browser and desktop for multi-step tasks.",
+        words: "operator browser desktop agent",
         value: autopilotModel.trim() || "Auto",
         tone: "on",
         body: automationPage,
@@ -1341,6 +1374,8 @@ export default function Settings({
         id: "location",
         title: "Location",
         icon: "pin",
+        desc: "Where you are, for the weather and places nearby.",
+        words: "city gps pin weather",
         value: pinnedLoc?.label ? pinnedLoc.label.split(",")[0] : "Automatic",
         tone: "on",
         body: locationPage,
@@ -1349,14 +1384,18 @@ export default function Settings({
         id: "calendar",
         title: "Calendar",
         icon: "calendar",
+        desc: "Your agenda, and whether it syncs with the phone's calendar.",
+        words: "agenda events sync",
         value: calendarSync ? "Syncing" : "In app only",
         tone: calendarSync ? "on" : "off",
         body: calendarPage,
       },
       IS_MOBILE && {
         id: "linked",
-        title: "PC & WhatsApp",
-        icon: "chat",
+        title: "Devices",
+        icon: "phone",
+        desc: "Your paired PC, and WhatsApp.",
+        words: "pc windows whatsapp paired remote",
         value: waMode !== "off" ? "WhatsApp on" : pcCommands ? "PC can ask" : "Off",
         tone: pcCommands || waMode !== "off" ? "on" : "off",
         body: (
@@ -1370,6 +1409,8 @@ export default function Settings({
         id: "files",
         title: "Files",
         icon: "folder",
+        desc: "Where JARVIS keeps files, and what it may read.",
+        words: "storage folder documents",
         value: IS_MOBILE
           ? grantedFolder?.name || "No folder"
           : `${dirs.length} folder${dirs.length === 1 ? "" : "s"}`,
@@ -1380,16 +1421,39 @@ export default function Settings({
     [
       {
         id: "diagnostics",
-        title: "Diagnostics",
-        icon: "activity",
+        title: "System",
+        icon: "wrench",
+        desc: "Diagnostics, logs and version.",
+        words: "diagnostics logs version debug",
         value: "",
         tone: null,
         body: diagnosticsPage,
       },
     ],
-  ].map((group) => group.filter(Boolean));
+  ]
+    .flat()
+    .filter(Boolean);
+  // The desktop's Settings groups, in its order.
+  const byId = Object.fromEntries(pages.map((pg) => [pg.id, pg]));
+  const sections = [
+    ["Intelligence", ["models", "keys", "routing", "automation"]],
+    ["Experience", ["voice", "interface", "files", "location", "calendar"]],
+    ["Connections", ["linked"]],
+    ["System", ["diagnostics"]],
+  ]
+    .map(([label, ids]) => ({ label, items: ids.map((id) => byId[id]).filter(Boolean) }))
+    .filter((g) => g.items.length);
 
-  const current = sections.flat().find((p) => p.id === page);
+  const current = pages.find((p) => p.id === page);
+  const q = query.trim().toLowerCase();
+  const shownSections = q
+    ? sections
+        .map((g) => ({
+          ...g,
+          items: g.items.filter((p) => `${p.title} ${p.desc} ${p.words}`.toLowerCase().includes(q)),
+        }))
+        .filter((g) => g.items.length)
+    : sections;
   const drilled = !wide && current;
 
   return (
@@ -1419,26 +1483,42 @@ export default function Settings({
         <div className="sp-body" key={wide ? "wide" : page || "index"}>
           {(wide || !current) && (
             <nav className="sp-nav" aria-label="Settings sections">
-              {sections.map((group) => (
-                <div className="sp-nav-group" key={group[0].id}>
-                  {group.map((p) => (
-                    <button
-                      type="button"
-                      key={p.id}
-                      className={`sp-nav-row ${p.id === page ? "is-current" : ""}`}
-                      aria-current={p.id === page ? "page" : undefined}
-                      onClick={() => setPage(p.id)}
-                    >
-                      <Icon name={p.icon} size={18} className="sp-nav-ico" />
-                      <span className="sp-nav-title">{p.title}</span>
-                      {p.value && (
-                        <span className={`sp-readout ${p.tone ? `sp-readout--${p.tone}` : ""}`}>
-                          {p.value}
-                        </span>
-                      )}
-                      {!wide && <Icon name="chevronRight" size={16} className="sp-nav-chev" />}
-                    </button>
-                  ))}
+              <label className="sp-search sp-nav-search">
+                <Icon name="search" size={16} />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search settings…"
+                  aria-label="Search settings"
+                />
+              </label>
+              {shownSections.length === 0 && (
+                <p className="sp-none">No setting matches “{query}”.</p>
+              )}
+              {shownSections.map((group) => (
+                <div className="sp-nav-block" key={group.label}>
+                  <div className="sp-nav-label">{group.label}</div>
+                  <div className="sp-nav-group">
+                    {group.items.map((p) => (
+                      <button
+                        type="button"
+                        key={p.id}
+                        className={`sp-nav-row ${p.id === page ? "is-current" : ""}`}
+                        aria-current={p.id === page ? "page" : undefined}
+                        onClick={() => setPage(p.id)}
+                      >
+                        <Icon name={p.icon} size={18} className="sp-nav-ico" />
+                        <span className="sp-nav-title">{p.title}</span>
+                        {p.value && (
+                          <span className={`sp-readout ${p.tone ? `sp-readout--${p.tone}` : ""}`}>
+                            {p.value}
+                          </span>
+                        )}
+                        {!wide && <Icon name="chevronRight" size={16} className="sp-nav-chev" />}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ))}
             </nav>
@@ -1446,6 +1526,7 @@ export default function Settings({
           {current && (
             <div className="sp-page" key={current.id}>
               <h2 className="sp-page-title">{current.title}</h2>
+              {current.desc && <p className="sp-page-desc">{current.desc}</p>}
               {current.body}
             </div>
           )}

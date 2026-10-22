@@ -398,10 +398,9 @@ export default function RemoteDesktop({
       style={{
         position: "fixed",
         inset: 0,
-        // Above hud-mobile.css's `.hud-fixed-btn { z-index: 260 !important }` and
-        // `.mobile-mic` (210) — those are `position:fixed` HUD chrome that otherwise
-        // shows through any lower overlay. Matches `.settings-overlay` (270), the
-        // modal this replaces on-screen.
+        // Above the STOP pill (210) and the other fixed chrome that would otherwise
+        // show through. Matches `.settings-overlay` (270), the modal this replaces
+        // on-screen.
         zIndex: 280,
         background: "#05070c",
         display: "flex",

@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
-import ViewportScale from "./hud/ViewportScale";
 import { JarvisHUD } from "./hud/HudApp";
-import { DEFAULT_DIRECTION, STATUS_META } from "./hud/hudConstants";
+import { DEFAULT_DIRECTION } from "./hud/hudConstants";
 import Settings from "./components/Settings";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
@@ -12,6 +11,9 @@ import SetupProgress from "./components/SetupProgress";
 import BootOverlay from "./components/BootOverlay";
 import Customize from "./components/Customize";
 import AgentActivity from "./components/AgentActivity";
+import CommandPalette from "./components/CommandPalette";
+import { agentById, agentsFor } from "./brain/agents";
+import { listRoutines } from "./brain/schedule/routines";
 import { ACTIVE_TASK_STATES } from "./hooks/taskCenter";
 import { syncBrowserPanel } from "./components/browserPanelWindow";
 import { syncControlOverlay } from "./components/controlOverlayWindow";
@@ -28,6 +30,19 @@ const SECTION_KEY = {
   schedule: "agenda",
   terminal: "terminal",
 };
+
+// Settings pages the command palette opens directly (ids from Settings.jsx).
+const SETTINGS_PAGES = [
+  ["models", "Intelligence", "spark", "provider model llm vertex gemini groq"],
+  ["keys", "API Keys", "key", "groq gemini openrouter credentials"],
+  ["routing", "Routing & Quota", "route", "rate limit benched rank"],
+  ["voice", "Voice", "volume", "wake word speech tts"],
+  ["interface", "Interface", "layout", "home screen customize look"],
+  ["files", "Files & Location", "folder", "storage folder location city"],
+  ["calendar", "Calendar", "calendar", "agenda sync events"],
+  ["linked", "Devices", "phone", "pc whatsapp paired"],
+  ["diagnostics", "System", "wrench", "diagnostics logs version"],
+];
 
 // Mid-task clarify dialog: the autopilot hit genuine ambiguity and asked ONE
 // question. Holds its own input state so typing doesn't re-render the whole app.
@@ -177,6 +192,14 @@ export default function App() {
   const [remoteOpen, setRemoteOpen] = useState(false); // Remote-PC pairing (mobile)
   const openRemote = useCallback(() => setRemoteOpen(true), []);
   const [screenOpen, setScreenOpen] = useState(false); // Remote-desktop live view (mobile)
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [toast, setToast] = useState(null); // {text, id}: a brief confirmation pill
+  const notify = useCallback((text) => setToast({ text, id: Date.now() }), []);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Effective HUD config: the base preset recolored by the user/JARVIS screen
   // settings. Memoized so it keeps a stable identity across the many re-renders
@@ -195,10 +218,9 @@ export default function App() {
 
   // ── Publish the accent to :root so it drives the WHOLE app ──────────────────
   // The accent was only ever applied as an inline style on `.hud`, so it coloured
-  // the HUD subtree and nothing else. The fixed top bar, the mic FAB and every
-  // modal are siblings of <ViewportScale>, not descendants of `.hud` — they read
-  // index.css's own `--accent`, a hardcoded cyan literal. Picking "amber" recoloured
-  // the panels and left the entire chrome cyan.
+  // the HUD subtree and nothing else. Every modal is a sibling of `.hud`, not a
+  // descendant — they read index.css's own `--accent`, a hardcoded cyan literal.
+  // Picking "amber" recoloured the panels and left the entire chrome cyan.
   //
   // Setting the variables on documentElement makes one source of truth for both
   // trees: `.hud`'s inline style still wins inside the HUD (same value), and
@@ -223,6 +245,10 @@ export default function App() {
   });
   const togglePanel = useCallback(
     (key, val) => setPanels((p) => ({ ...p, [key]: val === undefined ? !p[key] : val })),
+    [],
+  );
+  const setAllPanels = useCallback(
+    (open) => setPanels((p) => Object.fromEntries(Object.keys(p).map((k) => [k, open]))),
     [],
   );
 
@@ -485,204 +511,397 @@ export default function App() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [uiCommand?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Send a message as if typed in chat, and show the chat so the reply is seen.
+  const askInChat = useCallback(
+    (text) => {
+      sendMessage(text);
+      setChatOpen(true);
+    },
+    [sendMessage],
+  );
+  const toggleAgents = useCallback(() => {
+    sendConfig({ agent_mode: !sysInfo.agent_mode });
+    notify(sysInfo.agent_mode ? "Simple mode" : "Agent mode: specialists on each request");
+  }, [sysInfo.agent_mode, sendConfig, notify]);
+  const pcPaired = Boolean(pcConfig?.host);
+
+  // ── Command palette entries (the desktop's Ctrl+K list, with the phone's menus) ──
+  // Built only while it's open, so routines added by voice show up the next time.
+  const paletteCommands = useMemo(() => {
+    if (!paletteOpen) return [];
+    const cmd = (id, group, label, icon, run, extra = {}) => ({
+      id,
+      group,
+      label,
+      icon,
+      run,
+      ...extra,
+    });
+    return [
+      cmd("chat", "Menus", "Open conversation", "chat", () => setChatOpen(true), {
+        keywords: "chat talk messages log",
+      }),
+      cmd(
+        "new-chat",
+        "Menus",
+        "New conversation",
+        "plus",
+        () => {
+          newConversation();
+          setChatOpen(true);
+        },
+        { keywords: "chat reset clear fresh" },
+      ),
+      cmd("memory", "Menus", "Memory — what JARVIS knows", "memory", () => setMemoryOpen(true), {
+        keywords: "facts playbooks remember forget saved chats",
+      }),
+      cmd("skills", "Menus", "Skills", "skills", () => setSkillsOpen(true), {
+        keywords: "qr clipboard tools",
+      }),
+      cmd("caps", "Menus", "What can JARVIS do?", "caps", () => setCapsOpen(true), {
+        keywords: "capabilities help features",
+      }),
+      cmd("activity", "Menus", "Tasks", "activity", () => setActivityOpen(true), {
+        keywords: "agent activity autopilot steps running",
+        state: anyTaskActive ? "Running" : null,
+      }),
+      cmd(
+        "power",
+        "Menus",
+        IS_MOBILE ? "Device — Wi-Fi, sound, battery" : "Power options",
+        "power",
+        () => setPowerOpen(true),
+        { keywords: "wifi bluetooth battery mute app control shutdown restart lock" },
+      ),
+      ...(IS_MOBILE
+        ? [
+            cmd("remote", "Menus", "Your PC and TV", "monitor", () => setRemoteOpen(true), {
+              keywords: "pair pc windows tv remote screen",
+              state: pcState === "online" ? "Online" : null,
+            }),
+          ]
+        : []),
+      cmd(
+        "customize",
+        "Menus",
+        "Customize the home screen",
+        "palette",
+        () => setCustomizeOpen(true),
+        {
+          keywords:
+            "theme preset colour color accent font glow corners background picture image layout cards iron man",
+        },
+      ),
+      cmd("settings", "Menus", "Settings", "settings", () => openSettings()),
+      cmd(
+        "agent-mode",
+        "Assistant",
+        sysInfo.agent_mode ? "Switch to simple mode" : "Switch to agent mode",
+        "route",
+        toggleAgents,
+        {
+          keywords: "agents agent mode simple coordinator specialist",
+          state: sysInfo.agent_mode ? "Agents" : null,
+        },
+      ),
+      ...agentsFor(pcPaired).map((a) =>
+        cmd(
+          `agent-${a.id}`,
+          "Assistant",
+          a.id === "auto" ? "Agents: let JARVIS pick (Auto)" : `Agents: use the ${a.name} agent`,
+          "route",
+          () => {
+            pickAgent(a.id);
+            notify(
+              a.id === "auto"
+                ? "Auto: JARVIS picks the agents"
+                : `${agentById(a.id).name} agent: your requests go to it`,
+            );
+          },
+          {
+            keywords: `agent ${a.name} @${a.handle} ${a.hint}`,
+            state: sysInfo.agent_mode && (activeAgent || "auto") === a.id ? "On" : null,
+          },
+        ),
+      ),
+      cmd("listen", "Voice", "Start listening", "mic", triggerListen, {
+        keywords: "talk speak microphone",
+      }),
+      cmd("stop", "Voice", "Stop speaking", "stop", stopSpeech, {
+        keywords: "silence quiet interrupt",
+      }),
+      cmd(
+        "mute",
+        "Voice",
+        muted ? "Unmute JARVIS" : "Mute JARVIS (text only)",
+        muted ? "volume" : "mute",
+        () => setMute(!muted),
+        { keywords: "sound silence voice", state: muted ? "Muted" : null },
+      ),
+      cmd(
+        "conv-mode",
+        "Voice",
+        conversationMode ? "Turn off conversation mode" : "Turn on conversation mode",
+        "talk",
+        () => setConversationModeOn(!conversationMode),
+        { keywords: "natural brief chatty", state: conversationMode ? "On" : null },
+      ),
+      cmd("expand-all", "Home screen", "Expand all cards", "chevDown", () => setAllPanels(true), {
+        keywords: "open show panels",
+      }),
+      cmd(
+        "collapse-all",
+        "Home screen",
+        "Collapse all cards",
+        "chevUp",
+        () => setAllPanels(false),
+        {
+          keywords: "minimize hide close panels",
+        },
+      ),
+      cmd(
+        "terminal",
+        "Home screen",
+        panels.terminal ? "Collapse the action log" : "Expand the action log",
+        "terminal",
+        () => togglePanel("terminal"),
+        { keywords: "command log terminal" },
+      ),
+      ...(IS_MOBILE
+        ? listRoutines().map((r) =>
+            cmd(
+              `routine-${r.name}`,
+              "Routines",
+              `Run routine: ${r.name}`,
+              "play",
+              async () => {
+                const res = await runAction({ type: "routine", do: "run", name: r.name });
+                if (res?.ok) sendMessage(res.summary, `Run ${r.name}`);
+              },
+              { keywords: `routine ${r.time || ""}` },
+            ),
+          )
+        : []),
+      ...SETTINGS_PAGES.map(([id, label, icon, words]) =>
+        cmd(`settings-${id}`, "Settings", `Settings: ${label}`, icon, () => openSettings(id), {
+          keywords: `preferences configure ${words}`,
+        }),
+      ),
+    ];
+  }, [
+    paletteOpen,
+    anyTaskActive,
+    pcState,
+    sysInfo.agent_mode,
+    toggleAgents,
+    pcPaired,
+    activeAgent,
+    pickAgent,
+    notify,
+    triggerListen,
+    stopSpeech,
+    muted,
+    setMute,
+    conversationMode,
+    setConversationModeOn,
+    setAllPanels,
+    panels.terminal,
+    togglePanel,
+    runAction,
+    sendMessage,
+    newConversation,
+    openSettings,
+  ]);
+
+  // Quick controls, in the home screen's header (the desktop's three groups).
+  const toolbar = (
+    <div className="tb" role="toolbar" aria-label="Quick controls">
+      <div className="tb-group" role="group" aria-label="Voice">
+        {/* Tap-to-cut: the phone has the STOP pill and the orb for this. */}
+        {status === "speaking" && !IS_MOBILE && (
+          <button
+            className="hud-fixed-btn hud-fixed-btn--silence"
+            aria-label="Stop speaking now"
+            title="Stop speaking now"
+            onClick={stopSpeech}
+          >
+            <Icon name="stop" />
+          </button>
+        )}
+        {/* Persistent mute toggle: keeps speech off (text still shows) until untoggled */}
+        <button
+          className={`hud-fixed-btn ${muted ? "hud-fixed-btn--muted" : ""}`}
+          aria-label={muted ? "Unmute JARVIS" : "Mute JARVIS (text only)"}
+          title={muted ? "Muted: replies show as text. Tap to unmute" : "Mute JARVIS (text only)"}
+          aria-pressed={muted}
+          onClick={() => setMute(!muted)}
+        >
+          <Icon name={muted ? "mute" : "volume"} />
+        </button>
+        {/* Conversation mode: the phone has it in the chat header. */}
+        {!IS_MOBILE && (
+          <button
+            className={`hud-fixed-btn ${conversationMode ? "hud-fixed-btn--listening" : ""}`}
+            aria-label="Conversation mode"
+            title={
+              conversationMode
+                ? "Conversation mode is on"
+                : "Conversation mode: short, natural replies"
+            }
+            aria-pressed={conversationMode}
+            onClick={() => setConversationModeOn(!conversationMode)}
+          >
+            <Icon name="talk" />
+          </button>
+        )}
+      </div>
+      <div className="tb-group" role="group" aria-label="Tasks and your PC">
+        {/* JARVIS's own web browser: open / close */}
+        {browserState.available && (
+          <button
+            className={`hud-fixed-btn ${browserState.open ? "hud-fixed-btn--armed" : ""}`}
+            aria-label="JARVIS's web browser"
+            title={
+              browserState.open
+                ? "JARVIS's browser is open — tap to close it"
+                : "Open JARVIS's web browser"
+            }
+            aria-pressed={browserState.open}
+            onClick={() => setBrowserOpen(!browserState.open)}
+          >
+            <Icon name="globe" />
+          </button>
+        )}
+        <button
+          className={`hud-fixed-btn ${anyTaskActive ? "hud-fixed-btn--busy" : ""}`}
+          aria-label={anyTaskActive ? "Tasks, one running" : "Tasks"}
+          title={
+            anyTaskActive ? "A task is running — see its steps" : "Tasks: steps and screenshots"
+          }
+          aria-pressed={activityOpen}
+          onClick={() => setActivityOpen(true)}
+        >
+          <Icon name="activity" />
+        </button>
+        {/* ANDROID FORK: pair + drive the user's Windows PC and TV from the phone */}
+        {IS_MOBILE && (
+          <button
+            className={`hud-fixed-btn ${pcState === "online" ? "hud-fixed-btn--armed" : ""}`}
+            aria-label="Your PC and TV"
+            title={
+              pcState === "online"
+                ? "Remote PC online (tap to manage)"
+                : pcConfig
+                  ? `Remote PC ${pcState}`
+                  : "Pair a Windows PC or set up your TV"
+            }
+            aria-pressed={remoteOpen}
+            onClick={() => setRemoteOpen(true)}
+          >
+            <Icon name="monitor" />
+          </button>
+        )}
+      </div>
+      <div className="tb-group" role="group" aria-label="App">
+        <button
+          className="hud-fixed-btn"
+          aria-label="Command palette"
+          title="Search menus, settings and actions"
+          onClick={() => setPaletteOpen(true)}
+        >
+          <Icon name="search" />
+        </button>
+        <button
+          className="hud-fixed-btn"
+          aria-label="Customize the home screen"
+          title="Customize the home screen"
+          onClick={() => setCustomizeOpen(true)}
+        >
+          <Icon name="palette" />
+        </button>
+        <button
+          className="hud-fixed-btn"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => openSettings()}
+        >
+          <Icon name="settings" />
+        </button>
+        <button
+          className="hud-fixed-btn"
+          aria-label={IS_MOBILE ? "Device" : "Power options"}
+          title={
+            IS_MOBILE
+              ? "Device: Wi-Fi, sound, battery, app control"
+              : "Power: lock, sleep, restart…"
+          }
+          onClick={() => setPowerOpen(true)}
+        >
+          <Icon name="power" />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <>
-      <ViewportScale>
-        <JarvisHUD
-          config={hudConfig}
-          screen={screen}
-          status={status}
-          telemetry={telemetry}
-          weather={weather}
-          netInfo={netInfo}
-          schedule={schedule}
-          messages={messages}
-          commands={commands}
-          onClearCommands={clearCommands}
-          recordings={recordings}
-          isConnected={isConnected}
-          allowedDirs={sysInfo.allowed_dirs || []}
-          panels={panels}
-          onTogglePanel={togglePanel}
-          chatOpen={chatOpen}
-          setChatOpen={setChatOpen}
-          skillsOpen={skillsOpen}
-          setSkillsOpen={setSkillsOpen}
-          capsOpen={capsOpen}
-          setCapsOpen={setCapsOpen}
-          powerOpen={powerOpen}
-          setPowerOpen={setPowerOpen}
-          memoryOpen={memoryOpen}
-          setMemoryOpen={setMemoryOpen}
-          memory={memory}
-          onRemember={rememberFact}
-          onForget={forgetMemory}
-          onSend={sendMessage}
-          onStop={stopSpeech}
-          onReset={resetConversation}
-          onUpload={sendUpload}
-          runAction={runAction}
-          onSaveDirs={saveDirs}
-          conversations={conversations}
-          onNewChat={newConversation}
-          onOpenConversation={openConversation}
-          onDeleteConversation={deleteConversation}
-          onRefreshConversations={listConversations}
-          onClearConversations={clearConversations}
-          sysInfo={sysInfo}
-          appControlOn={appControlOn}
-          pcConfig={pcConfig}
-          pcState={pcState}
-          tvConfig={tvConfig}
-          onOpenSettings={openSettings}
-          onOpenRemote={openRemote}
-          onListen={triggerListen}
-          conversationMode={conversationMode}
-          onConversationMode={setConversationModeOn}
-          activeAgent={activeAgent}
-          onPickAgent={pickAgent}
-          onToggleAgents={() => sendConfig({ agent_mode: !sysInfo.agent_mode })}
-        />
-      </ViewportScale>
-
-      {/* Fixed controls layered above the scaled stage. Hidden while the chat
-          panel is open — they're window-fixed (z 200) and would otherwise draw
-          on top of the chat header. */}
-      {!chatOpen && !memoryOpen && (
-        <div className="hud-fixed-controls">
-          {/* Phone: what JARVIS is doing stays in view once the core scrolls away. */}
-          {IS_MOBILE && (
-            <div className="hud-appbar-status" role="status">
-              <span
-                className="hud-appbar-dot"
-                style={{ background: (STATUS_META[status] ?? STATUS_META.idle).col }}
-              />
-              <span className="hud-appbar-state">
-                {(STATUS_META[status] ?? STATUS_META.idle).short}
-              </span>
-            </div>
-          )}
-          {/* Tap-to-cut: stop whatever JARVIS is saying right now (only while speaking).
-              The phone has the STOP pill for this, so a second stop here was clutter. */}
-          {status === "speaking" && !IS_MOBILE && (
-            <button
-              className="hud-fixed-btn hud-fixed-btn--silence"
-              title="Stop speaking now"
-              onClick={stopSpeech}
-            >
-              <Icon name="stop" />
-            </button>
-          )}
-          {/* Persistent mute toggle: keeps speech off (text still shows) until untoggled */}
-          <button
-            className={`hud-fixed-btn ${muted ? "hud-fixed-btn--muted" : ""}`}
-            title={muted ? "Unmute Jarvis" : "Mute Jarvis (text only)"}
-            aria-pressed={muted}
-            onClick={() => setMute(!muted)}
-          >
-            <Icon name={muted ? "volumeOff" : "volume"} />
-          </button>
-          {/* Natural conversation mode (shorter, chattier replies). The phone has it in
-              the chat header, and the dock's Chat for the log, so neither is up here. */}
-          {!IS_MOBILE && (
-            <button
-              className={`hud-fixed-btn ${conversationMode ? "hud-fixed-btn--listening" : ""}`}
-              title={
-                conversationMode
-                  ? "Conversation mode ON"
-                  : "Conversation mode (natural, brief replies)"
-              }
-              aria-pressed={conversationMode}
-              onClick={() => setConversationModeOn(!conversationMode)}
-            >
-              <Icon name="chat" />
-            </button>
-          )}
-          {!IS_MOBILE && (
-            <button
-              className={`hud-fixed-btn ${chatOpen ? "hud-fixed-btn--armed" : ""}`}
-              title="Open conversation log"
-              aria-pressed={chatOpen}
-              onClick={() => setChatOpen(true)}
-            >
-              <Icon name="terminal" />
-            </button>
-          )}
-          {/* JARVIS's own web browser: open / close */}
-          {browserState.available && (
-            <button
-              className={`hud-fixed-btn ${browserState.open ? "hud-fixed-btn--armed" : ""}`}
-              title={
-                browserState.open
-                  ? "JARVIS's browser is open — click to close it"
-                  : "Open JARVIS's web browser"
-              }
-              aria-pressed={browserState.open}
-              onClick={() => setBrowserOpen(!browserState.open)}
-            >
-              <Icon name="globe" />
-            </button>
-          )}
-          {/* Agent Activity — JARVIS's autopilot steps + the screenshots it saw */}
-          <button
-            className={`hud-fixed-btn ${anyTaskActive ? "hud-fixed-btn--armed" : ""}`}
-            title={anyTaskActive ? "Tasks — one is running" : "Tasks"}
-            aria-label={anyTaskActive ? "Tasks, one running" : "Tasks"}
-            aria-pressed={activityOpen}
-            onClick={() => setActivityOpen(true)}
-          >
-            <Icon name="activity" />
-          </button>
-          {/* ANDROID FORK: pair + drive the user's Windows PC from the phone (Phase 3) */}
-          {IS_MOBILE && (
-            <button
-              className={`hud-fixed-btn ${pcState === "online" ? "hud-fixed-btn--armed" : ""}`}
-              title={
-                pcState === "online"
-                  ? "Remote PC — online (tap to manage)"
-                  : pcConfig
-                    ? `Remote PC — ${pcState}`
-                    : "Pair a Windows PC or set up your TV"
-              }
-              aria-pressed={remoteOpen}
-              onClick={() => setRemoteOpen(true)}
-            >
-              <Icon name="monitor" />
-            </button>
-          )}
-          <button
-            className="hud-fixed-btn"
-            title="Customize the home screen"
-            aria-label="Customize the home screen"
-            onClick={() => setCustomizeOpen(true)}
-          >
-            <Icon name="palette" />
-          </button>
-          <button
-            className="hud-fixed-btn"
-            title="Settings"
-            aria-label="Settings"
-            onClick={() => openSettings()}
-          >
-            <Icon name="settings" />
-          </button>
-        </div>
-      )}
-
-      {/* ANDROID FORK: push-to-talk mic. Tap to start listening, tap again to send.
-          Mic → Groq Whisper → brain (see useBrain). */}
-      {IS_MOBILE && !hudOverlayOpen && (
-        <button
-          className={`mobile-mic${status === "listening" ? " mobile-mic--listening" : ""}${
-            status === "thinking" || status === "speaking" ? " mobile-mic--busy" : ""
-          }`}
-          onClick={triggerListen}
-          aria-label={status === "listening" ? "Stop and send" : "Tap to talk"}
-          title={status === "listening" ? "Listening — tap to send" : "Tap to talk"}
-        >
-          <Icon name={status === "listening" ? "stop" : "mic"} size={28} strokeWidth={1.8} />
-        </button>
-      )}
+      <JarvisHUD
+        config={hudConfig}
+        toolbar={toolbar}
+        screen={screen}
+        status={status}
+        activeTask={unifiedTasks.find((t) => ACTIVE_TASK_STATES.has(t.status))}
+        telemetry={telemetry}
+        weather={weather}
+        netInfo={netInfo}
+        schedule={schedule}
+        messages={messages}
+        commands={commands}
+        onClearCommands={clearCommands}
+        recordings={recordings}
+        allowedDirs={sysInfo.allowed_dirs || []}
+        panels={panels}
+        onTogglePanel={togglePanel}
+        chatOpen={chatOpen}
+        setChatOpen={setChatOpen}
+        skillsOpen={skillsOpen}
+        setSkillsOpen={setSkillsOpen}
+        capsOpen={capsOpen}
+        setCapsOpen={setCapsOpen}
+        powerOpen={powerOpen}
+        setPowerOpen={setPowerOpen}
+        memoryOpen={memoryOpen}
+        setMemoryOpen={setMemoryOpen}
+        memory={memory}
+        onRemember={rememberFact}
+        onForget={forgetMemory}
+        onSend={sendMessage}
+        onStop={stopSpeech}
+        onReset={resetConversation}
+        onUpload={sendUpload}
+        onNotify={notify}
+        runAction={runAction}
+        onSaveDirs={saveDirs}
+        conversations={conversations}
+        onNewChat={newConversation}
+        onOpenConversation={openConversation}
+        onDeleteConversation={deleteConversation}
+        onRefreshConversations={listConversations}
+        onClearConversations={clearConversations}
+        sysInfo={sysInfo}
+        appControlOn={appControlOn}
+        pcConfig={pcConfig}
+        pcState={pcState}
+        tvConfig={tvConfig}
+        onOpenSettings={openSettings}
+        onOpenRemote={openRemote}
+        onListen={triggerListen}
+        conversationMode={conversationMode}
+        onConversationMode={setConversationModeOn}
+        activeAgent={activeAgent}
+        onPickAgent={pickAgent}
+        onToggleAgents={toggleAgents}
+      />
 
       {(browserState.open || controlState.armed || !isConnected) && !IS_MOBILE && (
         <div className="hud-top-stack" role="status">
@@ -780,7 +999,25 @@ export default function App() {
           onRefreshModels={refreshModels}
           onRerankModels={rerankModels}
           onRepairSetup={repairSetup}
+          onOpenCustomize={() => {
+            setShowSettings(false);
+            setCustomizeOpen(true);
+          }}
         />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          commands={paletteCommands}
+          onClose={() => setPaletteOpen(false)}
+          onAsk={askInChat}
+        />
+      )}
+
+      {toast && (
+        <div key={toast.id} className="hud-toast" role="status">
+          {toast.text}
+        </div>
       )}
 
       {customizeOpen && (

@@ -9,6 +9,7 @@ import "@fontsource/orbitron/600.css";
 import "@fontsource/orbitron/700.css";
 import "@fontsource/orbitron/800.css";
 import "@fontsource/orbitron/900.css";
+import "@fontsource/inter/300.css";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
@@ -22,6 +23,7 @@ import ControlOverlay from "./components/ControlOverlay";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { isMobileViewport } from "./utils/isMobileViewport";
 import "./index.css";
+import "./ui.css";
 
 // Both windows load the same page. Detect which one we are by reading the
 // Tauri-injected window label. Falls back to "main" in browser dev mode.

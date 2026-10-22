@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Icon from "./Icon";
-import { ReactorCore } from "../hud/HudCore";
+import Orb from "../hud/Orb";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 import { checkKey } from "../brain/providers/models";
 import { extractProjectId } from "../brain/providers/vertexAuth";
@@ -224,7 +224,9 @@ export default function MobileOnboarding({ onSave }) {
       <div className="ob" role="dialog" aria-modal="true" aria-labelledby="ob-title">
         <div className="ob-inner ob-inner--intro">
           <header className="ob-hero">
-            <ReactorCore size={168} />
+            <div className="ob-orb">
+              <Orb label="JARVIS" />
+            </div>
             <div className="ob-word">J.A.R.V.I.S</div>
             <h1 id="ob-title" className="ob-title">
               Let&apos;s get you set up

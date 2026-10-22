@@ -421,6 +421,7 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       {
         action: str("What to change.", [
           "set_theme",
+          "set_style",
           "set_background",
           "set_density",
           "show_panel",
@@ -431,7 +432,10 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
           "move_panel",
           "reset",
         ]),
-        value: str("New value (colour / background / density)."),
+        value: str(
+          "New value: a colour, background (grid/solid/aurora/minimal), density, or " +
+            "style (modern / Iron Man / a saved theme's name).",
+        ),
         panel: str("Panel name for show/hide/toggle/move."),
         direction: str("up/down/left/right for move_panel."),
       },

@@ -1,1117 +1,16 @@
-/* HudPanels.jsx — all the ringing data panels + chat & OCR overlays.
-   Ported from jarvis-hud/hud-panels.jsx and wired to LIVE backend data
-   (telemetry / weather / netinfo / schedule / messages) passed in as props.
-   Exports each panel (shared values live in hudConstants.js)  */
+/* HudPanels.jsx — the menus that open over the home screen: Skills, Capabilities,
+   Device (the desktop's Power), Memory and the chat, plus the agent row. The home
+   screen's own cards are widgets.jsx. Each menu is a Sheet: full screen on a phone. */
 
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { IS_MOBILE } from "../hooks/useAssistant";
-import {
-  CornerBox,
-  RadialGauge,
-  MiniRadial,
-  SegBar,
-  Sparkline,
-  TickStrip,
-  DataRow,
-} from "./HudGauges";
-import { Waveform } from "./HudCore";
 import ResponseRenderer from "../components/ResponseRenderer";
 import Icon from "../components/Icon";
 import StateMessage from "../components/StateMessage";
 import Sheet, { ActionRow, Field, Group, HeaderButton, Toggle } from "../components/Sheet";
-import { STATUS_META } from "./hudConstants";
 import { useAndroidBack } from "../hooks/useAndroidBack";
-import { listRoutines, parseDays, routineWhen, saveRoutine } from "../brain/schedule/routines";
 import { digestEnabled, setDigestEnabled } from "../brain/memory/digest";
 import { agentById, agentsFor } from "../brain/agents";
-import { localISODate } from "../brain/schedule/store";
-
-// Coerce a telemetry field to a finite number (→0). A partial frame missing
-// cpu/ram/disk would otherwise blow up `d.cpu.toFixed(...)` and crash the panel
-// — the gpu/net reads already use `?? 0`, so this just makes the rest consistent.
-const n0 = (x) => (Number.isFinite(x) ? x : Number.isFinite(+x) ? +x : 0);
-
-/* ───────── live clock ───────── */
-function useClock() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return now;
-}
-
-/* ───────── rolling history of a live value (for real sparklines) ───────── */
-function useHistory(value, points = 46) {
-  const [hist, setHist] = useState(() => Array(points).fill(0));
-  // Adjust state during render when the input changes (React's documented pattern)
-  // instead of in an effect, which rendered every tick twice.
-  const [seen, setSeen] = useState(value);
-  if (value !== seen) {
-    setSeen(value);
-    setHist((h) => [...h.slice(1), Number.isFinite(value) ? value : 0]);
-  }
-  return hist;
-}
-
-export function ClockPanel() {
-  const now = useClock();
-  const hh = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  const ss = String(now.getSeconds()).padStart(2, "0");
-  const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-  const yr = now.getFullYear();
-  return (
-    <div className="clock">
-      <div className="clock-main">
-        <span className="clock-hh">{hh}</span>
-        <span className="clock-ss">{ss}</span>
-      </div>
-      <div className="clock-date">
-        {date} · {yr}
-      </div>
-      <TickStrip count={46} />
-    </div>
-  );
-}
-
-/* ───────── status + waveform ───────── */
-export function StatusPanel({ status, rgb }) {
-  const meta = STATUS_META[status] ?? STATUS_META.idle;
-  return (
-    <div className="statp">
-      <div className="statp-row">
-        <span
-          className="statp-dot"
-          style={{ background: meta.col, boxShadow: `0 0 12px ${meta.col}` }}
-        />
-        <span className="statp-label" style={{ color: meta.col }}>
-          {meta.label}
-        </span>
-      </div>
-      <Waveform status={status} bars={42} height={44} rgb={rgb} />
-    </div>
-  );
-}
-
-/* ───────── readiness (phone): what JARVIS can do right now ─────────
-   Every request depends on one of these. A row that's off says so here, before a
-   request fails on it, and tapping it goes to where it's fixed. */
-// A PC that's switched off isn't something to fix from the phone, so only a
-// rejected pairing reads as a warning.
-const PC_READOUT = {
-  idle: ["Not paired", "off"],
-  connecting: ["Connecting…", "off"],
-  online: ["Online", "on"],
-  offline: ["Offline", "off"],
-  unauthorized: ["Pairing rejected", "warn"],
-};
-
-export function ReadinessPanel({
-  sysInfo = {},
-  appControlOn,
-  pcConfig,
-  pcState,
-  tvConfig,
-  onOpenSettings,
-  onOpenRemote,
-  onOpenAppControl,
-}) {
-  const wake = sysInfo.wake_word !== false;
-  const ranked = sysInfo.routing?.models?.length ?? 0;
-  const pinned = sysInfo.model_override !== "auto" && sysInfo.model_override;
-  const [pcText, pcTone] = pcConfig ? PC_READOUT[pcState] || PC_READOUT.offline : PC_READOUT.idle;
-  const rows = [
-    {
-      icon: "mic",
-      label: "Voice",
-      value: wake ? "Wake word on" : "Mic button only",
-      tone: wake ? "on" : "off",
-      onClick: () => onOpenSettings("voice"),
-    },
-    {
-      icon: "hand",
-      label: "App control",
-      value: appControlOn == null ? "Checking…" : appControlOn ? "On" : "Off, tap to allow",
-      tone: appControlOn ? "on" : appControlOn === false ? "warn" : "off",
-      onClick: onOpenAppControl,
-    },
-    {
-      icon: "sparkle",
-      label: "Model",
-      value: pinned || (ranked ? `Auto · ${ranked} models` : "Auto"),
-      tone: "on",
-      onClick: () => onOpenSettings("models"),
-    },
-    { icon: "monitor", label: "PC", value: pcText, tone: pcTone, onClick: onOpenRemote },
-    {
-      icon: "tv",
-      label: "TV",
-      value: tvConfig ? tvConfig.model || "Set up" : "Not set up",
-      tone: tvConfig ? "on" : "off",
-      onClick: onOpenRemote,
-    },
-  ];
-  const toFix = rows.filter((r) => r.tone === "warn").length;
-  return (
-    <CornerBox title="Status" code={toFix ? `${toFix} to check` : "Ready"} slot="readiness">
-      <div className="rdy">
-        {rows.map((r) => (
-          <button key={r.label} type="button" className="rdy-row" onClick={r.onClick}>
-            <Icon name={r.icon} size={18} className="rdy-ico" />
-            <span className="rdy-label">{r.label}</span>
-            <span className={`sp-readout sp-readout--${r.tone} rdy-val`}>
-              <span className="rdy-val-t">{r.value}</span>
-            </span>
-            <Icon name="chevronRight" size={15} className="rdy-chev" />
-          </button>
-        ))}
-      </div>
-    </CornerBox>
-  );
-}
-
-/* ───────── routines (phone): the saved ones, one tap to run ─────────
-   They were voice-only: nothing on screen said which existed, when they fire or what
-   they do. Run goes the way a timed routine does — the routine's steps become an
-   ordinary turn (routines.ts), so each step still reports its own real result. */
-const DAY_MODES = [
-  ["daily", "Every day"],
-  ["weekdays", "Weekdays"],
-  ["weekends", "Weekends"],
-  ["custom", "Custom"],
-];
-const WEEK = [1, 2, 3, 4, 5, 6, 0]; // getDay() indexes, Monday first
-const DAY_SPEC = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const DAY_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-/** Add/edit one routine, saved by routines.ts's own checks — when they refuse, their
- *  words show here instead of the form quietly doing nothing. */
-function RoutineForm({ routine, onSaved, onCancel }) {
-  const spec = (routine?.days || "daily").trim().toLowerCase();
-  const savedSet = parseDays(spec) || new Set(WEEK);
-  const savedMode =
-    savedSet.size === 7 ? "daily" : spec === "weekdays" || spec === "weekends" ? spec : "custom";
-  const [name, setName] = useState(routine?.name || "");
-  const [steps, setSteps] = useState(routine?.prompt || "");
-  const [time, setTime] = useState(routine?.time || "");
-  const [home, setHome] = useState(routine?.trigger === "home");
-  const [mode, setMode] = useState(savedMode);
-  const [picked, setPicked] = useState(savedMode === "custom" ? savedSet : new Set());
-  const [error, setError] = useState("");
-  const edit = (set) => (v) => {
-    setError("");
-    set(v);
-  };
-  const pickMode = (m) => {
-    // Custom starts from the days already chosen: Weekdays, then Custom, then untick Friday.
-    if (m === "custom" && mode !== "custom") setPicked(parseDays(mode) || new Set());
-    edit(setMode)(m);
-  };
-  const toggleDay = (i) =>
-    edit(setPicked)((p) => {
-      const next = new Set(p);
-      if (!next.delete(i)) next.add(i);
-      return next;
-    });
-  const days =
-    mode === "custom"
-      ? WEEK.filter((i) => picked.has(i))
-          .map((i) => DAY_SPEC[i])
-          .join(",")
-      : mode;
-  const ready = name.trim() && steps.trim() && !(time && mode === "custom" && !picked.size);
-  const submit = (e) => {
-    e.preventDefault();
-    const res = saveRoutine(
-      { name, prompt: steps, time: home ? "" : time, days, trigger: home ? "home" : undefined },
-      routine?.name,
-    );
-    if (res.ok) onSaved(res.routine);
-    else setError(res.summary);
-  };
-
-  return (
-    <form className="sch-form rt-form" onSubmit={submit}>
-      <input
-        value={name}
-        onChange={(e) => edit(setName)(e.target.value)}
-        placeholder="Name, like bedtime"
-        aria-label="Routine name"
-        maxLength={60}
-        autoFocus={!routine}
-      />
-      <textarea
-        value={steps}
-        onChange={(e) => edit(setSteps)(e.target.value)}
-        placeholder="What it does, in plain words: turn on Do Not Disturb and set an alarm for 7"
-        aria-label="Steps"
-        maxLength={600}
-        rows={3}
-      />
-      <div className="cz-seg" role="group" aria-label="When it runs">
-        <button
-          type="button"
-          className={`cz-seg-btn ${!home ? "is-on" : ""}`}
-          aria-pressed={!home}
-          onClick={() => edit(setHome)(false)}
-        >
-          At a time or when asked
-        </button>
-        <button
-          type="button"
-          className={`cz-seg-btn ${home ? "is-on" : ""}`}
-          aria-pressed={home}
-          onClick={() => edit(setHome)(true)}
-        >
-          When I get home
-        </button>
-      </div>
-      {home ? (
-        <p className="rt-form-note">
-          When the phone joins your home Wi-Fi you get a notification; tap it and JARVIS runs this.
-          Home is the Wi-Fi where your TV or PC answers.
-        </p>
-      ) : (
-        <>
-          <div className="sch-form-row">
-            <input
-              className="sch-form-time"
-              type="time"
-              value={time}
-              onChange={(e) => edit(setTime)(e.target.value)}
-              aria-label="Time (optional)"
-            />
-            {time && (
-              <button type="button" className="sch-form-btn" onClick={() => edit(setTime)("")}>
-                No time
-              </button>
-            )}
-          </div>
-          {!time ? (
-            <p className="rt-form-note">No time: it runs only when you ask.</p>
-          ) : (
-            <>
-              <div className="cz-seg" role="group" aria-label="Days">
-                {DAY_MODES.map(([m, label]) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`cz-seg-btn ${mode === m ? "is-on" : ""}`}
-                    aria-pressed={mode === m}
-                    onClick={() => pickMode(m)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {mode === "custom" && (
-                <div className="cz-seg rt-days" role="group" aria-label="Pick days">
-                  {WEEK.map((i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className={`cz-seg-btn ${picked.has(i) ? "is-on" : ""}`}
-                      aria-pressed={picked.has(i)}
-                      aria-label={DAY_NAME[i]}
-                      onClick={() => toggleDay(i)}
-                    >
-                      {DAY_NAME[i].slice(0, 2)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-      {error && (
-        <p className="rt-form-err" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="sch-form-row rt-form-go">
-        <button type="button" className="sch-form-btn" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="sch-form-btn sch-form-btn--go" disabled={!ready}>
-          {routine ? "Save" : "Add"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-export function RoutinesPanel({ status, runAction, onSend }) {
-  const [, refresh] = useState(0);
-  const [openName, setOpenName] = useState(null); // the routine showing its steps
-  const [armed, setArmed] = useState(null); // name awaiting Remove's confirming tap
-  const [editing, setEditing] = useState(null); // null | true (a new one) | the name being edited
-  // ponytail: re-read on every HUD render (a few hundred bytes from localStorage), so a
-  // routine added or removed by voice shows without a subscription.
-  const list = listRoutines();
-  const today = localISODate(new Date());
-  const busy = status === "thinking" || status === "working" || status === "speaking";
-
-  const run = async (r) => {
-    const res = await runAction({ type: "routine", do: "run", name: r.name });
-    if (res?.ok) onSend(res.summary, `Run ${r.name}`);
-    refresh((n) => n + 1);
-  };
-  const remove = async (r) => {
-    if (armed !== r.name) return setArmed(r.name);
-    setArmed(null);
-    await runAction({ type: "routine", do: "remove", name: r.name });
-    refresh((n) => n + 1);
-  };
-  const saved = (r) => {
-    setEditing(null);
-    setOpenName(r.name);
-  };
-  const cancel = () => setEditing(null);
-
-  return (
-    <CornerBox
-      title="Routines"
-      code={list.length ? `${list.length} saved` : ""}
-      slot="routines"
-      collapsible
-    >
-      {list.length === 0 && editing !== true ? (
-        <StateMessage variant="empty" icon="play" title="No routines yet">
-          Add one below, or say “make a routine called bedtime that turns on Do Not Disturb every
-          day at 10 pm”.
-        </StateMessage>
-      ) : (
-        <div className="rt">
-          {list.map((r) => {
-            const expanded = openName === r.name;
-            if (editing === r.name) {
-              return (
-                <div key={r.name} className="rt-item">
-                  <RoutineForm routine={r} onSaved={saved} onCancel={cancel} />
-                </div>
-              );
-            }
-            return (
-              <div key={r.name} className={`rt-item ${expanded ? "is-open" : ""}`}>
-                <div className="rt-row">
-                  <button
-                    type="button"
-                    className="rt-main"
-                    aria-expanded={expanded}
-                    onClick={() => {
-                      setOpenName(expanded ? null : r.name);
-                      setArmed(null);
-                    }}
-                  >
-                    <span className="rt-name">{r.name}</span>
-                    <span className="rt-when">
-                      {routineWhen(r)}
-                      {r.time && r.lastRun === today ? " · ran today" : ""}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="rt-run"
-                    disabled={busy}
-                    onClick={() => run(r)}
-                    aria-label={`Run ${r.name}`}
-                  >
-                    <Icon name="play" size={14} />
-                    Run
-                  </button>
-                </div>
-                {expanded && (
-                  <div className="rt-detail">
-                    <p className="rt-steps">{r.prompt}</p>
-                    <div className="rt-acts">
-                      <button
-                        type="button"
-                        className="rt-remove"
-                        onClick={() => {
-                          setArmed(null);
-                          setEditing(r.name);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className={`rt-remove ${armed === r.name ? "is-armed" : ""}`}
-                        onClick={() => remove(r)}
-                        onBlur={() => armed === r.name && setArmed(null)}
-                      >
-                        {armed === r.name ? "Tap again to remove" : "Remove"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {editing === true && (
-            <div className="rt-item">
-              <RoutineForm onSaved={saved} onCancel={cancel} />
-            </div>
-          )}
-          <p className="rt-hint">
-            Run one by saying its name. At its time a timed one runs if JARVIS is open, and
-            otherwise posts a notification: tap it to run.
-          </p>
-        </div>
-      )}
-      {editing === null && (
-        <button type="button" className="sch-add" onClick={() => setEditing(true)}>
-          <Icon name="plus" size={14} /> Add routine
-        </button>
-      )}
-    </CornerBox>
-  );
-}
-
-/* ───────── phone cards: one row style, one meter ─────────
-   The phone's panels were the desktop stage's instrument cluster squeezed into a
-   column: radial gauges, dotted-leader rows in spaced capitals, battery drawn three
-   times and a "TEMP" percentage. Here every card is label → value rows, a thin bar
-   where a proportion means something, and its header carries the one-line summary
-   (so a collapsed card still answers its question). */
-const gb = (x) => {
-  const v = n0(x);
-  return v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
-};
-
-function Meter({ pct, tone }) {
-  return (
-    <span className={`ph-meter ${tone ? `ph-meter--${tone}` : ""}`} aria-hidden="true">
-      <span style={{ width: `${Math.max(0, Math.min(100, n0(pct)))}%` }} />
-    </span>
-  );
-}
-
-function Stat({ label, value, pct, tone }) {
-  return (
-    <div className="ph-stat">
-      <span className="ph-stat-k">{label}</span>
-      <span className={`ph-stat-v ${tone === "warn" ? "is-warn" : ""}`}>{value}</span>
-      {pct != null && <Meter pct={pct} tone={tone} />}
-    </div>
-  );
-}
-
-/* ───────── system stats (radials) ───────── */
-export function SysStatsPanel({ d, collapsible, open, onToggle }) {
-  if (IS_MOBILE) {
-    // Battery has its own card; CPU isn't readable by apps since Android 8.
-    const known = d.diskTotalGb > 0;
-    const diskPct = n0(d.disk);
-    return (
-      <CornerBox
-        title="Device"
-        code={known ? `${gb(n0(d.diskTotalGb) - n0(d.diskUsedGb))} GB free` : ""}
-        slot="sysstats"
-        collapsible={collapsible}
-        open={open}
-        onToggle={onToggle}
-      >
-        {known ? (
-          <div className="ph-stats">
-            <Stat
-              label="Memory in use"
-              value={`${gb((n0(d.ram) / 100) * d.ramTotalGb)} of ${gb(d.ramTotalGb)} GB`}
-              pct={d.ram}
-            />
-            <Stat
-              label="Storage used"
-              value={`${gb(d.diskUsedGb)} of ${gb(d.diskTotalGb)} GB`}
-              pct={diskPct}
-              tone={diskPct >= 90 ? "warn" : undefined}
-            />
-          </div>
-        ) : (
-          <StateMessage variant="empty" icon="info" title="No readings yet">
-            Memory and storage come from the phone itself.
-          </StateMessage>
-        )}
-      </CornerBox>
-    );
-  }
-  const tempSub = d.temp != null ? `${n0(d.temp).toFixed(0)}°C` : `${n0(d.cpu).toFixed(0)}% load`;
-  const ramSub = d.ramTotalGb
-    ? `${Math.round((n0(d.ram) / 100) * d.ramTotalGb * 10) / 10} / ${Math.round(d.ramTotalGb)} GB`
-    : `${n0(d.ram).toFixed(0)}% used`;
-  return (
-    <CornerBox
-      title="System"
-      code="SYS·01"
-      slot="sysstats"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      <div className="sys-grid">
-        <RadialGauge value={d.cpu} label="CPU" size={106} sub={tempSub} />
-        <RadialGauge value={d.ram} label="MEMORY" size={106} sub={ramSub} />
-      </div>
-      <div className="sys-mini">
-        <MiniRadial
-          value={d.gpu ?? 0}
-          label="GPU"
-          size={60}
-          sub={d.gpuName || `${n0(d.gpu ?? 0)}%`}
-        />
-        <MiniRadial
-          value={d.diskActivity ?? 0}
-          label="DISK"
-          size={60}
-          sub={
-            d.diskTotalGb
-              ? `${Math.round(n0(d.diskUsedGb))} / ${Math.round(n0(d.diskTotalGb))} GB`
-              : `${n0(d.disk).toFixed(0)}% used`
-          }
-        />
-        <MiniRadial
-          value={d.net ?? 0}
-          label="NET"
-          size={60}
-          sub={d.down > 0 ? `${fmtMbps(d.down)} Mbps` : d.linkLabel || "ONLINE"}
-        />
-      </div>
-    </CornerBox>
-  );
-}
-
-/* ───────── power / battery ───────── */
-export function PowerPanel({ d, collapsible, open, onToggle }) {
-  const pct = d.batteryPct;
-  const hasBattery = pct != null;
-  if (IS_MOBILE) {
-    const low = hasBattery && pct < 20 && !d.charging;
-    const hot = d.temp != null && d.temp >= 45;
-    return (
-      <CornerBox
-        title="Battery"
-        code={hasBattery ? `${Math.round(pct)}%${d.charging ? ", charging" : ""}` : ""}
-        slot="power"
-        collapsible={collapsible}
-        open={open}
-        onToggle={onToggle}
-      >
-        {hasBattery ? (
-          <>
-            <div className="ph-batt">
-              <span className={`ph-big ${low ? "is-warn" : ""}`}>
-                {Math.round(pct)}
-                <small>%</small>
-              </span>
-              <span className="ph-batt-state">
-                {d.charging ? "Charging" : "On battery"}
-                {d.remaining && <span>{d.remaining}</span>}
-              </span>
-            </div>
-            <Meter pct={pct} tone={low ? "warn" : d.charging ? "ok" : undefined} />
-            {d.temp != null && (
-              <div className="ph-stats">
-                <Stat
-                  label="Temperature"
-                  value={`${Math.round(d.temp)} °C${hot ? ", hot" : ""}`}
-                  tone={hot ? "warn" : undefined}
-                />
-              </div>
-            )}
-          </>
-        ) : (
-          <StateMessage variant="empty" icon="battery" title="No battery reading">
-            The level shows here once the phone reports it.
-          </StateMessage>
-        )}
-      </CornerBox>
-    );
-  }
-  const shown = hasBattery ? pct : 0;
-  const label = !hasBattery ? "BATTERY" : d.charging ? "CHARGING" : "BATTERY";
-  return (
-    <CornerBox
-      title="Power"
-      code="PWR"
-      slot="power"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      <div className="pwr">
-        <RadialGauge value={shown} label={label} size={96} unit="%" />
-        <div className="pwr-meta">
-          <DataRow
-            k="SOURCE"
-            v={!hasBattery ? "UNKNOWN" : d.charging ? "AC / USB" : "CELL"}
-            accent
-          />
-          <DataRow k="STATE" v={!hasBattery ? "—" : d.charging ? "CHARGING" : "DISCHARGING"} />
-          <DataRow k="REMAINING" v={d.remaining || "—"} />
-          <DataRow k="LEVEL" v={hasBattery ? `${Math.round(pct)}%` : "—"} accent />
-        </div>
-      </div>
-      {hasBattery && <SegBar value={shown} segs={18} label="OUTPUT" />}
-    </CornerBox>
-  );
-}
-
-/* ───────── weather ───────── */
-const DEFAULT_WEATHER = {
-  temp: null,
-  condition: "—",
-  location: "LOCATING…",
-  humidity: null,
-  wind: "—",
-  aqi: null,
-  hours: [],
-};
-// The brain's WMO table hands out emoji; the card draws them as line icons in the
-// accent like everything else. Clear and partly cloudy turn to night after dark.
-const WX_ICON = {
-  "☀": "sun",
-  "🌤": "cloudSun",
-  "⛅": "cloudSun",
-  "☁": "cloud",
-  "🌫": "fog",
-  "🌦": "rain",
-  "🌧": "rain",
-  "🌨": "snow",
-  "❄": "snow",
-  "⛈": "storm",
-};
-function wxIcon(glyph, hhmm) {
-  const name = WX_ICON[glyph];
-  const h = Number(String(hhmm || "").slice(0, 2));
-  const night = h < 6 || h >= 19;
-  if (night && name === "sun") return "moon";
-  if (night && name === "cloudSun") return "cloud";
-  return name;
-}
-const sentence = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : "");
-
-function WeatherCard({ w, collapsible, open, onToggle }) {
-  const city = (w.location || "").split(",")[0];
-  // "Now" is the current observation everywhere on the card — the big icon, and the
-  // strip's first column — not the hourly forecast for this hour, which can disagree.
-  const nowT = w.hours?.[0]?.t;
-  const icon = wxIcon(w.icon || w.hours?.[0]?.i, nowT);
-  return (
-    <CornerBox
-      title="Weather"
-      code={w.temp != null ? `${Math.round(w.temp)}°${city ? ` · ${city}` : ""}` : ""}
-      slot="weather"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      {w.temp == null ? (
-        <StateMessage variant="empty" icon="cloud" title="No forecast yet">
-          It needs your location. If it doesn&apos;t appear, set one in Settings, Location.
-        </StateMessage>
-      ) : (
-        <>
-          <div className="ph-wx">
-            {icon && <Icon name={icon} size={38} strokeWidth={1.3} className="ph-wx-ico" />}
-            <span className="ph-big">{Math.round(w.temp)}°</span>
-            <span className="ph-wx-meta">
-              <span className="ph-wx-cond">{sentence(w.condition)}</span>
-              <span className="ph-wx-loc">{w.location}</span>
-            </span>
-          </div>
-          <div className="ph-stats">
-            {w.humidity != null && <Stat label="Humidity" value={`${Math.round(w.humidity)}%`} />}
-            {w.wind && w.wind !== "—" && <Stat label="Wind" value={w.wind} />}
-            {w.aqi != null && <Stat label="Air quality" value={`AQI ${w.aqi}`} />}
-          </div>
-          {w.hours?.length > 0 && (
-            <div className="ph-hours">
-              {w.hours.slice(0, 6).map((h, i) => {
-                const hi = wxIcon(i === 0 && w.icon ? w.icon : h.i, h.t);
-                const c = i === 0 && w.temp != null ? w.temp : h.c;
-                return (
-                  <div key={i} className="ph-hour">
-                    <span className="ph-hour-t">{i === 0 ? "Now" : h.t}</span>
-                    {hi ? <Icon name={hi} size={20} /> : <span className="ph-hour-gap" />}
-                    <span className="ph-hour-c">{c != null ? `${Math.round(n0(c))}°` : "—"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-    </CornerBox>
-  );
-}
-
-export function WeatherPanel({ weather, collapsible, open, onToggle }) {
-  const w = weather || DEFAULT_WEATHER;
-  if (IS_MOBILE) {
-    return <WeatherCard w={w} collapsible={collapsible} open={open} onToggle={onToggle} />;
-  }
-  return (
-    <CornerBox
-      title="Weather"
-      code="ATM"
-      slot="weather"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      <div className="wx-now">
-        <span className="wx-temp">{w.temp != null ? `${Math.round(w.temp)}°` : "—"}</span>
-        <div className="wx-meta">
-          <span className="wx-cond">{(w.condition || "—").toUpperCase()}</span>
-          <span className="wx-loc">{(w.location || "—").toUpperCase()}</span>
-        </div>
-      </div>
-      <div className="wx-stats">
-        <DataRow k="HUMIDITY" v={w.humidity != null ? `${Math.round(w.humidity)}%` : "—"} />
-        <DataRow k="WIND" v={w.wind || "—"} />
-        {w.aqi != null && <DataRow k="AQI" v={`${w.aqi}`} accent />}
-      </div>
-      {w.hours?.length > 0 && (
-        <div className="wx-hours">
-          {w.hours.slice(0, 6).map((h, i) => (
-            <div key={i} className="wx-h">
-              <span className="wx-h-t">{h.t}</span>
-              <span className="wx-h-i">{h.i}</span>
-              <span className="wx-h-c">{h.c != null ? `${Math.round(n0(h.c))}°` : "—"}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </CornerBox>
-  );
-}
-
-/* ───────── network / connectivity ───────── */
-// Live throughput: 1-decimal under 10 Mbps so background/idle traffic is still
-// visible instead of rounding to a dead "0"; whole numbers once it's busy.
-const fmtMbps = (v) => (v == null ? "0.0" : v < 10 ? v.toFixed(1) : v.toFixed(0));
-
-// deviceTelemetry's link labels, in words.
-function linkName(label) {
-  if (label === "WIFI") return "Wi-Fi";
-  if (/^[2-5]G$/.test(label || "")) return `Mobile data, ${label}`;
-  if (label === "OFFLINE") return "Offline";
-  return "Connected";
-}
-
-export function NetworkPanel({ d, netInfo, collapsible, open, onToggle }) {
-  const n = netInfo || {};
-  const downHist = useHistory(d.down);
-  if (IS_MOBILE) {
-    // The WebView only estimates speed and latency (Chromium caps the speed estimate
-    // at 10 Mbps) and can't see upload at all, so the card says "about" and shows no
-    // live graph or upload figure it doesn't have.
-    const link = linkName(d.linkLabel);
-    return (
-      <CornerBox
-        title="Network"
-        code={link.replace(/^Mobile data, /, "")}
-        slot="network"
-        collapsible={collapsible}
-        open={open}
-        onToggle={onToggle}
-      >
-        <div className="ph-stats">
-          <Stat
-            label="Connection"
-            value={link}
-            tone={d.linkLabel === "OFFLINE" ? "warn" : undefined}
-          />
-          {d.down > 0 && (
-            <Stat
-              label="Speed, estimated"
-              value={d.down >= 10 ? "10+ Mbps" : `about ${fmtMbps(d.down)} Mbps`}
-            />
-          )}
-          {d.ping > 0 && <Stat label="Latency, estimated" value={`about ${d.ping} ms`} />}
-          {n.publicIp && <Stat label="Public IP" value={n.publicIp} />}
-          {n.location && <Stat label="Located near" value={n.location} />}
-        </div>
-      </CornerBox>
-    );
-  }
-  return (
-    <CornerBox
-      title="Network"
-      code="NET·LINK"
-      slot="network"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      <div className="net-rates">
-        <div className="net-rate">
-          <span className="net-arrow">▼</span>
-          <span className="net-num">{fmtMbps(d.down)}</span>
-          <span className="net-u">Mbps DOWN</span>
-        </div>
-        <div className="net-rate">
-          <span className="net-arrow up">▲</span>
-          <span className="net-num">{fmtMbps(d.up)}</span>
-          <span className="net-u">Mbps UP</span>
-        </div>
-      </div>
-      <Sparkline points={42} height={34} data={downHist} />
-      <div className="net-meta">
-        <DataRow k="PING" v={d.ping ? `${d.ping} ms` : "—"} accent />
-        <DataRow k="LINK" v={d.linkLabel || (d.down > 0 ? "ACTIVE" : "—")} />
-        <DataRow k="PUBLIC IP" v={n.publicIp || "—"} />
-        <DataRow k="LOCATION" v={n.location || "—"} />
-      </div>
-    </CornerBox>
-  );
-}
-
-/* ───────── schedule / agenda (editable) ───────── */
-// Add/edit happen in a form inside the panel. They were two window.prompt() boxes
-// in a row: a browser dialog with no time picker, and no way to fix the first
-// answer once you were on the second.
-function AgendaForm({ item, onSave, onCancel }) {
-  const [task, setTask] = useState(item?.task || "");
-  const [time, setTime] = useState(/^\d{2}:\d{2}$/.test(item?.time || "") ? item.time : "");
-  const submit = (e) => {
-    e.preventDefault();
-    if (task.trim()) onSave(task.trim(), time);
-  };
-  return (
-    <form className="sch-form" onSubmit={submit}>
-      <input
-        className="sch-form-task"
-        value={task}
-        onChange={(e) => setTask(e.target.value)}
-        placeholder="What is it?"
-        aria-label="Agenda item"
-        maxLength={120}
-        autoFocus
-      />
-      <div className="sch-form-row">
-        <input
-          className="sch-form-time"
-          type="time"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-          aria-label="Time (optional)"
-        />
-        <button type="button" className="sch-form-btn" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="sch-form-btn sch-form-btn--go" disabled={!task.trim()}>
-          {item ? "Save" : "Add"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-export function SchedulePanel({ items, collapsible, open, onToggle, runAction }) {
-  const list = items || [];
-  const editable = typeof runAction === "function";
-  const [editing, setEditing] = useState(null); // null | "new" | the item being edited
-
-  const save = (task, time) => {
-    if (editing === "new") {
-      runAction({ type: "schedule", do: "add", day: "today", time, task });
-    } else {
-      runAction({
-        type: "schedule",
-        do: "edit",
-        day: "today",
-        match: editing.task,
-        new_task: task,
-        new_time: time || editing.time,
-      });
-    }
-    setEditing(null);
-  };
-  const removeItem = (it) =>
-    runAction({ type: "schedule", do: "remove", day: "today", match: it.task });
-
-  return (
-    <CornerBox
-      title="Agenda"
-      code={IS_MOBILE ? (list.length ? `${list.length} today` : "Nothing today") : "TODAY"}
-      slot="schedule"
-      collapsible={collapsible}
-      open={open}
-      onToggle={onToggle}
-    >
-      <div className="sch">
-        {list.length === 0 && editing !== "new" ? (
-          <StateMessage variant="empty" icon="calendar" title="Nothing scheduled today">
-            Ask JARVIS to remind you about something and it will show up here.
-          </StateMessage>
-        ) : (
-          list.map((it, i) =>
-            editing?.task === it.task ? (
-              <AgendaForm key={i} item={it} onSave={save} onCancel={() => setEditing(null)} />
-            ) : (
-              <div key={i} className={`sch-row ${it.now ? "now" : ""} ${it.done ? "done" : ""}`}>
-                <span className="sch-t">{it.time}</span>
-                <span className="sch-track">
-                  <span className="sch-dot" />
-                </span>
-                <span className="sch-task">{it.task}</span>
-                {it.duration && <span className="sch-dur">{it.duration}</span>}
-                {editable && (
-                  <span className="sch-edit">
-                    <button
-                      title="Edit"
-                      aria-label={`Edit ${it.task}`}
-                      onClick={() => setEditing(it)}
-                    >
-                      <Icon name="pencil" size={13} />
-                    </button>
-                    <button
-                      title="Remove"
-                      aria-label={`Remove ${it.task}`}
-                      onClick={() => removeItem(it)}
-                    >
-                      <Icon name="close" size={13} />
-                    </button>
-                  </span>
-                )}
-              </div>
-            ),
-          )
-        )}
-        {editing === "new" && <AgendaForm onSave={save} onCancel={() => setEditing(null)} />}
-      </div>
-      {editable && editing === null && (
-        <button className="sch-add" onClick={() => setEditing("new")}>
-          <Icon name="plus" size={14} /> Add item
-        </button>
-      )}
-    </CornerBox>
-  );
-}
-
-/* ───────── command log — JARVIS's mini "terminal" (collapsible) ───────── */
-/** Two taps to clear: the first arms it, the second (within a few seconds) clears. */
-function ClearLogButton({ onClear }) {
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 3000);
-    return () => clearTimeout(t);
-  }, [armed]);
-  return (
-    <button
-      type="button"
-      className={`term-clear ${armed ? "term-clear--armed" : ""}`}
-      onClick={() => {
-        if (!armed) return setArmed(true);
-        setArmed(false);
-        onClear();
-      }}
-      onBlur={() => setArmed(false)}
-    >
-      <Icon name="trash" size={14} />
-      {armed ? "Clear log?" : "Clear"}
-    </button>
-  );
-}
-
-export function TerminalPanel({ commands = [], onClear, open, onToggle }) {
-  const bodyRef = useRef(null);
-  const [expanded, setExpanded] = useState(null); // index of the line shown in full
-  useEffect(() => {
-    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [commands, open]);
-  const fmtTime = (ts) => {
-    try {
-      return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } catch {
-      return "";
-    }
-  };
-  return (
-    <CornerBox
-      title={IS_MOBILE ? "Action log" : "Terminal"}
-      code={IS_MOBILE ? (commands.length ? `${commands.length} actions` : "") : "LOG"}
-      slot="terminal"
-      collapsible
-      open={open}
-      onToggle={onToggle}
-      action={open && onClear && commands.length > 0 ? <ClearLogButton onClear={onClear} /> : null}
-    >
-      <div className="term" ref={bodyRef}>
-        {commands.length === 0 && (
-          <StateMessage variant="empty" icon="terminal" title="Nothing run yet">
-            Every action JARVIS takes for you is logged here, newest last.
-          </StateMessage>
-        )}
-        {commands.map((c, i) => (
-          <button
-            type="button"
-            key={i}
-            className={`term-line ${c.ok === false ? "term-err" : ""} ${expanded === i ? "term-line--open" : ""}`}
-            onClick={() => setExpanded(expanded === i ? null : i)}
-            aria-expanded={c.message ? expanded === i : undefined}
-          >
-            <span className="term-head">
-              <span className="term-prompt" aria-label={c.ok === false ? "Failed" : "Done"}>
-                {c.ok === false ? "✗" : "›"}
-              </span>
-              <span className="term-cmd">
-                {c.type}
-                {c.target ? ` ${c.target}` : ""}
-              </span>
-              <span className="term-t">{fmtTime(c.ts)}</span>
-            </span>
-            {c.message && <span className="term-out">{c.message}</span>}
-          </button>
-        ))}
-      </div>
-    </CornerBox>
-  );
-}
-
-/* ───────── bottom dock launcher (replaces the quick-actions grid) ───────── */
-// `unread`: JARVIS replied while the chat was closed (a spoken turn) — a dot, not a
-// count: the old total-message badge read "1" from the launch greeting forever.
-export function DockBar({
-  onOpenSkills,
-  onOpenCaps,
-  onOpenPower,
-  onOpenMemory,
-  onOpenChat,
-  unread,
-}) {
-  const items = [
-    { l: "Skills", i: "sparkle", on: onOpenSkills },
-    { l: "Memory", i: "memory", on: onOpenMemory },
-    { l: "Capabilities", i: "help", on: onOpenCaps },
-    { l: IS_MOBILE ? "Device" : "Power", i: "power", on: onOpenPower },
-  ];
-  return (
-    <nav className="dock" data-slot="dock" aria-label="JARVIS menus">
-      {items.map((it) => (
-        <button key={it.l} className="dock-btn" onClick={it.on}>
-          <span className="dock-i">
-            <Icon name={it.i} size={18} />
-          </span>
-          <span className="dock-l">{it.l}</span>
-        </button>
-      ))}
-      <button
-        className="dock-btn dock-btn--chat"
-        onClick={onOpenChat}
-        aria-label={unread ? "Conversation, new reply" : "Conversation"}
-      >
-        <span className="dock-i">
-          <Icon name="chat" size={18} />
-        </span>
-        <span className="dock-l">{IS_MOBILE ? "Chat" : "Conversation"}</span>
-        {unread && <span className="dock-badge" aria-hidden="true" />}
-      </button>
-    </nav>
-  );
-}
 
 /* ───────── Skills — quick tools, with their results shown in place ───────── */
 export function SkillsOverlay({
@@ -1149,7 +48,12 @@ export function SkillsOverlay({
   };
 
   return (
-    <Sheet open={open} title="Skills" onClose={onClose}>
+    <Sheet
+      open={open}
+      title="Skills"
+      sub="Quick tools JARVIS can run for you right now"
+      onClose={onClose}
+    >
       <div className="sp-sheet">
         <Group title="QR code">
           <Field hint="Anyone who scans it gets this link or text.">
@@ -1443,15 +347,55 @@ const CAPABILITIES = [
   { group: "Apps", items: ["Spotify: play, pause, next, previous, play a song"] },
 ];
 
+// Everything an item says, for the search box.
+const capText = (it) =>
+  (typeof it === "string" ? it : [it.t, it.say, it.note].filter(Boolean).join(" ")).toLowerCase();
+
 export function CapabilitiesOverlay({ open, onClose, onTry }) {
-  const caps = IS_MOBILE ? MOBILE_CAPABILITIES : CAPABILITIES;
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const all = IS_MOBILE ? MOBILE_CAPABILITIES : CAPABILITIES;
+  const caps = q
+    ? all
+        .map((c) =>
+          c.group.toLowerCase().includes(q)
+            ? c
+            : { ...c, items: c.items.filter((it) => capText(it).includes(q)) },
+        )
+        .filter((c) => c.items.length)
+    : all;
   return (
-    <Sheet open={open} title="Capabilities" onClose={onClose}>
+    <Sheet
+      open={open}
+      title="Capabilities"
+      sub="Just ask in plain language — by voice or in chat"
+      onClose={onClose}
+    >
       <div className="sp-sheet">
-        <p className="sp-lede">
-          Ask in your own words, by voice or text.
-          {onTry && IS_MOBILE ? " Tap an example to put it in the chat box." : ""}
-        </p>
+        <label className="sp-search">
+          <Icon name="search" size={16} />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search what JARVIS can do…"
+            aria-label="Search capabilities"
+          />
+        </label>
+        {!q && onTry && IS_MOBILE && (
+          <p className="sp-lede">Tap an example to put it in the chat box.</p>
+        )}
+        {caps.length === 0 && (
+          <div className="sp-none">
+            <span>Nothing matches “{query}”.</span>
+            {onTry && (
+              <button type="button" className="btn btn--sm" onClick={() => onTry(query.trim())}>
+                <Icon name="send" size={13} />
+                Ask JARVIS anyway
+              </button>
+            )}
+          </div>
+        )}
         {caps.map((c) => (
           <Group key={c.group} title={c.group}>
             {c.items.map((it) => {
@@ -1549,6 +493,7 @@ export function MemoryOverlay({
   const [digestOn, setDigestOn] = useState(digestEnabled);
   const [armed, setArmed] = useState(null); // id awaiting its confirming second tap
   const [focus, setFocus] = useState(null); // id picked on the timeline
+  const [query, setQuery] = useState("");
   const mainRef = useRef(null);
   const m = memory || {};
   const lists = {
@@ -1613,7 +558,18 @@ export function MemoryOverlay({
   };
   const row = (id) => ({ "data-mem": id, className: focus === id ? "is-focus" : "" });
   const cur = MEM_KINDS.find((k) => k.key === tab);
-  const list = lists[tab];
+  const q = query.trim().toLowerCase();
+  const memText = (key, x) =>
+    [memTitle(key, x), x.steps, ...(x.triggers || [])].filter(Boolean).join(" ").toLowerCase();
+  const list = q ? lists[tab].filter((x) => memText(tab, x).includes(q)) : lists[tab];
+  const hits = q
+    ? Object.fromEntries(
+        MEM_KINDS.map((k) => [
+          k.key,
+          lists[k.key].filter((x) => memText(k.key, x).includes(q)).length,
+        ]),
+      )
+    : null;
 
   return (
     <div className={`memx ${open ? "open" : ""}`} aria-hidden={!open}>
@@ -1625,9 +581,21 @@ export function MemoryOverlay({
             <h2 className="memx-title">{IS_MOBILE ? "Memory" : "What JARVIS knows"}</h2>
             <p className="memx-loc">Kept on this phone and your paired PC.</p>
           </div>
-          <button className="memx-close" onClick={onClose} aria-label="Close memory">
-            <Icon name="close" size={18} />
-          </button>
+          <div className="memx-hd-tools">
+            <label className="memx-search">
+              <Icon name="search" size={15} />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search memory…"
+                aria-label="Search memory"
+              />
+            </label>
+            <button className="memx-close" onClick={onClose} aria-label="Close memory">
+              <Icon name="close" size={18} />
+            </button>
+          </div>
         </header>
 
         <div className="memx-tl" aria-hidden="true">
@@ -1667,7 +635,13 @@ export function MemoryOverlay({
               >
                 <span className="memx-sw" />
                 <span className="memx-navl">{k.label}</span>
-                <span className="memx-count">{memory ? lists[k.key].length : "–"}</span>
+                <span className="memx-count">
+                  {!memory
+                    ? "–"
+                    : hits
+                      ? `${hits[k.key]}/${lists[k.key].length}`
+                      : lists[k.key].length}
+                </span>
               </button>
             ))}
             <p className="memx-navnote">
@@ -1687,7 +661,7 @@ export function MemoryOverlay({
               <p>{cur.note}</p>
             </div>
 
-            {tab === "facts" && (
+            {tab === "facts" && !q && (
               <form className="memx-add" onSubmit={remember}>
                 <input
                   value={draft}
@@ -1701,7 +675,7 @@ export function MemoryOverlay({
                 </button>
               </form>
             )}
-            {tab === "facts" && (
+            {tab === "facts" && !q && (
               <label className="memx-digest">
                 <input
                   type="checkbox"
@@ -1718,7 +692,7 @@ export function MemoryOverlay({
               </label>
             )}
 
-            {tab === "conversations" && currentCount > 0 && (
+            {tab === "conversations" && currentCount > 0 && !q && (
               <div className="memx-row memx-row--current">
                 <span className="memx-text">This conversation</span>
                 <span className="memx-meta">{currentCount} messages</span>
@@ -1729,7 +703,22 @@ export function MemoryOverlay({
             )}
 
             {!memory && <p className="memx-empty">Reading memory…</p>}
-            {memory && list.length === 0 && (
+            {memory && q && list.length === 0 && (
+              <p className="memx-empty">
+                Nothing in {cur.label.toLowerCase()} matches “{query}”.
+                {MEM_KINDS.filter((k) => k.key !== tab && hits[k.key]).map((k) => (
+                  <button
+                    key={k.key}
+                    type="button"
+                    className="memx-jump"
+                    onClick={() => pick(k.key)}
+                  >
+                    {hits[k.key]} in {k.label}
+                  </button>
+                ))}
+              </p>
+            )}
+            {memory && !q && list.length === 0 && (
               <p className="memx-empty">
                 {
                   {
@@ -1828,7 +817,7 @@ export function PowerOverlay({ open, onClose, runAction, d = {}, appControlOn })
 
   if (!IS_MOBILE) {
     return (
-      <Sheet open={open} title="Power" onClose={onClose}>
+      <Sheet open={open} title="Power" sub="Lock, sleep, restart…" onClose={onClose}>
         <div className="sp-sheet">
           <Group title="This PC">
             <ActionRow icon="lock" title="Lock" onClick={() => power("lock")} />
@@ -1861,7 +850,7 @@ export function PowerOverlay({ open, onClose, runAction, d = {}, appControlOn })
         };
 
   return (
-    <Sheet open={open} title="Device" onClose={onClose}>
+    <Sheet open={open} title="Device" sub="Wi-Fi, sound, battery and app control" onClose={onClose}>
       <div className="sp-sheet">
         <Group title="Connections">
           <ActionRow
@@ -1942,7 +931,7 @@ export function PowerOverlay({ open, onClose, runAction, d = {}, appControlOn })
 // One message, memoized: during streaming only the live message's object identity
 // changes (useWebSocket replaces just that entry), so finalized messages skip both
 // re-render and ResponseRenderer's re-parse. runAction is a stable useCallback.
-const ChatMessage = memo(function ChatMessage({ m, runAction }) {
+const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy }) {
   const user = m.role === "user";
   return (
     <div className={`cv-msg cv-msg--${user ? "user" : "jarvis"}`}>
@@ -1957,6 +946,17 @@ const ChatMessage = memo(function ChatMessage({ m, runAction }) {
           <ResponseRenderer text={m.text} actions={m.actions} runAction={runAction} />
         )}
       </div>
+      {!user && !m.streaming && m.text && onCopy && (
+        <button
+          type="button"
+          className="cv-copy"
+          onClick={() => onCopy(m.text)}
+          aria-label="Copy reply"
+        >
+          <Icon name="copy" size={13} />
+          Copy
+        </button>
+      )}
     </div>
   );
 });
@@ -1975,29 +975,24 @@ function timeAgo(ts) {
   return `${Math.floor(d / 7)} wk ago`;
 }
 
-const STARTERS = IS_MOBILE
-  ? [
-      "What's the weather today?",
-      "What's on my agenda today?",
-      "Open YouTube",
-      "What's in the news?",
-    ]
-  : [
-      "What's the weather today?",
-      "Summarise my agenda",
-      "Take a screenshot",
-      "What's in the news?",
-    ];
+// Starters for an empty chat: one tap sends it.
+const STARTERS = [
+  "What's on my agenda today?",
+  "What's the weather this week?",
+  "Play lofi on YouTube",
+  "What can you do?",
+];
 
 /** The agent row (brain/agents.ts): one chip per agent, each in its own colour; the PC's
  *  agents only while a PC is paired. Scrolls sideways. */
-function AgentRow({ active = "auto", pcPaired, onPick }) {
+export function AgentRow({ active = "auto", pcPaired, onPick }) {
   const rowRef = useRef(null);
   // Keep the picked chip in view when the row is narrower than it.
   useEffect(() => {
     const row = rowRef.current;
     const chip = row?.querySelector(".is-on");
-    if (chip) row.scrollLeft = Math.max(0, chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2);
+    if (chip)
+      row.scrollLeft = Math.max(0, chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2);
   }, [active]);
   return (
     <div className="agent-row" role="radiogroup" aria-label="Agent" ref={rowRef}>
@@ -2030,6 +1025,7 @@ export function ChatOverlay({
   onStop,
   onUpload,
   runAction,
+  onNotify,
   conversations = [],
   onNewChat,
   onOpenConversation,
@@ -2048,7 +1044,9 @@ export function ChatOverlay({
 }) {
   const [draft, setDraft] = useState("");
   const [histOpen, setHistOpen] = useState(false);
+  const [histQuery, setHistQuery] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null); // id awaiting its confirming second tap
   const bodyRef = useRef(null);
   const fileRef = useRef(null);
   const inputRef = useRef(null);
@@ -2073,6 +1071,8 @@ export function ChatOverlay({
   };
   const showHistory = () => {
     setConfirmClear(false);
+    setConfirmDel(null);
+    setHistQuery("");
     onRefreshConversations?.();
     setHistOpen(true);
   };
@@ -2113,29 +1113,56 @@ export function ChatOverlay({
     onSend(t);
     setDraft("");
   };
+  const copy = useCallback(
+    (text) => {
+      navigator.clipboard
+        ?.writeText(text)
+        .then(() => onNotify?.("Copied"))
+        .catch(() => {});
+    },
+    [onNotify],
+  );
+  const hq = histQuery.trim().toLowerCase();
+  const shownConvs = hq
+    ? conversations.filter((c) => (c.title || "").toLowerCase().includes(hq))
+    : conversations;
 
   if (histOpen) {
     return (
       <Sheet
         open={open}
-        title="History"
+        title="Recent chats"
         onClose={onClose}
         onBack={() => setHistOpen(false)}
         backLabel="Conversation"
       >
         <div className="sp-sheet">
-          <h2 className="sp-page-title">History</h2>
+          <h2 className="sp-page-title">Recent chats</h2>
           <button type="button" className="sp-btn cv-newchat" onClick={startNewChat}>
             <Icon name="plus" size={16} />
             New chat
           </button>
+          {conversations.length > 0 && (
+            <label className="sp-search">
+              <Icon name="search" size={16} />
+              <input
+                type="search"
+                value={histQuery}
+                onChange={(e) => setHistQuery(e.target.value)}
+                placeholder="Search saved chats…"
+                aria-label="Search saved chats"
+              />
+            </label>
+          )}
           {conversations.length === 0 ? (
             <StateMessage variant="empty" icon="history" title="No saved chats yet">
               Start a new chat and the current one is saved here.
             </StateMessage>
+          ) : shownConvs.length === 0 ? (
+            <p className="sp-none">No saved chat matches “{histQuery}”.</p>
           ) : (
             <Group title="Saved chats">
-              {conversations.map((c) => (
+              {shownConvs.map((c) => (
                 <div key={c.id} className="sp-field cv-hist-row">
                   <button type="button" className="cv-hist-open" onClick={() => openConv(c.id)}>
                     <span className="sp-label">{c.title}</span>
@@ -2144,14 +1171,23 @@ export function ChatOverlay({
                       {c.count ? `, ${c.count} message${c.count === 1 ? "" : "s"}` : ""}
                     </span>
                   </button>
+                  {/* Two taps, as on the desktop: a stray one can't lose a chat. */}
                   <button
                     type="button"
-                    className="cv-hist-del"
-                    aria-label={`Delete “${c.title}”`}
-                    title="Delete"
-                    onClick={() => onDeleteConversation?.(c.id)}
+                    className={`cv-hist-del${confirmDel === c.id ? " is-armed" : ""}`}
+                    aria-label={
+                      confirmDel === c.id
+                        ? `Tap again to delete “${c.title}”`
+                        : `Delete “${c.title}”`
+                    }
+                    onClick={() => {
+                      if (confirmDel !== c.id) return setConfirmDel(c.id);
+                      setConfirmDel(null);
+                      onDeleteConversation?.(c.id);
+                    }}
+                    onBlur={() => confirmDel === c.id && setConfirmDel(null)}
                   >
-                    <Icon name="trash" size={17} />
+                    {confirmDel === c.id ? "Delete?" : <Icon name="trash" size={17} />}
                   </button>
                 </div>
               ))}
@@ -2176,6 +1212,11 @@ export function ChatOverlay({
     <Sheet
       open={open}
       title="Conversation"
+      sub={
+        messages.length
+          ? `${messages.length} message${messages.length === 1 ? "" : "s"} in this chat`
+          : "A new chat"
+      }
       onClose={onClose}
       className="sp--chat"
       bodyRef={bodyRef}
@@ -2183,7 +1224,7 @@ export function ChatOverlay({
         <>
           {onConversationMode && (
             <HeaderButton
-              icon="chat"
+              icon="talk"
               label={
                 conversationMode
                   ? "Conversation mode on: short, natural replies"
@@ -2195,13 +1236,13 @@ export function ChatOverlay({
           )}
           {onToggleAgents && (
             <HeaderButton
-              icon="robot"
+              icon="route"
               label={agentMode ? "Agents on: pick one below" : "Agents: pick who handles a request"}
               pressed={agentMode}
               onClick={onToggleAgents}
             />
           )}
-          <HeaderButton icon="history" label="Chat history" onClick={showHistory} />
+          <HeaderButton icon="history" label="Recent chats" onClick={showHistory} />
           <HeaderButton icon="plus" label="New chat (saves this one)" onClick={startNewChat} />
         </>
       }
@@ -2280,16 +1321,19 @@ export function ChatOverlay({
     >
       <div className="cv" aria-live="polite">
         {messages.map((m) => (
-          <ChatMessage key={m.id} m={m} runAction={runAction} />
+          <ChatMessage key={m.id} m={m} runAction={runAction} onCopy={copy} />
         ))}
         {/* Until you've said something — the launch greeting alone used to hide these. */}
         {!messages.some((m) => m.role === "user") && (
           <div className="cv-empty">
-            {messages.length === 0 && <p className="cv-empty-title">Ask JARVIS anything</p>}
-            <p className="sp-desc">Type below, tap the mic, or say “Hey Jarvis”.</p>
+            {messages.length === 0 && <p className="cv-empty-title">Standing by, sir.</p>}
+            <p className="sp-desc">
+              Ask me anything — type below, tap the mic, or say “Hey Jarvis”.
+            </p>
             <div className="cv-starters">
               {STARTERS.map((t) => (
-                <button key={t} type="button" className="cv-starter" onClick={() => setDraft(t)}>
+                <button key={t} type="button" className="cv-starter" onClick={() => send(t)}>
+                  <Icon name="chevRight" size={14} />
                   {t}
                 </button>
               ))}

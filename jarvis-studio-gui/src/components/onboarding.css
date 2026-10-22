@@ -462,3 +462,16 @@
     animation: none;
   }
 }
+
+/* The home screen's orb (home.css), at the hero's size and in the accent. */
+.ob-orb {
+  --ac: var(--accent);
+  --ac2: var(--accent-soft);
+  --glow: 0.5;
+  --h-bg: #0a0c10;
+  margin: 12px 0 18px;
+}
+.ob-orb .orb {
+  --orb: 128px;
+  cursor: default;
+}
