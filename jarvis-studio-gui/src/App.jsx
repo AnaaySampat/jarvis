@@ -108,6 +108,8 @@ export default function App() {
     rerankModels,
     repairSetup,
     sendMessage,
+    activeAgent,
+    pickAgent,
     resetConversation,
     newConversation,
     openConversation,
@@ -537,6 +539,9 @@ export default function App() {
           onListen={triggerListen}
           conversationMode={conversationMode}
           onConversationMode={setConversationModeOn}
+          activeAgent={activeAgent}
+          onPickAgent={pickAgent}
+          onToggleAgents={() => sendConfig({ agent_mode: !sysInfo.agent_mode })}
         />
       </ViewportScale>
 

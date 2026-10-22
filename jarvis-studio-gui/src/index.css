@@ -3865,6 +3865,62 @@ button.cap-row:active {
 .sp-foot .cv-compose {
   flex: 1;
 }
+/* The agent row (HudPanels AgentRow) above the composer: one chip per agent, its colour. */
+.sp-foot .cv-foot-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-row {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding: 2px;
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+}
+.agent-row::-webkit-scrollbar {
+  display: none;
+}
+.agent-chip {
+  flex: none;
+  scroll-snap-align: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--agent) 32%, transparent);
+  background: color-mix(in srgb, var(--agent) 8%, var(--sp-well));
+  color: var(--text-pri);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.agent-chip.is-on {
+  border-color: var(--agent);
+  background: color-mix(in srgb, var(--agent) 24%, var(--sp-well));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--agent) 30%, transparent);
+}
+.agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--agent);
+}
+.agent-pc {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--agent) 45%, transparent);
+  opacity: 0.85;
+}
 .cv-compose {
   display: flex;
   align-items: center;

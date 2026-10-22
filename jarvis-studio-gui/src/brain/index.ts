@@ -26,6 +26,7 @@ import { routinesPromptHint } from "./schedule/routines";
 import { LocationService } from "./tools/location";
 import { androidPlatform, type Platform } from "./platform";
 import { runTurn } from "./loop";
+import { type AgentId, mention, routeFor } from "./agents";
 import type { ChatMessage, ToolResult } from "./types";
 import { isImageGenerationRequest } from "./modelPolicy";
 
@@ -35,7 +36,7 @@ const SENT_HISTORY_TURNS = 12;
 export interface Brain {
   /** `display` is the chat's text for the turn when it differs (see ChatMessage);
    *  `images` are base64 JPEGs the user attached, for the model to look at. */
-  ask(text: string, display?: string, images?: string[]): Promise<string>;
+  ask(text: string, display?: string, images?: string[], agent?: AgentId): Promise<string>;
   /** A command the paired PC sent (desktop phone_link.py): a turn limited to
    *  FROM_PC_TOOLS. `ok` is true only when a tool ran and every tool that ran says it
    *  worked — never from the reply's words. */
@@ -46,9 +47,12 @@ export interface Brain {
   get config(): BrainConfig;
 }
 
-/** Limits one turn (askFromPc). */
+/** Shapes one turn: limits it (askFromPc) or focuses it (a picked agent, agents.ts). */
 interface TurnScope {
-  onlyTools: ReadonlySet<string>;
+  /** Only these tools may run. */
+  onlyTools?: ReadonlySet<string>;
+  /** Tool groups loaded whatever the words say. */
+  groups?: string[];
   /** Added to the system prompt for this turn. */
   context: string;
 }
@@ -86,19 +90,12 @@ export function createBrain(opts: BrainOptions = {}): Brain {
   // Tool groups the last two turns called, so a follow-up keeps the tools it just had.
   const recentGroups: Set<string>[] = [];
 
-  async function turn(
-    text: string,
-    display?: string,
-    images?: string[],
-    scope?: TurnScope,
-  ): Promise<{ reply: string; toolResults: ToolResult[] }> {
-    const config = getConfig();
-    const location = new LocationService(config.pinnedLocation);
-    const deps: DispatchDeps = {
+  function makeDeps(config: BrainConfig, scope?: TurnScope): DispatchDeps {
+    return {
       platform,
       memory,
       config,
-      location,
+      location: new LocationService(config.pinnedLocation),
       remote: opts.remote ?? null,
       tv: opts.tv ?? null,
       onAgentEvent: opts.onAgentEvent,
@@ -107,8 +104,18 @@ export function createBrain(opts: BrainOptions = {}): Brain {
       shouldStopPhoneTask: opts.shouldStopPhoneTask,
       authorizePhoneAction: opts.authorizePhoneAction,
       onDispatched: opts.onDispatched,
-      ...(scope ? { onlyTools: scope.onlyTools } : {}),
+      ...(scope?.onlyTools ? { onlyTools: scope.onlyTools } : {}),
     };
+  }
+
+  async function turn(
+    text: string,
+    display?: string,
+    images?: string[],
+    scope?: TurnScope,
+  ): Promise<{ reply: string; toolResults: ToolResult[] }> {
+    const config = getConfig();
+    const deps = makeDeps(config, scope);
 
     if (!configReady(config)) {
       return { reply: "I need an API key first — set one in onboarding/settings.", toolResults: [] };
@@ -117,7 +124,7 @@ export function createBrain(opts: BrainOptions = {}): Brain {
     // Image creation never needs a text model to deliberate about a tool call.
     // Route it directly to the image-only path, which also ensures an image
     // request cannot accidentally consume a dumb/smart/very-smart chat route.
-    if (!scope && !images?.length && isImageGenerationRequest(text)) {
+    if (!scope?.onlyTools && !images?.length && isImageGenerationRequest(text)) {
       const image = await dispatch({ type: "generate_image", prompt: text }, deps);
       await memory.appendTurn({ role: "user", content: text, display });
       await memory.appendTurn({ role: "assistant", content: image.summary });
@@ -127,10 +134,10 @@ export function createBrain(opts: BrainOptions = {}): Brain {
     const fullTools = toolPalette(config, {
       pcPaired: deps.remote != null,
       tvPaired: deps.tv != null,
-    }).filter((t) => !scope || scope.onlyTools.has(t.name));
+    }).filter((t) => !scope?.onlyTools || scope.onlyTools.has(t.name));
     const tools = turnPalette(
       fullTools,
-      new Set([...groupsFor(text), ...recentGroups.flatMap((g) => [...g])]),
+      new Set([...groupsFor(text), ...recentGroups.flatMap((g) => [...g]), ...(scope?.groups ?? [])]),
     );
 
     // Storage keeps 40 turns; the model gets the last 12. Every turn is resent on
@@ -171,7 +178,28 @@ export function createBrain(opts: BrainOptions = {}): Brain {
   }
 
   return {
-    ask: async (text, display, images) => (await turn(text, display, images)).reply,
+    // "@files …" in the words beats the row's pick; the chat keeps showing what was typed.
+    ask: async (text, display, images, agent) => {
+      const named = mention(text);
+      const request = named.agent ? named.rest : text;
+      const shown = display ?? (named.agent ? text : undefined);
+      const route = routeFor(named.agent || agent || "auto", opts.remote != null);
+      if (route && "pc" in route) {
+        // The whole request goes to that agent on the PC, through dispatch like any
+        // pc_task (remote.runTask asks for the fingerprint first).
+        const result = await dispatch(
+          { type: "pc_task", goal: request, kind: route.pc },
+          makeDeps(getConfig()),
+        );
+        const reply =
+          result.summary?.trim() ||
+          (result.ok ? "Done on your PC, sir." : "I couldn't finish that on your PC, sir.");
+        await memory.appendTurn({ role: "user", content: request, display: shown });
+        await memory.appendTurn({ role: "assistant", content: reply });
+        return reply;
+      }
+      return (await turn(request, shown, images, route ?? undefined)).reply;
+    },
     askFromPc: async (text) => {
       const { reply, toolResults } = await turn(text, `💻 From your PC: ${text}`, undefined, {
         onlyTools: FROM_PC_TOOLS,

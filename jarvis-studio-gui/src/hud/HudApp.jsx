@@ -86,6 +86,9 @@ export function JarvisHUD({
   onListen,
   conversationMode,
   onConversationMode,
+  activeAgent,
+  onPickAgent,
+  onToggleAgents,
 }) {
   const c = config;
   const d = telemetry || DEFAULT_TELEMETRY;
@@ -304,6 +307,11 @@ export function JarvisHUD({
         onListen={onListen}
         conversationMode={conversationMode}
         onConversationMode={onConversationMode}
+        agentMode={Boolean(sysInfo?.agent_mode)}
+        activeAgent={activeAgent}
+        pcPaired={Boolean(pcConfig?.host)}
+        onPickAgent={onPickAgent}
+        onToggleAgents={onToggleAgents}
       />
 
       {/* boot overlay */}

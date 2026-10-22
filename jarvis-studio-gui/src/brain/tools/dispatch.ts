@@ -52,7 +52,7 @@ export interface DispatchDeps {
   location: LocationService;
   /** Phase 3: a connected remote-PC link, or null when no PC is paired. */
   remote?: {
-    runTask(goal: string, kind?: "browser" | "computer"): Promise<ToolResult>;
+    runTask(goal: string, kind?: "browser" | "computer" | "research"): Promise<ToolResult>;
     /** Wake-on-LAN, then wait for the PC to reconnect (RemotePC.wake). */
     wake?(): Promise<ToolResult>;
   } | null;
@@ -354,7 +354,8 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
       if (!remote) return { ok: false, summary: "No PC is paired yet." };
       return remote.runTask(
         String(spec.goal ?? ""),
-        spec.kind === "computer" ? "computer" : "browser",
+        // "research" only comes from the agent row (agents.ts); the model picks the two.
+        spec.kind === "computer" || spec.kind === "research" ? spec.kind : "browser",
       );
     case "wake_pc":
       if (!remote) return { ok: false, summary: "No PC is paired yet." };

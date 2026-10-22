@@ -1451,6 +1451,7 @@ export function useBrain() {
       allowed_dirs: [],
       calendar_sync: stored.calendarSync !== false,
       pc_commands: stored.pcCommands !== false,
+      agent_mode: stored.agentMode === true,
       wa_mode: WA_MODES.has(stored.waMode) ? stored.waMode : "off",
       wa_allowed: typeof stored.waAllowed === "string" ? stored.waAllowed : "",
       wa_access: waAccess,
@@ -1480,6 +1481,12 @@ export function useBrain() {
   // Hard ceiling on one push-to-talk recording (see startListen).
   const listenTimerRef = useRef(undefined);
   const finishListenRef = useRef(null);
+  // The agent row (brain/agents.ts): the picked agent gets what the user types or says
+  // while agent mode is on. Not saved — a restart is back on Auto. Composed turns (a
+  // routine run, a photo, a shared link: the ones with a `display`) stay with Auto.
+  const [activeAgent, setActiveAgent] = useState("auto");
+  const activeAgentRef = useRef("auto");
+
   // `display` is what the user's bubble shows when it isn't what the brain gets — a
   // routine run sends its steps but reads "Run bedtime". It's saved with the turn.
   // `photo` is a JPEG data URL the user attached (see sendUpload).
@@ -1532,6 +1539,7 @@ export function useBrain() {
           t,
           display,
           photo ? [photo.slice(photo.indexOf(",") + 1)] : undefined,
+          storedRef.current.agentMode === true && !display ? activeAgentRef.current : "auto",
         );
         spoken = reply;
         setMessages((prev) => [
@@ -1874,6 +1882,7 @@ export function useBrain() {
           next.conversationMode = cfg.conversation_mode;
         if (typeof cfg.calendar_sync === "boolean") next.calendarSync = cfg.calendar_sync;
         if (typeof cfg.pc_commands === "boolean") next.pcCommands = cfg.pc_commands;
+        if (typeof cfg.agent_mode === "boolean") next.agentMode = cfg.agent_mode;
         if (WA_MODES.has(cfg.wa_mode)) next.waMode = cfg.wa_mode;
         if (typeof cfg.wa_allowed === "string") next.waAllowed = cfg.wa_allowed.slice(0, 1_000);
         if (typeof cfg.wake_word === "boolean") next.wakeWord = cfg.wake_word;
@@ -1893,6 +1902,16 @@ export function useBrain() {
       return failedSecrets.length === 0;
     },
     [pushWarning, secretsReady],
+  );
+
+  // Picking an agent turns agent mode on (the row only shows while it's on).
+  const pickAgent = useCallback(
+    (id) => {
+      activeAgentRef.current = id;
+      setActiveAgent(id);
+      if (storedRef.current.agentMode !== true) void sendConfig({ agent_mode: true });
+    },
+    [sendConfig],
   );
 
   const resetConversation = useCallback(() => {
@@ -2638,6 +2657,8 @@ export function useBrain() {
     sendMessage,
     sendCommand,
     setPcCommandMode,
+    activeAgent,
+    pickAgent,
     triggerListen,
     stopSpeech,
     stopControl: stopRemoteControl,

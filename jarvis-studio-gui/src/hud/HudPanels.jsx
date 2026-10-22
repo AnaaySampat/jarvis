@@ -23,6 +23,7 @@ import { STATUS_META } from "./hudConstants";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 import { listRoutines, parseDays, routineWhen, saveRoutine } from "../brain/schedule/routines";
 import { digestEnabled, setDigestEnabled } from "../brain/memory/digest";
+import { agentById, agentsFor } from "../brain/agents";
 import { localISODate } from "../brain/schedule/store";
 
 // Coerce a telemetry field to a finite number (→0). A partial frame missing
@@ -1988,6 +1989,38 @@ const STARTERS = IS_MOBILE
       "What's in the news?",
     ];
 
+/** The agent row (brain/agents.ts): one chip per agent, each in its own colour; the PC's
+ *  agents only while a PC is paired. Scrolls sideways. */
+function AgentRow({ active = "auto", pcPaired, onPick }) {
+  const rowRef = useRef(null);
+  // Keep the picked chip in view when the row is narrower than it.
+  useEffect(() => {
+    const row = rowRef.current;
+    const chip = row?.querySelector(".is-on");
+    if (chip) row.scrollLeft = Math.max(0, chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2);
+  }, [active]);
+  return (
+    <div className="agent-row" role="radiogroup" aria-label="Agent" ref={rowRef}>
+      {agentsFor(pcPaired).map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          role="radio"
+          aria-checked={active === a.id}
+          className={`agent-chip${active === a.id ? " is-on" : ""}`}
+          style={{ "--agent": a.color }}
+          title={`${a.hint} — or type @${a.handle}`}
+          onClick={() => onPick?.(a.id)}
+        >
+          <span className="agent-dot" aria-hidden="true" />
+          {a.name}
+          {a.pc && a.id !== "research" && <span className="agent-pc">PC</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ChatOverlay({
   open,
   onClose,
@@ -2007,6 +2040,11 @@ export function ChatOverlay({
   onListen, // phone: the composer's mic (the HUD's mic button is hidden under this sheet)
   conversationMode,
   onConversationMode,
+  agentMode = false, // the agent row (brain/agents.ts) and the header's Agents switch
+  activeAgent = "auto",
+  pcPaired = false,
+  onPickAgent,
+  onToggleAgents,
 }) {
   const [draft, setDraft] = useState("");
   const [histOpen, setHistOpen] = useState(false);
@@ -2155,73 +2193,88 @@ export function ChatOverlay({
               onClick={() => onConversationMode(!conversationMode)}
             />
           )}
+          {onToggleAgents && (
+            <HeaderButton
+              icon="robot"
+              label={agentMode ? "Agents on: pick one below" : "Agents: pick who handles a request"}
+              pressed={agentMode}
+              onClick={onToggleAgents}
+            />
+          )}
           <HeaderButton icon="history" label="Chat history" onClick={showHistory} />
           <HeaderButton icon="plus" label="New chat (saves this one)" onClick={startNewChat} />
         </>
       }
       footer={
-        <div className="cv-compose">
-          {onUpload && (
-            <>
-              {/* The phone's brain only reads photos; the desktop backend takes documents too. */}
-              <input
-                ref={fileRef}
-                type="file"
-                accept={IS_MOBILE ? "image/*" : "image/*,.pdf,.txt,.md,.csv,.json,.log"}
-                onChange={pickFile}
-                hidden
-              />
+        <div className="cv-foot-stack">
+          {agentMode && <AgentRow active={activeAgent} pcPaired={pcPaired} onPick={onPickAgent} />}
+          <div className="cv-compose">
+            {onUpload && (
+              <>
+                {/* The phone's brain only reads photos; the desktop backend takes documents too. */}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={IS_MOBILE ? "image/*" : "image/*,.pdf,.txt,.md,.csv,.json,.log"}
+                  onChange={pickFile}
+                  hidden
+                />
+                <button
+                  type="button"
+                  className="cv-attach"
+                  aria-label={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
+                  title={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
+                  disabled={busy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Icon name="paperclip" size={20} />
+                </button>
+              </>
+            )}
+            <input
+              ref={inputRef}
+              className="sp-input cv-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder={
+                agentMode && activeAgent !== "auto"
+                  ? `Message the ${agentById(activeAgent).name} agent`
+                  : "Message JARVIS (@ picks an agent)"
+              }
+              aria-label="Message JARVIS"
+            />
+            {busy && onStop ? (
               <button
                 type="button"
-                className="cv-attach"
-                aria-label={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
-                title={IS_MOBILE ? "Attach a photo" : "Attach an image or document"}
-                disabled={busy}
-                onClick={() => fileRef.current?.click()}
+                className="cv-send cv-send--stop"
+                aria-label="Stop"
+                onClick={onStop}
               >
-                <Icon name="paperclip" size={20} />
+                <Icon name="stop" size={18} />
               </button>
-            </>
-          )}
-          <input
-            ref={inputRef}
-            className="sp-input cv-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Message JARVIS"
-            aria-label="Message JARVIS"
-          />
-          {busy && onStop ? (
-            <button
-              type="button"
-              className="cv-send cv-send--stop"
-              aria-label="Stop"
-              onClick={onStop}
-            >
-              <Icon name="stop" size={18} />
-            </button>
-          ) : IS_MOBILE && onListen && (status === "listening" || !draft.trim()) ? (
-            // Empty box → talk instead; tapping again while listening sends what was said.
-            <button
-              type="button"
-              className={`cv-send ${status === "listening" ? "cv-send--listening" : ""}`}
-              aria-label={status === "listening" ? "Stop and send" : "Talk"}
-              onClick={onListen}
-            >
-              <Icon name={status === "listening" ? "stop" : "mic"} size={19} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="cv-send"
-              aria-label="Send"
-              disabled={!draft.trim()}
-              onClick={() => send()}
-            >
-              <Icon name="send" size={19} />
-            </button>
-          )}
+            ) : IS_MOBILE && onListen && (status === "listening" || !draft.trim()) ? (
+              // Empty box → talk instead; tapping again while listening sends what was said.
+              <button
+                type="button"
+                className={`cv-send ${status === "listening" ? "cv-send--listening" : ""}`}
+                aria-label={status === "listening" ? "Stop and send" : "Talk"}
+                onClick={onListen}
+              >
+                <Icon name={status === "listening" ? "stop" : "mic"} size={19} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="cv-send"
+                aria-label="Send"
+                disabled={!draft.trim()}
+                onClick={() => send()}
+              >
+                <Icon name="send" size={19} />
+              </button>
+            )}
+          </div>
         </div>
       }
     >

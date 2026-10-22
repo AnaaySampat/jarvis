@@ -97,3 +97,39 @@ describe("askFromWhatsApp (a listed contact, answered on the phone)", () => {
     expect(user).toMatchObject({ display: "💬 WhatsApp from Asha: what's the weather in Pune?" });
   });
 });
+
+describe("ask with a picked agent (agents.ts)", () => {
+  it("sends a PC agent's request straight to the PC, without the @mention", async () => {
+    runTurn.mockClear();
+    const runTask = vi.fn(async () => ({ ok: true, summary: "Notepad has your list, sir." }));
+    const memory = new PersistentStore();
+    const brain = createBrain({ getConfig: () => cfg, memory, remote: { runTask } });
+    expect(await brain.ask("@desktop open notepad and write a list")).toBe(
+      "Notepad has your list, sir.",
+    );
+    expect(runTask).toHaveBeenCalledWith("open notepad and write a list", "computer");
+    expect(runTurn).not.toHaveBeenCalled();
+    expect(await brain.ask("best budget phones", undefined, undefined, "research")).toBe(
+      "Notepad has your list, sir.",
+    );
+    expect(runTask).toHaveBeenLastCalledWith("best budget phones", "research");
+    const [user] = await memory.recentTurns();
+    expect(user).toMatchObject({
+      content: "open notepad and write a list",
+      display: "@desktop open notepad and write a list",
+    });
+  });
+
+  it("gives a phone agent its groups and brief, and research a phone turn with no PC", async () => {
+    runTurn.mockClear();
+    const brain = createBrain({ getConfig: () => cfg, memory: new PersistentStore() });
+    await brain.ask("what's in my downloads", undefined, undefined, "files");
+    const [messages, tools, deps] = runTurn.mock.calls[0]!;
+    expect(messages[0]!.content).toMatch(/AGENT: FILES/);
+    expect(tools!.some((t) => t.name === "list_directory")).toBe(true);
+    expect(deps!.onlyTools).toBeUndefined();
+    await brain.ask("tell the research agent to compare budget phones");
+    expect(runTurn.mock.calls[1]![0][0]!.content).toMatch(/AGENT: RESEARCH/);
+    expect(runTurn.mock.calls[1]![0].at(-1)).toMatchObject({ content: "compare budget phones" });
+  });
+});

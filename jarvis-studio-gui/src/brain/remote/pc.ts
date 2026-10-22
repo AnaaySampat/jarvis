@@ -210,8 +210,9 @@ interface Pending {
   idempotencyKey: string;
   goal: string;
   /** Which PC surface runs this task — 'computer' drives native apps/files, 'browser'
-   *  the web, 'auto' lets the DESKTOP classify (used by live-view command mode). */
-  kind: "browser" | "computer" | "auto";
+   *  the web, 'research' the PC's research agent (agents.ts), 'auto' lets the DESKTOP
+   *  classify (used by live-view command mode). */
+  kind: "browser" | "computer" | "research" | "auto";
   accepted: boolean;
   lastSeq: number;
   bufferedEvents: Map<number, string>;
@@ -1105,7 +1106,10 @@ export class RemotePC {
    * failure (unreachable, dropped, timed out) comes back as ok:false so the brain
    * can speak it honestly rather than throwing.
    */
-  async runTask(goal: string, kind: "browser" | "computer" | "auto" = "browser"): Promise<ToolResult> {
+  async runTask(
+    goal: string,
+    kind: "browser" | "computer" | "research" | "auto" = "browser",
+  ): Promise<ToolResult> {
     const g = (goal || "").trim();
     if (!g) return { ok: false, summary: "What should I do on the PC, sir?" };
     if (this.pending) {

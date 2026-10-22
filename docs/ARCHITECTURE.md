@@ -287,6 +287,17 @@ call before `dispatch`, advertised or not, feeding the model "Not run: that tool
 available". `brain.askFromPc` / `askFromWhatsApp` return `ok` only when a tool ran and
 every tool that ran said it worked.
 
+### A picked agent shapes the turn (2026-10-21)
+
+The agent row (`brain/agents.ts`, the desktop's `agents.py` in the part that fits a
+phone) narrows a turn without adding a path. Phone, Files, Scheduler and Content run
+`turn()` with a scope that loads their tool groups whatever the words say and adds their
+brief to the system prompt — nothing is refused, the rest stays a `load_tools` away.
+Desktop, Browser and, with a PC paired, Research send the whole request as one `pc_task`
+spec to `dispatch`, so `remote.runTask`'s fingerprint gate still comes first; `kind:
+"research"` exists only for this (the model's own `pc_task` still picks browser or
+computer). The desktop's coordinator — plans across agents, hand-offs — stays on the PC.
+
 ### One-step phone actions go around the operator (2026-10-18)
 
 Gemini switches the flashlight or texts Mom in one call; JARVIS used to send all of that
