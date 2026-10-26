@@ -1,4 +1,4 @@
-# JARVIS for Android
+﻿# JARVIS for Android
 
 A voice assistant that runs on your phone. It chats, does real tasks over the internet
 (weather, news, search, places, reminders), **drives other apps on the phone by itself**,
@@ -12,9 +12,32 @@ in TypeScript and runs **inside the app**, so the phone needs no server and no P
 | | |
 |---|---|
 | **What it is** | Tauri 2 (Rust shell) + React HUD + a TypeScript brain + a Kotlin Android plugin |
-| **App id / version** | `com.jarvis.app` / 0.1.0 |
-| **State** | Working debug **and** release APK; 259 unit tests green. Debug APK rebuilt 2026-09-24 (smart routing + Memory view) and installed on a real phone; release APK is older (2026-07-26) — see [docs/STATUS.md](docs/STATUS.md) |
+| **App id / version** | `com.jarvis.app` / 2.5.0 |
+| **State** | Release APK v2.5.0 — 522 TypeScript tests + 148 native tests green, live-verified on SM-E156B (Android 16). See [docs/STATUS.md](docs/STATUS.md) |
 | **Docs** | [Architecture](docs/ARCHITECTURE.md) · [Status](docs/STATUS.md) · [Security](docs/SECURITY.md) |
+
+---
+
+
+## Screenshots
+
+<p align="center">
+  <img src="phase1-hud.png" width="30%" alt="Iron Man HUD — home screen on a real phone" />
+  &nbsp;
+  <img src="emulator-shot.png" width="30%" alt="HUD with greeting clock on the emulator" />
+  &nbsp;
+  <img src="phase-clock-build.png" width="30%" alt="Boot screen" />
+</p>
+<p align="center">
+  <em>Left: Iron Man mode on a real Galaxy M15 · Centre: HUD on the emulator · Right: boot screen</em>
+</p>
+
+<p align="center">
+  <img src="phase1-shot.png" width="30%" alt="First-run setup on a real phone" />
+</p>
+<p align="center">
+  <em>First-run setup — paste a free Gemini or Groq key and tap Start</em>
+</p>
 
 ---
 
