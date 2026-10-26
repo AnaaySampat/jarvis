@@ -1,5 +1,9 @@
 ﻿# JARVIS for Android
 
+<p align="center">
+  <img src="screenshot-home.png" width="340" alt="JARVIS for Android - Home Screen HUD" />
+</p>
+
 A voice assistant that runs on your phone. It chats, does real tasks over the internet
 (weather, news, search, places, reminders), **drives other apps on the phone by itself**,
 and can **remote-control your Windows PC**.
@@ -15,29 +19,6 @@ in TypeScript and runs **inside the app**, so the phone needs no server and no P
 | **App id / version** | `com.jarvis.app` / 2.5.0 |
 | **State** | Release APK v2.5.0 — 522 TypeScript tests + 148 native tests green, live-verified on SM-E156B (Android 16). See [docs/STATUS.md](docs/STATUS.md) |
 | **Docs** | [Architecture](docs/ARCHITECTURE.md) · [Status](docs/STATUS.md) · [Security](docs/SECURITY.md) |
-
----
-
-
-## Screenshots
-
-<p align="center">
-  <img src="phase1-hud.png" width="30%" alt="Iron Man HUD — home screen on a real phone" />
-  &nbsp;
-  <img src="emulator-shot.png" width="30%" alt="HUD with greeting clock on the emulator" />
-  &nbsp;
-  <img src="phase-clock-build.png" width="30%" alt="Boot screen" />
-</p>
-<p align="center">
-  <em>Left: Iron Man mode on a real Galaxy M15 · Centre: HUD on the emulator · Right: boot screen</em>
-</p>
-
-<p align="center">
-  <img src="phase1-shot.png" width="30%" alt="First-run setup on a real phone" />
-</p>
-<p align="center">
-  <em>First-run setup — paste a free Gemini or Groq key and tap Start</em>
-</p>
 
 ---
 
