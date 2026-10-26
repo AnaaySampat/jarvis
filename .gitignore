@@ -38,3 +38,4 @@ local.properties
 # Build output — regenerate with `npm run android:build[:debug]`
 *.apk
 *.aab
+.test-tmp/

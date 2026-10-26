@@ -1,0 +1,12 @@
+{
+  "identifier": "phone-research",
+  "description": "Read public research sources directly on Android. readWebPage validates each URL and redirect before fetching it.",
+  "platforms": ["android"],
+  "windows": ["*"],
+  "permissions": [
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [{ "url": "https://*/*" }, { "url": "http://*/*" }]
+    }
+  ]
+}

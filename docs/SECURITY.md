@@ -1,124 +1,30 @@
-# Security
+# JARVIS — Security Audit (white-hat)
 
-JARVIS can listen through your microphone, read what's on your screen, tap and type in
-other apps, and send tasks to your PC. That makes it powerful and also a real trust
-decision. This page explains how the app is built to limit that, where your data goes,
-and what is still open. The second half is the full audit history.
+Date: 2026-07-17. Scope: `aura-android` (phone app + Tauri plugin) **and** its paired
+desktop backend `aura/jarvis-studio-backend` (the phone forwards whole tasks to it, so
+its trust boundary is part of the phone's attack surface).
 
-## Reporting a vulnerability
+Method: source review of the auth/crypto/IPC paths, the native command surface, the
+WebSocket pairing protocol, and credential-at-rest. One live check (adb) was attempted;
+the connected device returned `unauthorized` (RSA debugging prompt not accepted), so the
+device-extraction finding below is confirmed at the code level, not yet run live.
 
-Please **don't open a public issue.** Use GitHub's private reporting instead: the
-repository's **Security** tab ▸ **Report a vulnerability**. Include the steps to
-reproduce and what an attacker gains. This is a one-person project, so replies may take a
-few days.
+**The through-line:** the PC pairing **token is the single credential for full control of
+the PC** (the phone forwards free-text goals to the Windows autopilot, which can open apps,
+type, click, browse — anything the user can). Almost every Critical/High finding is either
+"the token is easier to obtain than it should be" or "having the token gives more than it
+should." Fix the token lifecycle and the human-in-the-loop gate first.
 
-## Security model
+Severity = impact × ease. Findings are ranked. Each has: where, how I'd exploit it, fix.
 
-### What leaves the phone, and where it goes
+> **Reading order.** The findings below are the original 2026-07-17 audit, preserved as
+> written. Several have been fixed since — including two that were deferred at the time.
+> Read **Current status** first; it says which findings still stand.
 
-JARVIS has no server of its own. Nothing is sent anywhere unless you add a key for that
-service, and then only to that service.
+---
 
-| Data | Sent to | When |
-|---|---|---|
-| Your messages and chat history | The AI provider you chose (Google Gemini / Vertex AI, Groq, and optionally OpenRouter, NVIDIA, Mistral) | Every chat turn |
-| **What's on your screen** (text and, for some steps, a screenshot) | The same AI provider | Only while a phone task you started is running |
-| Your voice, after "Hey Jarvis" or the mic button | Groq Whisper, or Google Speech-to-Text if you use Vertex | Each voice command. The wake word itself is detected **on the phone** and no audio leaves it while it only listens |
-| Remembered facts | Google Vertex AI embeddings, if you use Vertex | When a fact is saved or looked up |
-| Search, weather, news, places queries | The public APIs behind those tools | When you ask for them |
-| Rough location | ipwho.is / ipapi.co (from your IP), or your phone's GPS | Weather and "near me" answers |
-| Text for a QR code | api.qrserver.com | When you ask for a QR code |
-| Tasks and screen-sharing for your PC | Your own PC only, directly or through Tailscale | When you use Remote PC |
-| Your own messages since the last digest, and the facts already remembered | The AI provider you chose, once a night (the memory digest; Memory ▸ Facts turns it off) | After 03:00, the first time JARVIS is open and idle |
-| Remembered facts and routines | Your own paired PC, over the same signed link | Every minute while connected, so both devices share one memory |
-| A Wake-on-LAN packet (the device's MAC address) | Your own home network, as a broadcast | When you ask to switch the TV or the PC on |
-| The answer to a request from your PC ("set an alarm on my phone") | Your own paired PC, over the same signed link | When the PC sends one (Settings ▸ PC & WhatsApp turns this off) |
-| JARVIS's answer to a WhatsApp command | The listed contact who sent it, through WhatsApp's own reply button | Only with WhatsApp turned on in Settings ▸ PC & WhatsApp |
-| Screenshots of the TV | The AI provider you chose (a model that can see images) | When you ask what's on the TV, or for a TV task done by sight |
-| The title of the YouTube video playing on the phone | Your web-search provider, then YouTube's public oEmbed endpoint (the video id) | When you ask to send it to the TV |
+## PC and WhatsApp requests (2026-10-21)
 
-Free tiers have their own rules: **Mistral's free tier trains on what you send it**, and
-OpenRouter's free models are run by third parties. The app says so next to those keys in
-Settings. Read your provider's privacy terms, because a phone task can send them your screen.
-
-### What's stored on the phone
-
-- **API keys and the Vertex service-account JSON** are encrypted with AES-GCM under a
-  non-exportable Android Keystore key (`SecureSecretStore.kt`). Only the encrypted form is
-  saved. Keys go to their provider in HTTP headers, never in URLs.
-- **The PC-pairing identity** is a non-exportable EC key in the Android Keystore
-  (`DeviceIdentityManager.kt`). It never leaves the secure hardware; only signatures do.
-  There is no password or bearer token to steal.
-- **Phone-task records** (goals, steps, results) live in an app-private Room database, not
-  in WebView storage.
-- **Chats, memory and settings** are in the app's private WebView storage. They are not
-  encrypted beyond Android's own app sandbox and device encryption.
-- **Backups are off** (`allowBackup="false"`), so `adb backup` and cloud backup can't copy
-  any of this. Release builds aren't debuggable, so `run-as` can't read it over USB either.
-
-### What stops it from doing damage
-
-- **Phone tasks run in a native loop with a risk policy.** Every action is classified
-  R0–R3 in Kotlin (`OperatorCore.kt`) before it happens. Actions with outside effects
-  (send, share, post, call, message) run only if you approved them when the task started.
-  Critical ones (pay, buy, bank, passwords, one-time codes, delete, uninstall, permission
-  changes) are **never** done automatically: the task stops and hands control back to you.
-- **You can stop a task any time**, from the floating STOP button over every app or the
-  PAUSE/STOP buttons in the task's notification. A stuck action is cut off by a watchdog
-  rather than hanging forever.
-- **Tapping by position is limited.** When an app hides a control from accessibility,
-  JARVIS may tap a spot it sees in the screenshot, but only in a harmless task, only on
-  something it names, and never over a known risky button. Anything that sends, pays or
-  deletes still goes through the rules above.
-- **Links the AI opens are limited to `http`/`https`.** Deep links like `upi:` or
-  `intent:` are refused in native code.
-- **Controlling your PC needs your fingerprint** (or screen lock) every time you send it
-  a task or take control. A borrowed, unlocked phone can't drive your PC.
-- **PC pairing is QR-only.** The QR code expires and works once. Every later message is
-  signed by the phone's Keystore key and checked with a counter, so a replayed message is
-  refused.
-- **Honest results.** The app only reports that an action worked when the action's own
-  return value says so. That includes the STOP button, which reports failure if the stop
-  didn't actually reach the PC.
-
-### Android permissions
-
-| Permission | Why |
-|---|---|
-| Accessibility service | Reading the screen and tapping/typing for phone tasks. Off until you turn it on in Settings ▸ Accessibility |
-| Microphone (`RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`) | Voice commands and the wake word |
-| Foreground service (microphone, special use) | Keep "Hey Jarvis" listening, and keep a phone task running, with a visible notification |
-| Display over other apps (`SYSTEM_ALERT_WINDOW`) | The floating STOP button |
-| Camera | Scanning the PC-pairing QR code |
-| Calendar (read/write) | Calendar questions and adding events |
-| Set alarm | Alarms and timers |
-| Notifications, vibrate | The listening notification and the wake-word cue |
-| Notification access (a setting you turn on) | Reading notifications you ask about, replying through one you approved, and — with WhatsApp turned on — seeing commands from the contacts you listed |
-| Run at startup (`RECEIVE_BOOT_COMPLETED`) | Clean up a phone task that was cut off by a reboot or app update |
-| Internet | Talking to the AI providers and tools above |
-
-### Known risks and limits
-
-These are open, documented below in detail, and worth knowing before you install:
-
-- **Prompt injection.** A web page, message or email on screen could contain text that
-  tries to steer the AI into doing something you didn't ask for. The risk policy and STOP
-  button limit this; they don't eliminate it.
-- **Anyone nearby can say "Hey Jarvis".** There is no voice matching. Turn the wake word
-  off in Settings if that matters where you are.
-- **Some apps hide their buttons from accessibility.** JARVIS can then tap by position
-  in harmless tasks, and could mis-tap a control it can't read.
-- **Risk detection reads button labels in English.** An icon-only or non-English "Send"
-  or "Pay" button can be treated as low-risk.
-- **The approval for risky phone actions is shown by the app's UI, not by Android.**
-  Your PC is protected by a system fingerprint prompt; risky phone actions are not yet.
-- **The device log (logcat) records phone-task steps.** Other apps can't read it, but
-  anyone with USB debugging access to your phone can.
-- **Remote PC traffic is plain `ws://` inside the Tailscale tunnel.** Tailscale's
-  WireGuard encryption and the signed device handshake protect it. On your home Wi-Fi
-  without Tailscale, the connection is not encrypted.
-- **Release builds you compile yourself are signed with your machine's debug key** unless
-  you set up `keystore.properties` (see the README).
 - **Requests from your PC and from WhatsApp run without asking on the phone.** The PC is
   your paired, signed device, and on WhatsApp a contact counts only if you listed it —
   by the name WhatsApp shows, so a listed name is trusted as far as your address book
@@ -127,21 +33,28 @@ These are open, documented below in detail, and worth knowing before you install
   anyone, reads the phone, or drives an app. A listed contact can still set alarms or
   turn on Do Not Disturb on your phone; list only people you trust with that.
 
-### Using it safely
+| Data | Sent to | When |
+|---|---|---|
+| The answer to a request from your PC ("set an alarm on my phone") | Your own paired PC, over the same signed link | When the PC sends one (Settings ▸ PC & WhatsApp turns this off) |
+| JARVIS's answer to a WhatsApp command | The listed contact who sent it, through WhatsApp's own reply button | Only with WhatsApp turned on in Settings ▸ PC & WhatsApp |
 
-- Install only APKs you built yourself or got from this repository's Releases.
-- Don't run phone tasks while banking, payment or password apps are open, and watch
-  tasks that send messages or buy things.
-- Use Tailscale for Remote PC when you're not on a network you trust.
-- Turn off the accessibility service when you don't need phone control.
+| Permission | Used for |
+|---|---|
+| Notification access (a setting you turn on) | Reading notifications you ask about, replying through one you approved, seeing enabled WhatsApp commands from listed contacts, and stopping a single unambiguous timer through the resolved Clock app's own cancellation action |
+
+Timer cancellation (2026-10-24) accepts only the Clock package's non-group timer
+notification with exactly one matching cancellation action. Ambiguous/multiple timers
+are refused; unrelated notifications are never cancelled. Removal is verified before
+claiming the timer stopped. This does not grant general notification dismissal.
+
+Plain local notification-read requests (2026-10-24) return the permission-checked
+native reader's formatted, verification-code-redacted text directly through the
+existing dispatcher and chat history. Notification bodies on this simple route are
+not sent to a model. Filtered/compound requests retain the existing model route;
+PC/WhatsApp scopes still prohibit notification reads. The live regression used a
+labelled synthetic notification and recorded only sample checks and workflow metrics.
 
 ---
-
-# Audit history
-
-The rest of this page is the record of the audits, kept for transparency. Newest first.
-The original 2026-07-17 audit also covered the paired Windows backend, which is a
-separate project and not in this repository.
 
 ## Pre-publish audit (2026-09-25)
 
@@ -267,8 +180,8 @@ user data, but GitHub sees the phone's IP. The HTTP scope allows exactly that UR
 consequences worth knowing:
 
 - The operator's model calls now come from Kotlin, so for the life of one phone task the
-  resolved route list — URLs plus auth headers (`x-goog-api-key` for Gemini since the
-  2026-09-25 pass, `Authorization` for Groq/Vertex) — crosses the bridge in `operator_start` and sits in native memory. It
+  resolved route list — URLs with Gemini API keys as `?key=`, or `Authorization` headers
+  for Groq/Vertex — crosses the bridge in `operator_start` and sits in native memory. It
   is never journaled or logged (the bench log carries provider/model/status only). This
   is the same process and the same plaintext-for-one-call posture as `configSecrets`, held
   for minutes instead of one call.
@@ -409,8 +322,8 @@ to the debug APK if it's ever installed/distributed. But `ALLOW_BACKUP` was live
   system entirely: `set_config` (rewrite `allowed_dirs` → widen the file sandbox, swap the LLM
   provider, overwrite API keys), `run_action`, conversation wipes, `set_location`, setup
   re-runs. Fixed with a **default-deny allowlist at the WS dispatch point**
-  (`websocket_server.py` (desktop backend) +
-  `set_remote_allowed` in `main.py` (desktop backend)): a remote client
+  ([websocket_server.py](../../aura/jarvis-studio-backend/server/websocket_server.py) +
+  `set_remote_allowed` in [main.py](../../aura/jarvis-studio-backend/main.py)): a remote client
   may invoke ONLY the 10 message types the phone actually sends (`text_input`,
   `clarify_response`, `permission_response`, the `webrtc_*`/`stop_screen` screen channel, and
   `arm_control`/`disarm_control`/`stop_control`/`remote_input`). Everything else is local-GUI-
@@ -434,7 +347,7 @@ to the debug APK if it's ever installed/distributed. But `ALLOW_BACKUP` was live
   (weather, timers, chat) are untouched. Does NOT authenticate the network link to the PC (the
   PC still only sees the token) — it's a second, local gate. Verified: typecheck/lint clean,
   web build + boot OK. **The fingerprint prompt itself needs an on-device APK build to test.**
-- **New: remote-approval email alert** (`notify.py` (desktop backend)) —
+- **New: remote-approval email alert** ([notify.py](../../aura/jarvis-studio-backend/notify.py)) —
   when a *remote-triggered* gated action needs approval, the PC owner gets an out-of-band
   email so a legitimate request doesn't silently time out while they're away from the
   keyboard. **Notification only — it can never approve or gate anything itself**; approval
@@ -465,25 +378,12 @@ effect on the next Android build.
 
 ---
 
-## Original audit (2026-07-17)
-
-Scope: the phone app and Tauri plugin, **and** the paired Windows backend (the phone
-forwards whole tasks to it, so its trust boundary was part of the phone's attack
-surface). Method: source review of the auth/crypto/IPC paths, the native command surface,
-the WebSocket pairing protocol, and credentials at rest.
-
-At the time, the PC pairing token was the single credential for full control of the PC,
-so almost every Critical/High finding was either "the token is easier to obtain than it
-should be" or "having the token gives more than it should." That token has since been
-replaced by Keystore device keys; see **Current status** above for which findings still
-stand. The findings below are preserved as written. Severity = impact × ease.
-
 ## CRITICAL
 
 ### C1 — A remote client can approve its own "dangerous action" prompts
-**Where:** `main.py:228` (desktop backend) `handle_permission_response`,
-`main.py:207` (desktop backend) `request_permission`,
-`websocket_server.py:160` (desktop backend) `emit`.
+**Where:** [main.py:228](../../aura/jarvis-studio-backend/main.py) `handle_permission_response`,
+[main.py:207](../../aura/jarvis-studio-backend/main.py) `request_permission`,
+[websocket_server.py:160](../../aura/jarvis-studio-backend/server/websocket_server.py) `emit`.
 
 The one human-in-the-loop gate for destructive autopilot actions is `request_permission()`,
 which `emit()`s a `permission_request` and waits for a `permission_response`. But:
@@ -491,8 +391,8 @@ which `emit()`s a `permission_request` and waits for a `permission_response`. Bu
   phone / any token-holding remote client — so the attacker *receives* the prompt.
 - `handle_permission_response()` resolves the future from **any** client's message. It never
   checks `is_current_sender_remote()`. The `remote` flag is captured
-  (`main.py:1096` (desktop backend)) and used **only as a UI label**
-  (`main.py:1110` (desktop backend)), never to require that approval come
+  ([main.py:1096](../../aura/jarvis-studio-backend/main.py)) and used **only as a UI label**
+  ([main.py:1110](../../aura/jarvis-studio-backend/main.py)), never to require that approval come
   from the local GUI.
 
 **Exploit:** With the token, connect over the WS, send `{"type":"text_input","data":"<any
@@ -509,9 +409,9 @@ broadcasting, so a remote client never sees the id.
 
 ### C2 — Token travels/rests in cleartext across every pairing path
 **Where:** token in the WS URL query over `ws://` — [pc.ts:188](../jarvis-studio-gui/src/brain/remote/pc.ts),
-`websocket_server.py:143` (desktop backend);
-token file `start.py:135` (desktop backend) `_TOKEN_FILE = ROOT/.jarvis_ws_token`;
-token printed + QR'd `start.py:382` (desktop backend), `start.py:295` (desktop backend).
+[websocket_server.py:143](../../aura/jarvis-studio-backend/server/websocket_server.py);
+token file [start.py:135](../../aura/start.py) `_TOKEN_FILE = ROOT/.jarvis_ws_token`;
+token printed + QR'd [start.py:382](../../aura/start.py), [start.py:295](../../aura/start.py).
 
 The token is a strong 256-bit secret (`secrets.token_urlsafe(32)` — good), but it is exposed
 in cleartext through multiple channels, any one of which hands an attacker full PC control:
@@ -545,7 +445,7 @@ in cleartext through multiple channels, any one of which hands an attacker full 
 
 ### H1 — Shipped APK is debuggable + cleartext; all secrets extractable over USB
 **Where:** debug manifest
-the merged debug manifest (build output, `…/merged_manifests/universalDebug/…/AndroidManifest.xml:92`)
+[…/merged_manifests/universalDebug/…/AndroidManifest.xml:92](../jarvis-studio-gui/src-tauri/gen/android/app/build/intermediates/merged_manifests/universalDebug/processUniversalDebugManifest/AndroidManifest.xml)
 — `android:debuggable="true"`, `android:usesCleartextTraffic="true"`. The repo ships
 `JARVIS-arm64-debug.apk` (root) — a debug build. `allowBackup` is not set anywhere → defaults
 to **true**.
@@ -580,8 +480,8 @@ via a native command), not in WebView storage. For Vertex specifically, prefer s
 tokens minted server-side over shipping a raw SA key to the device at all.
 
 ### H3 — Backend listens on all interfaces by default
-**Where:** `start.py:398` (desktop backend) sets `JARVIS_WS_BIND=0.0.0.0`;
-`websocket_server.py:46` (desktop backend).
+**Where:** [start.py:398](../../aura/start.py) sets `JARVIS_WS_BIND=0.0.0.0`;
+[websocket_server.py:46](../../aura/jarvis-studio-backend/server/websocket_server.py).
 
 Whenever launched via `start.py`, the backend binds `0.0.0.0:8765` — reachable from the entire
 LAN and any network the PC joins (coffee-shop Wi-Fi, etc.), gated only by the token. Combined
@@ -636,7 +536,7 @@ Python `qrcode` lib — good — so this is the tool, not pairing.)
 leaves the device and never feed secrets to it.
 
 ### M4 — No rate-limiting / connection throttling on the WS server
-**Where:** `websocket_server.py:82` (desktop backend).
+**Where:** [websocket_server.py:82](../../aura/jarvis-studio-backend/server/websocket_server.py).
 
 The 256-bit token makes online brute force impractical (good), so this is **DoS**, not
 auth-bypass: an attacker who can reach `:8765` (H3) can flood connections/handshakes. `max_queue`
@@ -668,12 +568,12 @@ narrow folder grants and surface which folder is shared.
 
 ## What's already done right (don't regress these)
 - Token is 256-bit (`secrets.token_urlsafe(32)`); comparison is constant-time
-  (`hmac.compare_digest`) — `websocket_server.py:144` (desktop backend).
+  (`hmac.compare_digest`) — [websocket_server.py:144](../../aura/jarvis-studio-backend/server/websocket_server.py).
 - a11y service, `ReminderReceiver`, `WakeWordService` are all `exported="false"` with
   `BIND_ACCESSIBILITY_SERVICE` — other apps can't bind/trigger them
   ([plugin AndroidManifest.xml](../jarvis-studio-gui/src-tauri/tauri-plugin-phone/android/src/main/AndroidManifest.xml)).
 - Origin allowlist blocks browser-based cross-site WS hijack and DNS-rebinding
-  (`websocket_server.py:127` (desktop backend)).
+  ([websocket_server.py:127](../../aura/jarvis-studio-backend/server/websocket_server.py)).
 - SAF-scoped file access, no traversal (L2).
 - Device requires per-host RSA authorization before adb works → blocks drive-by "juice-jacking".
 - Release build is not debuggable. It does allow cleartext (`usesCleartextTraffic=true`),

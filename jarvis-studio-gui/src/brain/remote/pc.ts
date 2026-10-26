@@ -1772,7 +1772,13 @@ function terminalResult(data: unknown): ToolResult {
   return {
     ok,
     summary,
-    data: proof || findings.length ? { ...(proof ? { proof } : {}), findings } : undefined,
-    error: ok ? undefined : state === "succeeded" ? "unverified_success" : state || "unverified_failure",
+    data: {
+      ...(proof ? { proof } : {}), findings,
+      artifacts: Array.isArray(d.artifacts) ? d.artifacts : [],
+      completed: Array.isArray(d.completed) ? d.completed : [],
+      remaining: Array.isArray(d.remaining) ? d.remaining : [],
+    },
+    error: ok ? undefined : state === "succeeded" ? "unverified_success"
+      : d.status === "unverified" ? "unverified" : state || "unverified_failure",
   };
 }

@@ -78,6 +78,8 @@ data class OpObservation(
     /** Full display size in pixels — what a screenshot covers. 0 when unknown. */
     val screenW: Int = 0,
     val screenH: Int = 0,
+    /** Android Build values, independent of editable names in Settings. */
+    val hardwareFacts: Map<String, String> = emptyMap(),
 )
 
 data class OpResult(val ok: Boolean, val summary: String, val code: String = if (ok) "ok" else "action_failed")
@@ -562,9 +564,13 @@ class OperatorLoop(
             // ── Terminal commands ──
             if (action in setOf("done", "finished", "complete")) {
                 val summary = cmd.optString("summary").trim()
-                // Truthful-completion gate: a "done" with no real actuation, or one that
-                // reads like non-completion, is not believed.
-                if (steps.none(::isActuation)) {
+                // Hardware lookups have direct Android evidence even without a
+                // tap. Everything else still needs actuation; the independent
+                // checker below must verify the entire goal in both cases.
+                val hardwareLookup = isLookupGoal(opts.goal) && cur.hardwareFacts.isNotEmpty() &&
+                    Regex("\\b(model|manufacturer|android version)\\b", RegexOption.IGNORE_CASE).containsMatchIn(opts.goal) &&
+                    !Regex("\\b(open|launch|navigate|tap|scroll|back|home)\\b", RegexOption.IGNORE_CASE).containsMatchIn(opts.goal)
+                if (steps.none(::isActuation) && !hardwareLookup) {
                     return partial(steps, "I didn't actually manage to do anything there, sir.")
                 }
                 // A summary that narrates NON-completion ("I will wait for it to load") is
@@ -1147,6 +1153,7 @@ class OperatorLoop(
         changes: List<String>,
         seen: Map<String, String>,
     ): Verification {
+        hardwareClaimProblem(opts.goal, claim, obs.hardwareFacts)?.let { return Verification(it, "") }
         return try {
             val screen = JSONObject()
                 .put("app", obs.app.ifEmpty { "?" }.take(200))
@@ -1489,7 +1496,9 @@ internal fun rankNodes(nodes: List<OpNode>): List<OpNode> {
 /** The per-step screen payload — the operator's whole token budget, so no selector
  *  (the model targets by index and can't use it) and no toggle state on non-toggles. */
 internal fun renderObs(obs: OpObservation): String {
-    if (obs.nodes.isEmpty()) return "(no actionable elements detected)"
+    val hardware = if (obs.hardwareFacts.isEmpty()) "" else
+        "Android-reported hardware (device name is editable, NOT the model): ${JSONObject(obs.hardwareFacts)}\n"
+    if (obs.nodes.isEmpty()) return hardware + "(no actionable elements detected)"
     // A row that speaks through its children (a clickable container with 1–3 labels inside)
     // carries them itself, so those plain text children aren't listed a second time.
     val rows = obs.nodes.filter {
@@ -1540,7 +1549,16 @@ internal fun renderObs(obs: OpObservation): String {
         val at = if (n.clickable || n.editable || n.scrollable || label.isEmpty()) " @${b.x},${b.y} ${b.w}x${b.h}" else ""
         "[${n.index}] ${n.role}$id $text${if (flags.isNotEmpty()) " ($flags)" else ""}$at"
     }
-    return "$lines$more"
+    return "$hardware$lines$more"
+}
+
+internal fun hardwareClaimProblem(goal: String, claim: String, facts: Map<String, String>): String? {
+    val asksModel = Regex("\\bmodel\\b", RegexOption.IGNORE_CASE).containsMatchIn(goal) &&
+        Regex("\\b(phone|device)\\b", RegexOption.IGNORE_CASE).containsMatchIn(goal)
+    val model = facts["model"].orEmpty()
+    return if (asksModel && model.isNotEmpty() && !claim.contains(model, ignoreCase = true))
+        "The hardware model is $model according to Android. The result must include that model code; an editable device name is not proof of the model."
+    else null
 }
 
 /** The command in a model reply (null when there is none), normalised to {"do":…}. */

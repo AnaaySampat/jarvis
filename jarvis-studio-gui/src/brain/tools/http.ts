@@ -216,9 +216,25 @@ export function isPrivateHost(host: string): boolean {
 }
 
 const ENTITIES: Record<string, string> = {
-  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", thinsp: " ", ensp: " ", emsp: " ",
-  mdash: "—", ndash: "–",
-  hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", copy: "©", pound: "£", euro: "€",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  thinsp: " ",
+  ensp: " ",
+  emsp: " ",
+  mdash: "—",
+  ndash: "–",
+  hellip: "…",
+  rsquo: "’",
+  lsquo: "‘",
+  rdquo: "”",
+  ldquo: "“",
+  copy: "©",
+  pound: "£",
+  euro: "€",
 };
 
 /** The readable text of an HTML page: its <article>/<main> when it has one, without
@@ -233,13 +249,19 @@ export function pageText(html: string): { title: string; text: string } {
       .replace(/&([a-z]+);/gi, (m, e: string) => ENTITIES[e.toLowerCase()] ?? m);
   const title = decode((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "").trim());
   let body = html.replace(/<!--[\s\S]*?-->/g, "");
-  body = body.replace(/<(script|style|noscript|svg|template|nav|header|footer|aside|form|iframe)\b[\s\S]*?<\/\1>/gi, " ");
+  body = body.replace(
+    /<(script|style|noscript|svg|template|nav|header|footer|aside|form|iframe)\b[\s\S]*?<\/\1>/gi,
+    " ",
+  );
   const main = /<(article|main)\b[\s\S]*?<\/\1>/i.exec(body)?.[0];
   // A tag's quoted attributes may hold ">" (Wikipedia's data-mw JSON does).
   const attrs = `(?:[^>"']|"[^"]*"|'[^']*')*`;
   const text = decode(
     (main ?? body)
-      .replace(new RegExp(`<(?:br|/p|/h[1-6]|/li|/tr|/div|/section|/blockquote)\\b${attrs}>`, "gi"), "\n")
+      .replace(
+        new RegExp(`<(?:br|/p|/h[1-6]|/li|/tr|/div|/section|/blockquote)\\b${attrs}>`, "gi"),
+        "\n",
+      )
       .replace(new RegExp(`<${attrs}>`, "g"), " "),
   )
     .replace(/[ \t\f\v\r ]+/g, " ")
@@ -256,12 +278,45 @@ export async function readWebPage(url: string): Promise<ToolResult> {
   } catch {
     return { ok: false, summary: "That isn't a web address I can open, sir." };
   }
-  if (!/^https?:$/.test(u.protocol) || isPrivateHost(u.hostname)) {
+  const publicUrl = (page: URL) =>
+    /^https?:$/.test(page.protocol) &&
+    !isPrivateHost(page.hostname) &&
+    !page.username &&
+    !page.password;
+  if (!publicUrl(u)) {
     return { ok: false, summary: "I only read public web pages, sir." };
   }
   let html: string;
   try {
-    html = await getText(u.href, { timeoutMs: 15000 });
+    // Check redirects ourselves: a public source must not redirect this reader to
+    // the phone's private network. Native HTTP otherwise follows them implicitly.
+    const deadline = Date.now() + 20000;
+    for (let hop = 0; ; hop++) {
+      if (!publicUrl(u)) return { ok: false, summary: "I only read public web pages, sir." };
+      const response = await resilientFetch(
+        u.href,
+        {
+          redirect: "manual",
+          credentials: "omit",
+          maxRedirections: 0,
+          headers: {
+            Accept: "text/html,application/xhtml+xml,text/plain",
+            "User-Agent": "JarvisAndroid/2.5 (public source reader)",
+          },
+        } as RequestInit,
+        Math.max(1, deadline - Date.now()),
+      );
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        if (hop >= 5 || Date.now() >= deadline) throw new Error("Too many page redirects.");
+        const next = response.headers.get("location");
+        if (!next) throw new Error("Page redirected without an address.");
+        u = new URL(next, u);
+        continue;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      html = await response.text();
+      break;
+    }
   } catch (err) {
     return { ok: false, summary: offlineOr(`I couldn't open ${u.hostname} (${String(err)}).`) };
   }
@@ -544,10 +599,10 @@ function classify(query: string): [string, string] {
   return ['["amenity"="restaurant"]', "restaurants"];
 }
 
-// Overpass mirrors that send CORS headers (verified): the main .de endpoint and the
-// independent mail.ru mirror. The lz4 mirror is dropped — it sends NO CORS header, so
-// a WebView fetch is blocked. We race both and take the first to answer.
+// Independent public Overpass instances: a regional outage or overloaded primary
+// must not take nearby places down. Private.coffee is the former Kumi instance.
 const OVERPASS_ENDPOINTS = [
+  "https://overpass.private.coffee/api/interpreter",
   "https://overpass-api.de/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
@@ -565,7 +620,11 @@ interface OverpassResp {
 async function overpass(queryBody: string): Promise<OverpassResp> {
   const suffix = `?data=${encodeURIComponent(queryBody)}`;
   return Promise.any(
-    OVERPASS_ENDPOINTS.map((base) => getJson<OverpassResp>(base + suffix, { timeoutMs: 14000 })),
+    OVERPASS_ENDPOINTS.map(async (base) => {
+      const data = await getJson<OverpassResp>(base + suffix, { timeoutMs: 18000 });
+      if (!Array.isArray(data.elements)) throw new Error("Invalid maps response");
+      return data;
+    }),
   );
 }
 

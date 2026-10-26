@@ -26,13 +26,15 @@ describe("mention", () => {
 });
 
 describe("routeFor", () => {
-  it("sends PC agents to the PC and research there only when one is paired", () => {
+  it("sends PC agents to the PC and keeps research on the phone even when paired", () => {
     expect(routeFor("desktop", true)).toEqual({ pc: "computer" });
     expect(routeFor("browser", false)).toEqual({ pc: "browser" });
-    expect(routeFor("research", true)).toEqual({ pc: "research" });
+    expect(routeFor("research", true)).toEqual(routeFor("research", false));
     expect(routeFor("research", false)).toMatchObject({
       groups: ["web"], // reads the sources itself (read_webpage)
       context: expect.stringMatching(/RESEARCH/),
+      maxToolRounds: 10,
+      informationOnly: true,
     });
     expect(routeFor("scheduling", false)).toMatchObject({ groups: ["planner"] });
     expect(routeFor("auto", true)).toBeNull();

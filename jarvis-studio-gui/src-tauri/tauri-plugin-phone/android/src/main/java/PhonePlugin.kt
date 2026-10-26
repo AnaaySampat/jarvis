@@ -2283,6 +2283,20 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     fun clockAction(invoke: Invoke) {
         val args = invoke.parseArgs(ClockArgs::class.java)
         val label = args.label.trim()
+        if (args.action.trim().lowercase() == "dismiss_timer") {
+            autonomyScope.launch {
+                val clock = Intent(AlarmClock.ACTION_SHOW_TIMERS).resolveActivity(activity.packageManager)?.packageName
+                val stopped = clock != null && JarvisNotificationListener.instance?.stopSingleTimer(clock) == true
+                invoke.resolve(if (stopped) result(true, "Timer stopped.") else {
+                    // ACTION_DISMISS_TIMER without a timer URI only dismisses
+                    // expired timers. It cannot prove a running timer stopped.
+                    val opened = startClockIntent(Intent(AlarmClock.ACTION_SHOW_TIMERS),
+                        "Opened your timers — choose the timer and tap Cancel. I couldn't confirm it stopped automatically.")
+                    result(false, opened.optString("summary")).apply { put("error", "timer_not_stopped") }
+                })
+            }
+            return
+        }
 
         val response = when (args.action.trim().lowercase()) {
             "alarm" -> {
@@ -2334,16 +2348,6 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                     startClockIntent(Intent(AlarmClock.ACTION_SHOW_TIMERS), "Opened your timers.")
                 } else {
                     result(false, "This version of Android can't open the timer list directly.")
-                }
-
-            "dismiss_timer" ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val intent = Intent(AlarmClock.ACTION_DISMISS_TIMER).apply {
-                        putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                    }
-                    startClockIntent(intent, "Timer dismissed.")
-                } else {
-                    result(false, "This version of Android can't dismiss timers directly.")
                 }
 
             else -> result(false, "I don't know the clock action '${args.action}'.")

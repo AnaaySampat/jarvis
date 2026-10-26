@@ -336,11 +336,13 @@ object NativeOperator {
         override suspend fun observe(): OpObservation {
             val s = svc() ?: return OpObservation("", emptyList(), ready = false)
             val (screenW, screenH) = screenSize()
+            val hardware = mapOf("model" to Build.MODEL, "manufacturer" to Build.MANUFACTURER,
+                "android_version" to Build.VERSION.RELEASE, "sdk" to Build.VERSION.SDK_INT.toString())
             // JARVIS's own screen is never acted on (only left, with open_app), and its
             // WebView is the biggest tree on the phone: walking it cost 0.9–3s per task
             // start, and its ~5k chars slowed the first model call too.
             if (s.rootInActiveWindow?.packageName?.toString() == context.packageName) {
-                return OpObservation(context.packageName, emptyList(), screenW = screenW, screenH = screenH)
+                return OpObservation(context.packageName, emptyList(), screenW = screenW, screenH = screenH, hardwareFacts = hardware)
             }
             val snap = s.snapshot()
             return OpObservation(
@@ -349,6 +351,7 @@ object NativeOperator {
                 windowId = snap.windowId,
                 screenW = screenW,
                 screenH = screenH,
+                hardwareFacts = hardware,
                 nodes = snap.nodes.map { n ->
                     OpNode(
                         index = n.index,

@@ -105,6 +105,10 @@ const PROMPT_TIMEOUT_MS = 90_000;
 // so "Hey Jarvis" goes quietly dead for the rest of the session.
 const MAX_LISTEN_MS = 30_000;
 
+// Automatic model fallback is routine routing, not a user-facing alert. Keep the
+// route/reason in diagnostics while real failures still use pushWarning.
+const logModelFallback = (text) => console.info("[model fallback]", text);
+
 const CONFIG_KEY = "jarvis.android.config.v1";
 const PC_KEY = "jarvis.android.pc.v1";
 const TV_KEY = "jarvis.android.tv.v1";
@@ -784,6 +788,19 @@ export function useBrain() {
     setControlSecondsLeft(0);
   }, []);
 
+  useEffect(() => {
+    if (!controlArmed) return undefined;
+    const tick = () => {
+      const remaining = controlLeaseRef.current.remainingSeconds;
+      if (remaining == null) return;
+      setControlSecondsLeft(remaining);
+      if (remaining === 0) clearControlLease();
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [controlArmed, clearControlLease]);
+
   const nextControlLeaseEnvelope = useCallback(() => {
     const envelope = controlLeaseRef.current.nextEnvelope();
     if (!envelope) return envelope;
@@ -976,7 +993,7 @@ export function useBrain() {
           if (!d.armed) {
             clearControlLease();
           } else if (leaseId) {
-            controlLeaseRef.current.acquire(leaseId);
+            controlLeaseRef.current.acquire(leaseId, d.seconds_left);
             setControlArmed(true);
             setControlSecondsLeft(Number(d.seconds_left) || 0);
           } else if (controlLeaseRef.current.leaseId) {
@@ -990,9 +1007,9 @@ export function useBrain() {
           const action = String(d.action || "").toLowerCase();
           const leaseId = d.lease_id || d.leaseId;
           if ((action === "arm" || action === "arm_control") && d.ok !== false && leaseId) {
-            controlLeaseRef.current.acquire(leaseId);
+            controlLeaseRef.current.acquire(leaseId, d.seconds_left);
             setControlArmed(true);
-            setControlSecondsLeft(Number(d.seconds_left) || 0);
+            if (d.seconds_left != null) setControlSecondsLeft(Number(d.seconds_left) || 0);
           } else if (
             d.ok === false ||
             action === "disarm" ||
@@ -1153,7 +1170,10 @@ export function useBrain() {
       onStream: setScreenStream,
       onState: (next) => {
         setScreenState(next);
-        if (next === "failed" || next === "closed") clearControlLease();
+        if (next === "failed" || next === "closed") {
+          clearControlLease();
+          setScreenStream(null);
+        }
       },
       onDetail: setScreenDetail,
     });
@@ -1373,7 +1393,7 @@ export function useBrain() {
       location: locationRef.current,
       onAgentEvent,
       onUiCommand: emitUiCommand,
-      onFallback: pushWarning,
+      onFallback: logModelFallback,
       shouldStopPhoneTask: () => phoneTaskStopRef.current,
       authorizePhoneAction,
       onDispatched,
@@ -1386,7 +1406,6 @@ export function useBrain() {
     tv,
     onAgentEvent,
     emitUiCommand,
-    pushWarning,
     taskPlatform,
     authorizePhoneAction,
     onDispatched,
@@ -1408,7 +1427,7 @@ export function useBrain() {
       tv,
       onAgentEvent,
       onUiCommand: emitUiCommand,
-      onFallback: pushWarning,
+      onFallback: logModelFallback,
       shouldStopPhoneTask: () => phoneTaskStopRef.current,
       authorizePhoneAction,
       onDispatched,
@@ -1418,7 +1437,6 @@ export function useBrain() {
     tv,
     onAgentEvent,
     emitUiCommand,
-    pushWarning,
     taskPlatform,
     authorizePhoneAction,
     onDispatched,
@@ -1499,6 +1517,9 @@ export function useBrain() {
     async (text, display, photo) => {
       const t = (text || "").trim();
       if (!t || busyRef.current) return;
+      // STOP belongs to the previous request. Clear it only once a new turn is
+      // accepted; otherwise loop.ts returns "Stopped." before any model/tool runs.
+      phoneTaskStopRef.current = false;
       userInteractedRef.current = true; // gates the one-time overlay-permission prompt
       setMessages((prev) => [
         ...prev,
@@ -1589,7 +1610,10 @@ export function useBrain() {
       pcCommandsSeenRef.current.add(id);
       const answer = (ok, reply) => void pc.signalConfirmed("phone.result", { id, ok, reply });
       if (storedRef.current?.pcCommands === false) {
-        answer(false, "This phone is set not to take requests from the PC (Settings ▸ PC & WhatsApp).");
+        answer(
+          false,
+          "This phone is set not to take requests from the PC (Settings ▸ PC & WhatsApp).",
+        );
         return;
       }
       // One turn at a time: give one in progress a little while to finish.
@@ -1603,7 +1627,11 @@ export function useBrain() {
       }
       busyRef.current = true;
       setStatus("thinking");
-      setMessages((prev) => [...prev, { role: "user", text: `💻 From your PC: ${text}`, id: uid() }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: `💻 From your PC: ${text}`, id: uid() },
+      ]);
+      phoneTaskStopRef.current = false;
       let ok = false;
       let reply = "";
       try {
@@ -1663,7 +1691,10 @@ export function useBrain() {
         await new Promise((r) => setTimeout(r, 250));
       }
       if (busyRef.current || !brainRef.current) {
-        await whatsappReply(c.seq, "I'm busy with something else right now — try again in a minute.");
+        await whatsappReply(
+          c.seq,
+          "I'm busy with something else right now — try again in a minute.",
+        );
         return;
       }
       busyRef.current = true;
@@ -1672,6 +1703,7 @@ export function useBrain() {
         ...prev,
         { role: "user", text: `💬 WhatsApp from ${c.sender}: ${c.text}`, id: uid() },
       ]);
+      phoneTaskStopRef.current = false;
       let reply = "";
       try {
         const res = await brainRef.current.askFromWhatsApp(c.text, c.sender);

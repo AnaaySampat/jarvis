@@ -84,6 +84,9 @@ export class RemoteScreen {
   private opts: RemoteScreenOptions;
   private _state: ScreenState = "idle";
   private slowTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveries = 0;
   // The backend mints this session id itself and only reveals it in the
   // `webrtc_answer` payload — every message after that (trickled ICE,
   // stop_screen, and the arm/disarm/remote_input control-lease messages built
@@ -146,12 +149,13 @@ export class RemoteScreen {
   }
 
   /** Open the peer connection, offer a recv-only video, and signal the PC. */
-  async start(): Promise<void> {
+  async start(recovering = false): Promise<void> {
     if (!webrtcAvailable()) {
       this.setState("failed");
       throw new Error("This device's WebView has no WebRTC support.");
     }
-    await this.close(false); // fresh start; don't tell the PC to stop yet
+    if (!recovering) this.recoveries = 0;
+    await this.close(recovering);
     this._sessionId = "";
     this._taskId = "";
     this._pendingIce = [];
@@ -169,12 +173,33 @@ export class RemoteScreen {
     const pc = new RTCPeerConnection({
       iceServers: [...DEFAULT_ICE, ...(this.opts.iceServers ?? [])],
     });
+    let receivedStream: MediaStream | null = null;
     this.pc = pc;
+    const recover = (delay: number) => {
+      if (this.pc !== pc || this.recoveryTimer != null) return;
+      this.setState("failed"); // immediately disables control of a stale frame
+      if (this.recoveries >= 2) {
+        this.setDetail("The screen connection was lost. Tap Retry to reconnect.");
+        return;
+      }
+      this.setDetail("Screen connection lost — reconnecting…");
+      this.recoveryTimer = setTimeout(() => {
+        this.recoveryTimer = null;
+        if (this.pc !== pc) return;
+        this.recoveries++;
+        void this.start(true).catch(() => this.setState("failed"));
+      }, delay);
+    };
+    this.connectTimer = setTimeout(() => {
+      if (this.pc === pc && pc.connectionState !== "connected") recover(1000);
+    }, 25000);
 
     pc.addTransceiver("video", { direction: "recvonly" });
 
     pc.ontrack = (ev) => {
+      if (this.pc !== pc) return;
       const stream = ev.streams[0] ?? new MediaStream([ev.track]);
+      receivedStream = stream;
       this.setState("streaming");
       try {
         this.opts.onStream?.(stream);
@@ -211,9 +236,18 @@ export class RemoteScreen {
 
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
-      if (st === "failed" || st === "closed" || st === "disconnected") {
-        // Don't clobber a good "streaming" on a transient "disconnected"; only fail hard.
-        if (st === "failed") this.setState("failed");
+      if (this.pc !== pc) return;
+      if (st === "failed" || st === "disconnected") {
+        recover(st === "disconnected" ? 4000 : 1000);
+      } else if (st === "connected") {
+        if (this.connectTimer != null) clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+        if (this.recoveryTimer != null) clearTimeout(this.recoveryTimer);
+        this.recoveryTimer = null;
+        if (this._state === "failed" && receivedStream) {
+          this.opts.onStream?.(receivedStream);
+          this.setState("streaming");
+        }
       }
     };
 
@@ -294,6 +328,11 @@ export class RemoteScreen {
 
   /** Stop streaming. `tellPc` sends `stop_screen` so the PC frees its capturer. */
   async close(tellPc = true): Promise<void> {
+    this.clearSlowTimer();
+    if (this.recoveryTimer != null) clearTimeout(this.recoveryTimer);
+    if (this.connectTimer != null) clearTimeout(this.connectTimer);
+    this.recoveryTimer = null;
+    this.connectTimer = null;
     const pc = this.pc;
     this.pc = null;
     if (pc) {

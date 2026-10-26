@@ -2,24 +2,52 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const resilientFetch = vi.fn();
 const postJson = vi.fn();
+const getJson = vi.fn();
 
 vi.mock("./httpClient", () => ({
   resilientFetch: (...a: unknown[]) => resilientFetch(...a),
   postJson: (...a: unknown[]) => postJson(...a),
-  getJson: vi.fn(),
+  getJson: (...a: unknown[]) => getJson(...a),
   getText: vi.fn(),
   isOffline: () => false,
 }));
 
-import { generateImage, webSearch } from "./http";
+import { findPlaces, generateImage, webSearch } from "./http";
 import type { HttpToolCtx } from "./http";
 import * as quota from "../quota";
 
 const ctx = (): HttpToolCtx =>
   ({
-    config: { tier: "gemini", model: "gemini-3.6-flash", keys: { gemini: ["k"] }, pinnedLocation: "" },
+    config: {
+      tier: "gemini",
+      model: "gemini-3.6-flash",
+      keys: { gemini: ["k"] },
+      pinnedLocation: "",
+    },
     location: { pinnedPlace: "", coords: async () => null },
   }) as unknown as HttpToolCtx;
+
+describe("nearby places mirror recovery", () => {
+  it("uses an independent working mirror when others fail or return malformed data", async () => {
+    getJson.mockImplementation(async (url: string) => {
+      if (url.startsWith("https://overpass.private.coffee/"))
+        return {
+          elements: [
+            { lat: 19.2, lon: 72.8, tags: { name: "Test pharmacy", amenity: "pharmacy" } },
+          ],
+        };
+      if (url.startsWith("https://overpass-api.de/")) throw new Error("HTTP 504");
+      return { error: "unavailable" };
+    });
+    const config = ctx();
+    config.location.coords = async () => ({ lat: 19.2, lon: 72.8, place: "Test location" });
+    const result = await findPlaces("pharmacy", config);
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain("Test pharmacy");
+    expect(getJson).toHaveBeenCalledTimes(3);
+    getJson.mockReset();
+  });
+});
 
 /** The live free-tier rejection: not a spent allowance — an allocation of zero. */
 const LIMIT_ZERO = JSON.stringify({
@@ -37,7 +65,9 @@ const drew = () => ({
   ok: true,
   status: 200,
   json: async () => ({
-    candidates: [{ content: { parts: [{ inline_data: { data: "AAA", mime_type: "image/png" } }] } }],
+    candidates: [
+      { content: { parts: [{ inline_data: { data: "AAA", mime_type: "image/png" } }] } },
+    ],
   }),
 });
 
@@ -105,7 +135,8 @@ describe("webSearch — the grounded call must leave room to answer", () => {
 describe("webSearch — grounds only where the free tier allows it", () => {
   const answer = { candidates: [{ content: { parts: [{ text: "Saturday 10am PT" }] } }] };
   const modelOf = (call: unknown[]) => String(call[0]).match(/models\/([^:]+):/)![1];
-  const keyOf = (call: unknown[]) => (call[2] as { headers: Record<string, string> }).headers["x-goog-api-key"];
+  const keyOf = (call: unknown[]) =>
+    (call[2] as { headers: Record<string, string> }).headers["x-goog-api-key"];
   const twoKeys = (): HttpToolCtx => {
     const c = ctx();
     c.config.keys.gemini = ["k1", "k2"];
@@ -141,7 +172,10 @@ describe("webSearch — grounds only where the free tier allows it", () => {
   });
 
   it("skips a key the chat ladder already found spent", async () => {
-    quota.bench({ provider: "gemini", model: "gemini-2.5-flash", keyIndex: 0 }, { durationMs: quota.DAY });
+    quota.bench(
+      { provider: "gemini", model: "gemini-2.5-flash", keyIndex: 0 },
+      { durationMs: quota.DAY },
+    );
     postJson.mockResolvedValue(answer);
     await webSearch("x", twoKeys());
     expect(keyOf(postJson.mock.calls[0]!)).toBe("k2");
@@ -165,7 +199,9 @@ describe("webSearch — Tavily backs up Gemini grounding", () => {
   };
   const tavilyAnswer = {
     answer: "Spain won.",
-    results: [{ title: "Final report", url: "https://ex.com/a", content: "Spain beat England 2-1." }],
+    results: [
+      { title: "Final report", url: "https://ex.com/a", content: "Spain beat England 2-1." },
+    ],
   };
   const isTavily = (call: unknown[]) => String(call[0]).includes("api.tavily.com");
 
@@ -190,7 +226,9 @@ describe("webSearch — Tavily backs up Gemini grounding", () => {
     expect(r.summary).toMatch(/Spain won/);
     expect(r.data).toEqual({ sources: [{ title: "Final report", uri: "https://ex.com/a" }] });
     const tavilyCall = postJson.mock.calls.find(isTavily)!;
-    expect((tavilyCall[2] as { headers: Record<string, string> }).headers.Authorization).toBe("Bearer tvly-1");
+    expect((tavilyCall[2] as { headers: Record<string, string> }).headers.Authorization).toBe(
+      "Bearer tvly-1",
+    );
   });
 
   it("answers with no Gemini key at all", async () => {
@@ -208,6 +246,70 @@ describe("webSearch — Tavily backs up Gemini grounding", () => {
 });
 
 describe("reading a web page (research without a PC)", () => {
+  const page = () =>
+    new Response(
+      `<title>NASA source</title><article>${"Research evidence. ".repeat(30)}</article>`,
+    );
+
+  it("reads source text and preserves the final URL after a public redirect", async () => {
+    const { readWebPage } = await import("./http");
+    resilientFetch
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://science.nasa.gov/mission/europa-clipper/" },
+        }),
+      )
+      .mockResolvedValueOnce(page());
+    const r = await readWebPage("https://www.nasa.gov/clipper");
+    expect(r.ok).toBe(true);
+    expect(r.summary).toContain("Research evidence.");
+    expect(r.data).toEqual({
+      sources: [
+        {
+          title: "NASA source",
+          uri: "https://science.nasa.gov/mission/europa-clipper/",
+        },
+      ],
+    });
+    expect(resilientFetch.mock.calls[0]![1]).toMatchObject({
+      maxRedirections: 0,
+      redirect: "manual",
+      credentials: "omit",
+    });
+  });
+
+  it("blocks a public page redirecting to the private network before a second request", async () => {
+    const { readWebPage } = await import("./http");
+    resilientFetch.mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://192.168.1.1/admin" },
+      }),
+    );
+    expect((await readWebPage("https://example.org/source")).ok).toBe(false);
+    expect(resilientFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds redirect loops and reports empty or inaccessible sources as failures", async () => {
+    const { readWebPage } = await import("./http");
+    resilientFetch.mockImplementation(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "/again" },
+        }),
+    );
+    expect((await readWebPage("https://example.org/source")).summary).toContain(
+      "Too many page redirects",
+    );
+    expect(resilientFetch).toHaveBeenCalledTimes(6);
+    resilientFetch.mockResolvedValueOnce(new Response("<p>Loading...</p>"));
+    expect((await readWebPage("https://example.org/empty")).ok).toBe(false);
+    resilientFetch.mockResolvedValueOnce(new Response("denied", { status: 403 }));
+    expect((await readWebPage("https://example.org/blocked")).summary).toContain("HTTP 403");
+  });
+
   it("keeps the article's words, not its scripts, menus or entities", async () => {
     const { pageText } = await import("./http");
     const html =
@@ -223,7 +325,14 @@ describe("reading a web page (research without a PC)", () => {
 
   it("never reads this phone's network or a non-web address", async () => {
     const { isPrivateHost, readWebPage } = await import("./http");
-    for (const h of ["localhost", "192.168.0.1", "10.2.3.4", "172.20.0.1", "printer.local", "[::1]"])
+    for (const h of [
+      "localhost",
+      "192.168.0.1",
+      "10.2.3.4",
+      "172.20.0.1",
+      "printer.local",
+      "[::1]",
+    ])
       expect(isPrivateHost(h)).toBe(true);
     expect(isPrivateHost("en.wikipedia.org")).toBe(false);
     expect(isPrivateHost("172.32.0.1")).toBe(false);

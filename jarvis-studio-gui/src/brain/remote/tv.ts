@@ -475,7 +475,7 @@ async function castToTv(tv: Tv, target: string, env: TvEnv): Promise<ToolResult>
   }
   return {
     ok: false,
-    summary: `“${title || "That"}” is playing in ${pkg || "an app"}; only YouTube and Netflix can be sent to the TV.`,
+    summary: `“${title || "That"}” is from ${pkg || "another app"}; only YouTube and Netflix can be sent to the TV.`,
   };
 }
 
@@ -850,6 +850,13 @@ export class Tv {
           summary: `Netflix is playing, but I couldn't confirm it switched to ${found.name}.`,
         };
       }
+      // A leftover/background media session is insufficient when Netflix has
+      // returned to the launcher (observed during the live TV audit).
+      if ((await this.focusedPackage()) !== NETFLIX)
+        return {
+          ok: false,
+          summary: `Netflix reported playback, but it isn't on the TV screen. I couldn't confirm ${found.name} is playing.`,
+        };
       return { ok: true, summary: `Playing ${found.name} on Netflix.` };
     }
     return {
@@ -1118,9 +1125,9 @@ export async function lookupNetflixTitle(
   if (bare) ids.push(bare);
   let other = "";
   for (const id of [...new Set(ids)].slice(0, 3)) {
-    const name = await netflixTitleName(id);
-    if (name && sameTitle(name, t)) return { id, name };
-    if (name) other = name;
+    const found = await netflixTitleDetails(id);
+    if (found && sameTitle(found.name, t)) return found;
+    if (found) other = found.name;
   }
   return {
     error: other
@@ -1141,12 +1148,30 @@ function jsUnescape(s: string): string {
 
 /** Netflix's name for a title, from its public page (~1 MB, read whole: see titleNameIn). */
 export async function netflixTitleName(id: string): Promise<string | null> {
+  return (await netflixTitleDetails(id))?.name ?? null;
+}
+
+async function netflixTitleDetails(id: string): Promise<{ id: string; name: string } | null> {
   try {
     const res = await resilientFetch(`https://www.netflix.com/title/${id}`, {}, 20_000);
-    return res.ok ? titleNameIn(await res.text(), id) : null;
+    return res.ok ? netflixTitleIn(await res.text(), id) : null;
   } catch {
     return null;
   }
+}
+
+/** Search may return a season ID. Netflix's page identifies its parent series;
+ * require one unambiguous parent and its own Show/Movie title evidence. */
+export function netflixTitleIn(html: string, id: string): { id: string; name: string } | null {
+  const exact = titleNameIn(html, id);
+  if (exact) return { id, name: exact };
+  const parents = [
+    ...new Set([...html.matchAll(/"topLevelVideoId":(\d{5,10})\b/g)].map((m) => m[1])),
+  ];
+  if (parents.length !== 1) return null;
+  const parentId = parents[0]!;
+  const name = titleNameIn(html, parentId);
+  return name ? { id: parentId, name } : null;
 }
 
 /**

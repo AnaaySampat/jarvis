@@ -9,7 +9,8 @@
  *
  * This scaffold implements the SHAPE (bounded tool-call rounds with a truthful
  * final answer) plus a same-repeat guard mirroring the phone operator's cycle guard
- * (scaled down: with only MAX_TOOL_ROUNDS=3 rounds there's no room for the
+ * (ordinary turns use three rounds; scoped research can use a larger bounded budget).
+ * With the ordinary turn's budget there's no room for the
  * operator's longer window-based cycle detector to matter — the useful signal at
  * this scale is "the model just repeated an identical call and got an identical
  * result", which means one more round won't help either).
@@ -20,10 +21,14 @@ import type { ToolDeclaration } from "./types";
 import { groupOf, LOAD_TOOLS, requestedGroups, toSpec, turnPalette } from "./tools/registry";
 import { dispatch, type DispatchDeps } from "./tools/dispatch";
 import { chatOverLadder } from "./ask";
+import { agentResult, modelToolResult, type ResultStatus } from "./results";
+import { WorkflowJournal, type Workflow } from "./workflow";
+import { isComplexTask } from "./modelPolicy";
 
 const MAX_TOOL_ROUNDS = 3; // backstop against runaway tool loops (cf. cycle guard)
 
 export interface TurnResult {
+  status?: ResultStatus;
   reply: string;
   toolResults: ToolResult[];
   /** Every tool the model called this turn (load_tools included). */
@@ -125,6 +130,18 @@ const COMPLETION_CLAIM_RE = new RegExp(
  * call — a copy of an earlier (true) assistant turn in the history it was sent.
  */
 export function claimedWithoutActing(userText: string, reply: string, ranTools: boolean): boolean {
+  // Rendering requested text/visuals IS the work. Keep real-world action claims
+  // guarded even in a mixed request such as "draft a table and email it".
+  const inlineContent =
+    /\b(chart|table|flowchart|diagram|draft|poem|story|essay|outline|schedule)\b/i.test(userText) &&
+    !/\b(send|save|publish|post|call|dial|open|close|launch|delete|remember|forget|remind|alarm|timer|calendar|install|download|upload)\b|\bschedule\s+(a|an|my|this|the)\b|(?:^|\b(?:and|then|also|please)\s+)(?:email|forward|share|text|message)\b/i.test(
+      userText,
+    );
+  if (
+    inlineContent &&
+    !/\b(sent|saved|published|posted|called|dialled|deleted|installed|uploaded)\b/i.test(reply)
+  )
+    return false;
   return !ranTools && ACTIONY_RE.test(userText) && COMPLETION_CLAIM_RE.test(reply);
 }
 
@@ -194,6 +211,93 @@ export async function runTurn(
    *  load_tools can add from. Without it, load_tools isn't on offer. */
   fullTools?: ToolDeclaration[],
 ): Promise<TurnResult> {
+  const journal = deps.journal ?? new WorkflowJournal();
+  const objective = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const run = journal.begin(objective);
+  const scopedDeps = { ...deps, readAgentResult: (id: string) => journal.readResult(run.id, id) };
+  try {
+    const output = await runTurnSteps(
+      messages,
+      tools,
+      scopedDeps,
+      onFallback,
+      fullTools,
+      journal,
+      run,
+    );
+    if (
+      deps.verifyCompletion &&
+      run.state !== "suspended" &&
+      run.results.length &&
+      (run.results.length > 1 || isComplexTask(objective)) &&
+      !run.pending &&
+      !output.toolResults.some((r) => r.error === "cancelled")
+    ) {
+      if (run.metrics) run.metrics.model_decisions++;
+      const verdict = await deps.verifyCompletion(objective, run.results, output.reply);
+      run.completion = verdict;
+      if (verdict.status !== "succeeded") {
+        run.state = "suspended";
+        run.reason = `${verdict.status}: ${verdict.remaining.join("; ")}`;
+        const readOnly =
+          output.calledTools.every((name) =>
+            [
+              "get_weather",
+              "get_news",
+              "web_search",
+              "read_webpage",
+              "read_file",
+              "list_directory",
+              "get_time",
+              "get_day",
+              LOAD_TOOLS,
+            ].includes(name),
+          ) &&
+          !/\b(send|save|publish|post|email|share|forward|call|dial|open|close|launch|delete|remember|forget|remind|alarm|timer|calendar|install|download|upload)\b|\b(create|make|write|edit|update)\s+(?:(a|an|the|my|this)\s+)?(file|folder|document|workbook)\b/i.test(
+            objective,
+          );
+        output.reply =
+          (readOnly && output.reply.trim() ? output.reply : partialReply(output.toolResults)) +
+          (verdict.remaining.length
+            ? ` Still unconfirmed: ${verdict.remaining.join("; ")}`
+            : " Completion could not be verified.");
+      }
+    }
+    run.state =
+      run.state === "suspended" ||
+      run.pending ||
+      (run.completion
+        ? run.completion.status !== "succeeded"
+        : output.toolResults.some((r) => !r.ok))
+        ? "suspended"
+        : "succeeded";
+    // A single result already carries the tool/native verification verdict.
+    // Never let final model wording promote a failed or denied action.
+    const single = run.results.length === 1 ? run.results[0] : undefined;
+    if (!run.completion && single && !single.ok) output.reply = single.summary;
+    output.status =
+      run.completion?.status ??
+      (single && (run.state === "succeeded" || !single.ok)
+        ? single.status
+        : run.state === "succeeded"
+          ? "succeeded"
+          : "unverified");
+    return output;
+  } finally {
+    if (run.state === "running") run.state = "suspended";
+    journal.save(run);
+  }
+}
+
+async function runTurnSteps(
+  messages: ChatMessage[],
+  tools: ToolDeclaration[],
+  deps: DispatchDeps,
+  onFallback: ((msg: string) => void) | undefined,
+  fullTools: ToolDeclaration[] | undefined,
+  journal: WorkflowJournal,
+  run: Workflow,
+): Promise<TurnResult> {
   const convo = [...messages];
   const toolResults: ToolResult[] = [];
   const calledTools: string[] = [];
@@ -207,8 +311,17 @@ export async function runTurn(
   // load_tools doesn't count against the cap, once.
   const loaded = new Set<string>();
   let freeLoadRound = true;
+  const maxRounds = Number.isFinite(deps.maxToolRounds)
+    ? Math.max(1, Math.min(12, Math.floor(deps.maxToolRounds!)))
+    : MAX_TOOL_ROUNDS;
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < maxRounds; round++) {
+    if (deps.shouldStopPhoneTask?.()) {
+      run.state = "suspended";
+      run.reason = "Stopped by the user.";
+      return { reply: "Stopped.", toolResults, calledTools };
+    }
+    if (run.metrics) run.metrics.model_decisions++;
     const reply = await chatOverLadder(convo, tools, deps.config, onFallback);
 
     if (!reply.toolCalls.length) {
@@ -230,6 +343,15 @@ export async function runTurn(
         convo.push({ role: "assistant", content: reply.text });
         convo.push({ role: "user", content: note });
         continue;
+      }
+      if (claimChecked && claimedWithoutActing(userText, reply.text, ranTools)) {
+        run.reason = "The assistant claimed an action without an execution result.";
+        run.state = "suspended";
+        return {
+          reply: "I couldn't confirm that anything was done. Please check before retrying.",
+          toolResults,
+          calledTools,
+        };
       }
       return { reply: reply.text, toolResults, calledTools };
     }
@@ -260,7 +382,22 @@ export async function runTurn(
       } else if (isPhoneTask && phoneActedAndFailed) {
         result = PHONE_RETRY_REFUSED; // nothing ran, so it isn't one of toolResults
       } else {
+        run.pending = { id: call.id, tool: call.name, state: "intent_recorded" };
+        run.plan.push(call.name);
+        journal.save(run); // commit before the first possible side effect
         result = await dispatch(toSpec(call.name, call.args), deps);
+        result.result = agentResult(result, JSON.stringify(call.args), call.name);
+        if (!result.result.ok && result.ok) {
+          result = {
+            ...result,
+            ok: false,
+            summary: result.result.summary,
+            error: "unverified_success",
+          };
+        }
+        run.results.push(result.result!);
+        run.pending = null;
+        journal.save(run); // commit before another agent/model consumes it
         toolResults.push(result);
         if (isPhoneTask && actedAndFailed(result)) phoneActedAndFailed = true;
         // The user pressed STOP: the turn ends on the task's own words. Another round
@@ -273,7 +410,7 @@ export async function runTurn(
         role: "tool",
         toolCallId: call.id,
         toolName: call.name,
-        content: JSON.stringify({ ok: result.ok, summary: result.summary }),
+        content: JSON.stringify(modelToolResult(result, JSON.stringify(call.args), call.name)),
         ...(result.images ? { images: result.images } : {}),
       });
 
@@ -299,6 +436,7 @@ export async function runTurn(
   // can't be reached), say what the tools returned rather than nothing.
   convo.push({ role: "user", content: FINAL_ANSWER_NOTE });
   try {
+    if (run.metrics) run.metrics.model_decisions++;
     const last = await chatOverLadder(convo, tools, deps.config, onFallback);
     if (!last.toolCalls.length && last.text.trim())
       return { reply: last.text, toolResults, calledTools };
@@ -323,7 +461,10 @@ export function partialReply(results: ToolResult[]): string {
   const said = results
     .filter((r) => r.summary?.trim())
     .slice(-3)
-    .map((r) => `${r.ok ? "" : "(failed) "}${r.summary.trim()}`);
+    .map(
+      (r) =>
+        `${r.ok ? "" : "(failed) "}${r.summary.trim().slice(0, 800)}${r.summary.trim().length > 800 ? "…" : ""}`,
+    );
   return said.length
     ? `I couldn't finish all of that, sir. Here's what I did get: ${said.join(" — ")}`
     : "I worked on that but couldn't fully finish it.";

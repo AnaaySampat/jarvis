@@ -18,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap
  * Notification access: read what's showing, and reply through a notification's own
  * reply button — the one way a third-party app can answer a WhatsApp/Telegram message
  * with nothing opening on screen. Enabled by the user in Settings ▸ Notification
- * access (a restricted setting for sideloaded installs). Never posts or dismisses.
+ * access (a restricted setting for sideloaded installs). Never posts or dismisses
+ * arbitrary notifications; timer stop uses the Clock's own Cancel action.
  * WhatsAppInbox reads the WhatsApp ones as they arrive, for commands to JARVIS.
  */
 class JarvisNotificationListener : NotificationListenerService() {
@@ -45,6 +46,29 @@ class JarvisNotificationListener : NotificationListenerService() {
 
     /** Last time each notification key was posted, updated or removed (elapsedRealtime). */
     private val changedAt = ConcurrentHashMap<String, Long>()
+
+    /** PendingIntent acceptance isn't completion: wait for the timer notification
+     * to disappear before saying it stopped. Runs on the plugin's worker scope. */
+    fun stopSingleTimer(clockPackage: String): Boolean {
+        return try { stopSingleTimerChecked(clockPackage) } catch (_: Exception) { false }
+    }
+
+    private fun stopSingleTimerChecked(clockPackage: String): Boolean {
+        val active = activeNotifications ?: return false
+        val selected = timerCancelAction(active.map { sbn ->
+            TimerNotice(sbn.key, sbn.packageName, sbn.notification.channelId.orEmpty(),
+                sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+                sbn.notification.actions?.map { it.title.toString() } ?: emptyList())
+        }, clockPackage) ?: return false
+        val action = active.firstOrNull { it.key == selected.first }?.notification?.actions?.getOrNull(selected.second) ?: return false
+        try { action.actionIntent.send() } catch (_: Exception) { return false }
+        val until = SystemClock.elapsedRealtime() + 3_000
+        while (SystemClock.elapsedRealtime() < until) {
+            if (activeNotifications?.none { it.key == selected.first } == true) return true
+            Thread.sleep(100)
+        }
+        return false
+    }
 
     override fun onListenerConnected() {
         instance = this

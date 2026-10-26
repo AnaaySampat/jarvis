@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { createControlLeaseTracker } from "./controlLease.js";
 
 describe("remote input lease tracker", () => {
+  it("preserves duration on a duplicate arm ACK without seconds and refuses expired input", () => {
+    let now = 1000;
+    const tracker = createControlLeaseTracker(() => now);
+    tracker.acquire("lease", 60);
+    tracker.nextEnvelope();
+    now += 1500;
+    tracker.acquire("lease");
+    expect(tracker.remainingSeconds).toBe(59);
+    expect(tracker.nextEnvelope()?.seq).toBe(2);
+    now = 61000;
+    expect(tracker.remainingSeconds).toBe(0);
+    expect(tracker.nextEnvelope()).toBeNull();
+  });
   it("fails closed until the host issues a lease", () => {
     const tracker = createControlLeaseTracker();
     expect(tracker.nextEnvelope()).toBeNull();

@@ -7,6 +7,7 @@ import {
   sameTitle,
   shellQuote,
   titleNameIn,
+  netflixTitleIn,
   tvAddresses,
   macFromIpLink,
   normMac,
@@ -72,6 +73,7 @@ describe("runTvControl", () => {
 
   it("plays a Netflix title with the source=30 link and confirms the position moves", async () => {
     const tv = fakeTv([
+      [/mCurrentFocus/, focus("com.netflix.ninja")],
       [/^pidof/, "9812"],
       [/media_session/, [nf(2, 1000), nf(1, 0), nf(3, 5000), nf(3, 5000), nf(3, 8000)]],
     ]);
@@ -86,6 +88,7 @@ describe("runTvControl", () => {
   it("gets past the cold-start profile screen with one OK, and not on state alone", async () => {
     // Netflix reports state 3 at position 0 behind "Who's watching?" — not playback.
     const tv = fakeTv([
+      [/mCurrentFocus/, focus("com.netflix.ninja")],
       [/^pidof/, ""],
       [
         /media_session/,
@@ -109,6 +112,7 @@ describe("runTvControl", () => {
 
   it("opens a named episode by its own watch link instead of the show page", async () => {
     const tv = fakeTv([
+      [/mCurrentFocus/, focus("com.netflix.ninja")],
       [/^pidof/, "9812"],
       [/media_session/, [nf(2, 1000), nf(3, 0), nf(3, 4000), nf(3, 4000), nf(3, 7000)]],
     ]);
@@ -134,6 +138,17 @@ describe("runTvControl", () => {
     const r = await runTvControl(tv.shell, "play", "Stranger Things", "netflix", env);
     expect(r.ok).toBe(false);
     expect(r.summary).toContain("couldn't confirm it switched");
+  });
+
+  it("does not claim Netflix playback from a moving session after returning to Home", async () => {
+    const tv = fakeTv([
+      [/mCurrentFocus/, focus("com.google.android.tvlauncher")],
+      [/^pidof/, "9812"],
+      [/media_session/, [nf(2, 1000), nf(1, 0), nf(3, 5000), nf(3, 5000), nf(3, 8000)]],
+    ]);
+    const r = await runTvControl(tv.shell, "play", "Stranger Things", "netflix", env);
+    expect(r.ok).toBe(false);
+    expect(r.summary).toContain("isn't on the TV screen");
   });
 
   it("passes a failed title lookup straight through without touching the TV", async () => {
@@ -219,6 +234,17 @@ describe("runTvControl", () => {
 });
 
 describe("helpers", () => {
+  it("resolves a season ID only from unambiguous Netflix parent-series evidence", () => {
+    const series = String.raw`"__typename":"Show","title":"A\x20Series","videoId":80057281`;
+    const page = `"metadata":{"topLevelVideoId":80057281},${series}`;
+    expect(netflixTitleIn(page, "81297917")).toEqual({ id: "80057281", name: "A Series" });
+    expect(netflixTitleIn(series, "80057281")).toEqual({ id: "80057281", name: "A Series" });
+    expect(netflixTitleIn(series, "81297917")).toBeNull();
+    expect(netflixTitleIn(page + ',"topLevelVideoId":80123456', "81297917")).toBeNull();
+    expect(
+      netflixTitleIn('"topLevelVideoId":80057281,<title>Netflix</title>', "81297917"),
+    ).toBeNull();
+  });
   it("finds an episode's id and title in Netflix's page data", () => {
     // The shape of the real page (keys carry escaped quotes), cut down to two seasons.
     const page = String.raw`"Season:{\\"videoId\\":1}":{"__typename":"Season","videoId":1,"numberLabelV2({\\"label\\":\\"LONG\\"})":"Season 1","episodes":{"__typename":"EpisodesConnection","edges":[{"node":{"__ref":"Episode:{\\"videoId\\":11}"}},{"node":{"__ref":"Episode:{\\"videoId\\":12}"}}]}},"Season:{\\"videoId\\":2}":{"__typename":"Season","videoId":2,"numberLabelV2({\\"label\\":\\"LONG\\"})":"Season 2","episodes":{"__typename":"EpisodesConnection","edges":[{"node":{"__ref":"Episode:{\\"videoId\\":21}"}}]}},"Episode:{\\"videoId\\":12}":{"__typename":"Episode","videoId":12,"title":"Chapter Two: The Weirdo on Maple Street","number":2}`;

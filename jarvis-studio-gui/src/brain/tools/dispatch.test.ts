@@ -28,6 +28,38 @@ function makeDeps(onDispatched: DispatchDeps["onDispatched"]) {
 }
 
 describe("onDispatched", () => {
+  it("distinguishes an unsaved calendar draft from an event with a saved id", async () => {
+    const deps = makeDeps(undefined);
+    const add = vi.fn(async (): Promise<{ ok: boolean; summary: string; eventId?: number }> => ({
+      ok: true,
+      summary: "Opened your calendar to add it — tap save.",
+    }));
+    const remove = vi.fn();
+    deps.platform.calendar = { add, remove } as unknown as Platform["calendar"];
+    const spec = { type: "schedule", do: "add", time: "23:54", task: "calendar regression" };
+    const draft = await dispatch(spec, deps);
+    expect(draft.summary).toContain("tap save");
+    expect(draft.summary).not.toContain("It's in your calendar too");
+    await dispatch({ type: "schedule", do: "remove", task: spec.task }, deps);
+    expect(remove).not.toHaveBeenCalled();
+    add.mockResolvedValue({ ok: true, summary: "Added to your calendar.", eventId: 7429 });
+    expect((await dispatch(spec, deps)).summary).toContain("It's in your calendar too");
+    await dispatch({ type: "schedule", do: "remove", task: spec.task }, deps);
+    expect(remove).toHaveBeenCalledWith(7429);
+  });
+  it("blocks agenda mutations and recursive consultation before either handler runs", async () => {
+    const seen = vi.fn();
+    const consultAgent = vi.fn();
+    const deps = { ...makeDeps(seen), informationOnly: true, consultAgent };
+    for (const spec of [
+      { type: "schedule", do: "add", task: "Unexpected meeting" },
+      { type: "consult_agent", agent: "content", question: "Send a message" },
+    ]) {
+      expect(await dispatch(spec, deps)).toMatchObject({ ok: false, error: "blocked" });
+    }
+    expect(consultAgent).not.toHaveBeenCalled();
+    expect(seen).toHaveBeenCalledTimes(2);
+  });
   it("fires for a successful action", async () => {
     const seen = vi.fn();
     const spec = { type: "clock", do: "timer", seconds: 60, label: "tea" };
@@ -70,6 +102,27 @@ describe("onDispatched", () => {
   });
 });
 
+describe("media search recovery", () => {
+  it("continues a normal play request through the operator but never widens a restricted PC/WhatsApp scope", async () => {
+    const deps = makeDeps(undefined);
+    const failure = { ok: false, summary: "Nothing started", error: "not_playing" };
+    const device = vi.fn(async () => failure);
+    const isEnabled = vi.fn(async () => false);
+    deps.platform.direct = { device } as unknown as Platform["direct"];
+    deps.platform.phone = { isEnabled } as unknown as Platform["phone"];
+    deps.platform.openAccessibilitySettings = vi.fn(async () => ({
+      ok: true,
+      summary: "Opened Accessibility",
+    }));
+    const spec = { type: "play_media", query: "lofi instrumental", app: "spotify" };
+    expect((await dispatch(spec, deps)).error).toBe("accessibility_disabled");
+    expect(isEnabled).toHaveBeenCalledOnce();
+    isEnabled.mockClear();
+    expect(await dispatch(spec, { ...deps, onlyTools: new Set(["play_media"]) })).toEqual(failure);
+    expect(isEnabled).not.toHaveBeenCalled();
+  });
+});
+
 describe("one-step messages and calls", () => {
   const target = { name: "Mom", number: "+91 98200 12345", route: "chat", app: "whatsapp" };
 
@@ -83,7 +136,10 @@ describe("one-step messages and calls", () => {
       resolveContact: vi.fn(async () => opts.lookup ?? { ok: true, target }),
       message: vi.fn(async () => ({ ok: true, summary: "Sent to Mom on WhatsApp." })),
       call: vi.fn(async () => ({ ok: true, summary: "Calling Mom." })),
-      readNotifications: vi.fn(async () => ({ ok: true, summary: "No notifications are showing." })),
+      readNotifications: vi.fn(async () => ({
+        ok: true,
+        summary: "No notifications are showing.",
+      })),
     };
     const authorizePhoneAction = vi.fn(async () => opts.decision ?? "allow");
     const deps = {
@@ -96,7 +152,10 @@ describe("one-step messages and calls", () => {
 
   it("looks the person up, asks about exactly that person and text, then sends", async () => {
     const { deps, direct, authorizePhoneAction } = commDeps({});
-    const res = await dispatch({ type: "message", to: "mom", text: "on my way", app: "whatsapp" }, deps);
+    const res = await dispatch(
+      { type: "message", to: "mom", text: "on my way", app: "whatsapp" },
+      deps,
+    );
     expect(direct.resolveContact).toHaveBeenCalledWith("mom", "whatsapp");
     expect(authorizePhoneAction).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -125,7 +184,11 @@ describe("one-step messages and calls", () => {
   });
 
   it("passes an ambiguous lookup back as a question, without asking to send", async () => {
-    const lookup = { ok: false, summary: "More than one contact matches \"Rahul\": Rahul M, Rahul S. Which one?", error: "ambiguous" };
+    const lookup = {
+      ok: false,
+      summary: 'More than one contact matches "Rahul": Rahul M, Rahul S. Which one?',
+      error: "ambiguous",
+    };
     const { deps, direct, authorizePhoneAction } = commDeps({ lookup });
     const res = await dispatch({ type: "message", to: "Rahul", text: "hi" }, deps);
     expect(authorizePhoneAction).not.toHaveBeenCalled();
@@ -148,7 +211,10 @@ describe("one-step messages and calls", () => {
     await dispatch({ type: "call", to: "mom", app: "whatsapp", video: true }, deps);
     expect(direct.resolveContact).toHaveBeenCalledWith("mom", "whatsapp");
     expect(authorizePhoneAction).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "call", reason: "video call Mom (+91 98200 12345) on WhatsApp" }),
+      expect.objectContaining({
+        action: "call",
+        reason: "video call Mom (+91 98200 12345) on WhatsApp",
+      }),
     );
     expect(direct.call).toHaveBeenCalledWith(target, true);
   });
@@ -198,10 +264,25 @@ describe("pc_task hand-off cards", () => {
     };
     await dispatch({ type: "pc_task", goal: "find the cheapest flight", kind: "research" }, deps);
     expect(said).toEqual([
-      { event: "agent_message", data: { from: "phone", to: "research", kind: "ask", text: "find the cheapest flight", items: [] } },
       {
         event: "agent_message",
-        data: { from: "research", to: "phone", kind: "answer", text: "₹4,210 on IndiGo.", items: ["6E 5321, Fri 06:10 (google.com/flights)"] },
+        data: {
+          from: "phone",
+          to: "research",
+          kind: "ask",
+          text: "find the cheapest flight",
+          items: [],
+        },
+      },
+      {
+        event: "agent_message",
+        data: {
+          from: "research",
+          to: "phone",
+          kind: "answer",
+          text: "₹4,210 on IndiGo.",
+          items: ["6E 5321, Fri 06:10 (google.com/flights)"],
+        },
       },
     ]);
   });
@@ -214,6 +295,8 @@ describe("pc_task hand-off cards", () => {
       onAgentEvent: (ev: { event: string; data?: Record<string, unknown> }) => said.push(ev),
     };
     await dispatch({ type: "pc_task", goal: "open Notepad", kind: "computer", picked: true }, deps);
-    expect(said.map((e) => [e.data?.from, e.data?.to, e.data?.kind])).toEqual([["phone", "desktop", "handover"]]);
+    expect(said.map((e) => [e.data?.from, e.data?.to, e.data?.kind])).toEqual([
+      ["phone", "desktop", "handover"],
+    ]);
   });
 });

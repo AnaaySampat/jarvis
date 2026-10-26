@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mapPointToScreen } from "../brain/remote/webrtcScreen";
+import { useAndroidBack } from "../hooks/useAndroidBack";
 
 /* ANDROID FORK — Remote Desktop (live view + direct control).
  *
@@ -135,6 +136,7 @@ export default function RemoteDesktop({
   onTriggerListen,
   onCommandMode,
 }) {
+  useAndroidBack(true, onClose);
   const videoRef = useRef(null);
   const surfaceRef = useRef(null);
   const kbdRef = useRef(null);
@@ -634,7 +636,10 @@ export default function RemoteDesktop({
           title={gamepad ? "Hide game controls" : "Show game controls (WASD + keys)"}
           onClick={() => setGamepad((v) => !v)}
           disabled={!controlArmed}
-          style={{ opacity: controlArmed ? 1 : 0.4, background: gamepad ? "rgba(80,180,255,0.4)" : undefined }}
+          style={{
+            opacity: controlArmed ? 1 : 0.4,
+            background: gamepad ? "rgba(80,180,255,0.4)" : undefined,
+          }}
         >
           🎮
         </button>

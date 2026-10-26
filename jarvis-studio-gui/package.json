@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:live": "vitest run replay.live"
+    "test:live": "vitest run replay.live",
+    "test:workflow": "vitest run src/brain/workflow.test.ts src/brain/results.test.ts src/brain/completion.test.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

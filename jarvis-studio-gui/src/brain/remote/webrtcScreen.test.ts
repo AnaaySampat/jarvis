@@ -1,5 +1,113 @@
-import { describe, expect, it } from "vitest";
-import { mapPointToScreen } from "./webrtcScreen";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mapPointToScreen, RemoteScreen } from "./webrtcScreen";
+
+describe("screen connection recovery", () => {
+  class Peer {
+    static instances: Peer[] = [];
+    connectionState = "new";
+    iceConnectionState = "new";
+    localDescription: unknown = null;
+    remoteDescription: unknown = null;
+    ontrack: ((event: { streams: MediaStream[] }) => void) | null = null;
+    onconnectionstatechange: (() => void) | null = null;
+    oniceconnectionstatechange: (() => void) | null = null;
+    onicecandidate: unknown = null;
+    constructor() {
+      Peer.instances.push(this);
+    }
+    addTransceiver() {}
+    async createOffer() {
+      return { type: "offer", sdp: "offer-sdp" };
+    }
+    async setLocalDescription(value: unknown) {
+      this.localDescription = value;
+    }
+    async setRemoteDescription(value: unknown) {
+      this.remoteDescription = value;
+    }
+    async addIceCandidate() {}
+    close() {
+      this.connectionState = "closed";
+    }
+    state(value: string) {
+      this.connectionState = value;
+      this.onconnectionstatechange?.();
+    }
+  }
+  beforeEach(() => {
+    vi.useFakeTimers();
+    Peer.instances = [];
+    vi.stubGlobal("RTCPeerConnection", Peer);
+    vi.stubGlobal(
+      "RTCSessionDescription",
+      class {
+        constructor(value: object) {
+          Object.assign(this, value);
+        }
+      },
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reconnects a failed peer with a fresh session and stops the old owned screen", async () => {
+    const signal = vi.fn(() => true);
+    const screen = new RemoteScreen({ signaller: { signal } });
+    await screen.start();
+    await screen.onSignal("webrtc_answer", {
+      type: "answer",
+      sdp: "answer-sdp",
+      screen_session_id: "old-session",
+    });
+    const first = Peer.instances[0]!;
+    first.ontrack?.({ streams: [{} as MediaStream] });
+    first.state("failed");
+    expect(screen.state).toBe("failed");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(Peer.instances).toHaveLength(2);
+    expect(first.connectionState).toBe("closed");
+    expect(signal).toHaveBeenCalledWith("stop_screen", { screen_session_id: "old-session" });
+    expect(screen.sessionId).toBe("");
+    Peer.instances[1]!.ontrack?.({ streams: [{} as MediaStream] });
+    expect(screen.state).toBe("streaming");
+    await screen.close();
+  });
+
+  it("restores the stream after a brief disconnect and cancels pending recovery on close", async () => {
+    const onStream = vi.fn();
+    const screen = new RemoteScreen({ signaller: { signal: () => true }, onStream });
+    await screen.start();
+    const peer = Peer.instances[0]!;
+    const stream = {} as MediaStream;
+    peer.ontrack?.({ streams: [stream] });
+    peer.state("disconnected");
+    expect(screen.state).toBe("failed");
+    peer.state("connected");
+    expect(screen.state).toBe("streaming");
+    expect(onStream).toHaveBeenLastCalledWith(stream);
+    expect(onStream).toHaveBeenCalledTimes(2);
+    peer.state("failed");
+    await screen.close();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(Peer.instances).toHaveLength(1);
+    expect(screen.state).toBe("closed");
+  });
+
+  it("bounds automatic recovery rather than retrying forever", async () => {
+    const screen = new RemoteScreen({ signaller: { signal: () => true } });
+    await screen.start();
+    for (let i = 0; i < 3; i++) {
+      Peer.instances.at(-1)!.state("failed");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(Peer.instances).toHaveLength(3);
+    expect(screen.state).toBe("failed");
+    await screen.close();
+  });
+});
 
 // The element is the phone's video box; the PC screen (videoW×videoH) is drawn
 // inside it with object-fit: contain (centered + letterboxed). mapPointToScreen

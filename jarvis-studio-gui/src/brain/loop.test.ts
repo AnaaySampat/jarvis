@@ -16,7 +16,13 @@ const results: ToolResult[] = [];
 vi.mock("./tools/dispatch", () => ({
   dispatch: async (spec: { type: string }) => {
     dispatched.push(spec.type);
-    return results.shift() ?? { ok: true, summary: "Found it: 55.2 GB used." };
+    return (
+      results.shift() ?? {
+        ok: true,
+        summary: "Found it: 55.2 GB used.",
+        data: { verificationReceipt: `aura.verify.v1:model:${"a".repeat(64)}` },
+      }
+    );
   },
 }));
 
@@ -29,6 +35,7 @@ import {
 import type { DispatchDeps } from "./tools/dispatch";
 import { turnPalette } from "./tools/registry";
 import type { ToolDeclaration, ToolResult } from "./types";
+import { WorkflowJournal } from "./workflow";
 
 const deps = { config: {} } as unknown as DispatchDeps;
 const ask = (text: string) => runTurn([{ role: "user", content: text }], [], deps);
@@ -42,7 +49,10 @@ beforeEach(() => {
 });
 
 describe("runTurn — a phone task that acted and failed is not re-run", () => {
-  const task = (id: string, goal: string) => ({ text: "", toolCalls: [{ id, name: "phone_task", args: { goal } }] });
+  const task = (id: string, goal: string) => ({
+    text: "",
+    toolCalls: [{ id, name: "phone_task", args: { goal } }],
+  });
   const stopped = (acted: boolean): ToolResult => ({
     ok: false,
     summary: "Nothing on screen is changing, sir — I've stopped.",
@@ -56,13 +66,16 @@ describe("runTurn — a phone task that acted and failed is not re-run", () => {
     replies.push(
       task("c1", "click a photo"),
       task("c2", "open the Camera app and press the shutter button once"),
-      { text: "I tapped the shutter but couldn't confirm a photo was saved — please check.", toolCalls: [] },
+      {
+        text: "I tapped the shutter but couldn't confirm a photo was saved — please check.",
+        toolCalls: [],
+      },
     );
     const out = await ask("click a photo");
     expect(dispatched).toEqual(["phone_task"]);
     expect(out.toolResults).toHaveLength(1);
     expect(seen[2]!.at(-1)).toMatch(/^\{"ok":false,"summary":"Not run\./);
-    expect(out.reply).toMatch(/couldn't confirm/);
+    expect(out.reply).toBe(stopped(true).summary);
   });
 
   it("still retries one that failed before touching anything", async () => {
@@ -94,7 +107,146 @@ describe("runTurn — STOP", () => {
   });
 });
 
+describe("workflow handover and completion", () => {
+  it.each([
+    { ok: true, summary: "Timer started.", status: "succeeded" },
+    { ok: false, summary: "Permission denied.", error: "approval_denied", status: "blocked" },
+    { ok: false, summary: "Timer could not be started.", status: "failed" },
+  ])("uses the single tool receipt without another model ($status)", async (receipt) => {
+    results.push(receipt);
+    replies.push(
+      { text: "", toolCalls: [{ id: "t", name: "set_timer", args: { seconds: 300 } }] },
+      { text: "Timer started.", toolCalls: [] },
+    );
+    const verifyCompletion = vi.fn();
+    const out = await runTurn([{ role: "user", content: "Set a timer for five minutes" }], [], {
+      ...deps,
+      verifyCompletion,
+    });
+    expect(verifyCompletion).not.toHaveBeenCalled();
+    expect(out.status).toBe(receipt.status);
+    expect(out.reply).toBe(receipt.summary);
+  });
+
+  it("reviews a multi-tool turn even when the wording looked simple", async () => {
+    replies.push(
+      {
+        text: "",
+        toolCalls: [
+          { id: "a", name: "get_time", args: {} },
+          { id: "b", name: "get_day", args: {} },
+        ],
+      },
+      { text: "Saturday at four.", toolCalls: [] },
+    );
+    const verifyCompletion = vi.fn(async () => ({
+      status: "succeeded" as const,
+      completed: ["Time and date read"],
+      remaining: [],
+    }));
+    await runTurn([{ role: "user", content: "What time is it?" }], [], {
+      ...deps,
+      verifyCompletion,
+    });
+    expect(verifyCompletion).toHaveBeenCalledOnce();
+  });
+  it("retains a researched answer when checking is unavailable instead of dumping raw pages", async () => {
+    const answer =
+      "Service A observes UI; Service B observes notifications. Sources: https://example.test/a and https://example.test/b";
+    results.push({ ok: true, summary: "Raw page text ".repeat(1000) });
+    replies.push(
+      {
+        text: "",
+        toolCalls: [{ id: "r", name: "read_webpage", args: { url: "https://example.test/a" } }],
+      },
+      { text: answer, toolCalls: [] },
+    );
+    const verifyCompletion = vi.fn(async () => ({
+      status: "unverified" as const,
+      completed: [],
+      remaining: ["Citation check unavailable"],
+    }));
+    const out = await runTurn(
+      [{ role: "user", content: "Compare the services and cite sources" }],
+      [],
+      { ...deps, verifyCompletion },
+    );
+    expect(verifyCompletion).toHaveBeenCalledWith(expect.any(String), expect.any(Array), answer);
+    expect(out.reply).toContain(answer);
+    expect(out.reply).not.toContain("Raw page text");
+    expect(out.status).toBe("unverified");
+  });
+  it("delivers full PC findings and artifacts to the next model", async () => {
+    results.push({
+      ok: true,
+      summary: "Comparison ready",
+      data: {
+        findings: ["x".repeat(3000), "Laptop B: ₹42,100 — https://vendor.example/B"],
+        artifacts: [{ uri: "D:/Reports/comparison.txt", kind: "document" }],
+        proof: { passed: true, evidence_ids: ["comparison-read"] },
+      },
+    });
+    replies.push(
+      {
+        text: "",
+        toolCalls: [
+          { id: "pc-1", name: "pc_task", args: { goal: "Compare laptops", kind: "browser" } },
+        ],
+      },
+      { text: "Laptop B costs ₹42,100.", toolCalls: [] },
+    );
+    await ask("Compare laptops on my PC");
+    const payload = seen[1]!
+      .map((s) => {
+        try {
+          return JSON.parse(s);
+        } catch {
+          return null;
+        }
+      })
+      .find((r) => r?.version === 1);
+    expect(payload.findings.at(-1)).toContain("₹42,100");
+    expect(payload.artifacts[0].uri).toBe("D:/Reports/comparison.txt");
+  });
+
+  it("replaces a saved-file claim when only opening the app was proved", async () => {
+    const journal = new WorkflowJournal();
+    const verifyCompletion = vi.fn(async () => ({
+      status: "partial" as const,
+      completed: ["Opened Notepad"],
+      remaining: ["Save the comparison"],
+    }));
+    results.push({ ok: true, summary: "Opened Notepad" });
+    replies.push(
+      {
+        text: "",
+        toolCalls: [{ id: "open-1", name: "open_application", args: { name: "Notepad" } }],
+      },
+      { text: "Saved your comparison.", toolCalls: [] },
+    );
+    const output = await runTurn(
+      [{ role: "user", content: "Open Notepad and save the comparison" }],
+      [],
+      { ...deps, journal, verifyCompletion },
+    );
+    expect(output.reply).toContain("Still unconfirmed: Save the comparison");
+    expect(output.reply).not.toContain("Saved your comparison");
+    expect(journal.listSuspended()[0]?.completion?.status).toBe("partial");
+  });
+});
+
 describe("runTurn — said it did it but didn't", () => {
+  it("renders requested content without an action, but still guards sending or saving it", async () => {
+    const request = "Show a bar chart and table, a flowchart and a two-item schedule";
+    const answer = 'Here you go: [CHART type="bar"]{"labels":["Apples"],"values":[3]}[/CHART]';
+    expect(claimedWithoutActing(request, answer, false)).toBe(false);
+    expect(claimedWithoutActing("Make a chart and email it", "Sent it.", false)).toBe(true);
+    expect(claimedWithoutActing("Make a chart and email it", "Done.", false)).toBe(true);
+    expect(claimedWithoutActing("Create a table and save it", "I've saved it.", false)).toBe(true);
+    replies.push({ text: answer, toolCalls: [] });
+    expect((await ask(request)).reply).toBe(answer);
+    expect(dispatched).toEqual([]);
+  });
   it("rechecks a claimed action that made no tool call, and never speaks the claim", async () => {
     // Live 2026-09-23: the model copied an earlier turn instead of calling phone_task.
     replies.push(
@@ -115,7 +267,7 @@ describe("runTurn — said it did it but didn't", () => {
     );
     const out = await ask("open settings");
     expect(seen).toHaveLength(2);
-    expect(out.reply).toBe("I've opened it.");
+    expect(out.reply).toMatch(/couldn't confirm/);
   });
 
   it("leaves questions and genuine tool-backed replies alone", () => {
@@ -123,7 +275,9 @@ describe("runTurn — said it did it but didn't", () => {
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", true)).toBe(false);
     expect(claimedWithoutActing("set a timer for 5 minutes", "I've set it.", false)).toBe(true);
     // Live 2026-09-30, no tool call and the wrong show named.
-    expect(claimedWithoutActing("Resume", "Resumed — back to *Arcane* on Netflix.", false)).toBe(true);
+    expect(claimedWithoutActing("Resume", "Resumed — back to *Arcane* on Netflix.", false)).toBe(
+      true,
+    );
     // Live 2026-10-18: a bare acknowledgement, no tool call, volume unchanged.
     expect(claimedWithoutActing("increase the volume", "OK.", false)).toBe(true);
     expect(claimedWithoutActing("turn on the flashlight", "Sure thing, sir!", false)).toBe(true);
@@ -146,17 +300,48 @@ describe("runTurn — said it did it but didn't", () => {
         false,
       ),
     ).toBe(true);
-    expect(claimedWithoutActing("navigate to the airport", "Sure, which terminal?", false)).toBe(false);
+    expect(claimedWithoutActing("navigate to the airport", "Sure, which terminal?", false)).toBe(
+      false,
+    );
   });
 });
 
 describe("runTurn — out of tool rounds", () => {
-  const call = (id: string) => ({ text: "", toolCalls: [{ id, name: "web_search", args: { query: id } }] });
+  const call = (id: string) => ({
+    text: "",
+    toolCalls: [{ id, name: "web_search", args: { query: id } }],
+  });
+
+  it("allows a bounded research budget to search, read multiple pages and resolve gaps", async () => {
+    for (let n = 0; n < 6; n++) replies.push(call(`source-${n}`));
+    replies.push({ text: "Findings with source links.", toolCalls: [] });
+    const out = await runTurn([{ role: "user", content: "Research a topic" }], [], {
+      ...deps,
+      maxToolRounds: 10,
+    });
+    expect(dispatched).toHaveLength(6);
+    expect(out.reply).toBe("Findings with source links.");
+    expect(seen.flat().some((s) => s.includes("used every tool call"))).toBe(false);
+  });
+
+  it("honours STOP between research rounds", async () => {
+    replies.push(call("one"), call("two"));
+    const out = await runTurn([{ role: "user", content: "Research a topic" }], [], {
+      ...deps,
+      maxToolRounds: 10,
+      shouldStopPhoneTask: () => dispatched.length > 0,
+    });
+    expect(dispatched).toHaveLength(1);
+    expect(out.reply).toBe("Stopped.");
+  });
 
   it("answers from what the tools found instead of a canned failure", async () => {
     // Live 2026-09-26: "read my Chrome screen and search up the time" ended in
     // "I worked on that but couldn't fully finish it", its search results thrown away.
-    replies.push(call("a"), call("b"), call("c"), { text: "It starts at 17:00 UTC.", toolCalls: [] });
+    replies.push(call("a"), call("b"), call("c"), {
+      text: "It starts at 17:00 UTC.",
+      toolCalls: [],
+    });
     const out = await ask("read my screen and search up what time it starts");
     expect(out.reply).toBe("It starts at 17:00 UTC.");
     expect(seen.at(-1)!.at(-1)).toMatch(/used every tool call/);
@@ -165,7 +350,9 @@ describe("runTurn — out of tool rounds", () => {
   it("falls back to the tools' own words when the model still wants to act", async () => {
     replies.push(call("a"), call("b"), call("c"), call("d"));
     const out = await ask("read my screen and search up what time it starts");
-    expect(out.reply).toMatch(/^I couldn't finish all of that, sir\. Here's what I did get: Found it: 55\.2 GB used\./);
+    expect(out.reply).toMatch(
+      /^I couldn't finish all of that, sir\. Here's what I did get: Found it: 55\.2 GB used\./,
+    );
     expect(dispatched).toHaveLength(3); // the fourth call was never run
   });
 });
@@ -175,7 +362,10 @@ describe("runTurn — answered about the phone without looking", () => {
     // Live 2026-09-26, fallback chat model: "Android 14" for a phone on Android 16.
     replies.push(
       { text: "Phone info: Android 14.", toolCalls: [] },
-      { text: "", toolCalls: [{ id: "c1", name: "phone_task", args: { goal: "find the Android version" } }] },
+      {
+        text: "",
+        toolCalls: [{ id: "c1", name: "phone_task", args: { goal: "find the Android version" } }],
+      },
       { text: "Android 16.", toolCalls: [] },
     );
     const out = await ask("on my phone, check Settings and tell me the Android version");
@@ -186,21 +376,36 @@ describe("runTurn — answered about the phone without looking", () => {
 
   it("only for requests about the phone, and not once a tool ran", () => {
     expect(answeredPhoneWithoutLooking("what's my phone's device name?", false)).toBe(true);
-    expect(answeredPhoneWithoutLooking("how long has it been on? check in Settings", false)).toBe(true);
+    expect(answeredPhoneWithoutLooking("how long has it been on? check in Settings", false)).toBe(
+      true,
+    );
     expect(answeredPhoneWithoutLooking("what's the tallest mountain?", false)).toBe(false);
-    expect(answeredPhoneWithoutLooking("on my phone, what's the Android version?", true)).toBe(false);
+    expect(answeredPhoneWithoutLooking("on my phone, what's the Android version?", true)).toBe(
+      false,
+    );
   });
 
   it("without the words 'on my phone'", () => {
-    for (const q of ["what model is my phone?", "is this phone on silent?", "what's my battery at",
-      "which wifi am I on? my wifi keeps dropping", "what android version am I running",
+    for (const q of [
+      "what model is my phone?",
+      "is this phone on silent?",
+      "what's my battery at",
+      "which wifi am I on? my wifi keeps dropping",
+      "what android version am I running",
       "how much storage does my device have left",
       // Live 2026-10-18: answered "none" from the previous turn without reading again.
-      "can you check my notifications?", "any new messages?", "do I have unread texts"]) {
+      "can you check my notifications?",
+      "any new messages?",
+      "do I have unread texts",
+    ]) {
       expect(answeredPhoneWithoutLooking(q, false), q).toBe(true);
     }
-    for (const q of ["what's the capital of France?", "tell me a joke", "who won the match yesterday",
-      "what's the phone number for Pizza Hut?"]) {
+    for (const q of [
+      "what's the capital of France?",
+      "tell me a joke",
+      "who won the match yesterday",
+      "what's the phone number for Pizza Hut?",
+    ]) {
       expect(answeredPhoneWithoutLooking(q, false), q).toBe(false);
     }
   });
@@ -254,7 +459,11 @@ describe("runTurn — load_tools", () => {
       undefined,
       full,
     );
-    expect(seen[1]!.at(-1)).toBe('{"ok":false,"summary":"No such group."}');
+    expect(JSON.parse(seen[1]!.at(-1)!)).toMatchObject({
+      ok: false,
+      summary: "No such group.",
+      status: "failed",
+    });
   });
 });
 

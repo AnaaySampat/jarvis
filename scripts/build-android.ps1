@@ -34,8 +34,7 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $variant = if ($Debug) { "debug" } else { "release" }
-    # --target only picks the ABIs; without --split-per-abi the output is still "universal".
-    $apkDir = Join-Path $AndroidGen "app\build\outputs\apk\universal\$variant"
+    $apkDir = Join-Path $AndroidGen "app\build\outputs\apk\$Target\$variant"
     $apk = Get-ChildItem -Path $apkDir -Filter "*.apk" -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch "-unsigned" } |
         Sort-Object LastWriteTime -Descending |
@@ -58,7 +57,7 @@ try {
     Write-Host "  $($apk.FullName)"
     Write-Host "  Size: $([math]::Round($apk.Length / 1MB, 1)) MB"
     Write-Host ""
-    Write-Host "Do NOT install .aab bundles or output-metadata.json - only the .apk file."
+    Write-Host "Do NOT install .aab bundles or output-metadata.json — only the .apk file."
 }
 finally {
     Pop-Location

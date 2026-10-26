@@ -94,6 +94,16 @@ class OperatorCoreTest {
 
     private val pass = """{"verdict":"pass"}"""
 
+    @Test fun hardwareLookupUsesAndroidEvidenceWithoutRequiringAScreenTap() {
+        val observation = OpObservation("com.test", emptyList(), hardwareFacts = mapOf("model" to "SM-E156B", "android_version" to "16"))
+        val device = FakeDevice(listOf(observation))
+        val result = run("What is my phone model and Android version?", device,
+            ScriptedModel("""{"do":"done","summary":"Model SM-E156B; Android 16."}"""))
+        assertTrue(result.ok)
+        assertTrue(result.verificationReceipt.isNotEmpty())
+        assertTrue(device.actions.isEmpty())
+    }
+
     private fun run(
         goal: String,
         device: OperatorDevice,

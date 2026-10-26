@@ -78,6 +78,8 @@ export interface ActionSpec {
 
 /** What a dispatched action returns. The spoken reply is built from `summary`. */
 export interface ToolResult {
+  /** Validated, provider-neutral handover; never inferred from assistant prose. */
+  result?: import("./results").AgentResult;
   ok: boolean;
   /** Short, user-facing outcome — the model speaks/relays this, not the raw data. */
   summary: string;

@@ -43,8 +43,36 @@ import { runTvControl, tvEnv, type TvShell } from "../remote/tv";
 import { lookAtTv, runTvTask, type Sight } from "../remote/tvSight";
 import { chatOverLadder } from "../ask";
 import { agentMessage, PC_AGENT, type AgentMessage } from "../agents";
+import type { AgentResult } from "../results";
+import type { WorkflowJournal } from "../workflow";
+
+export function informationOnly(spec: ActionSpec): boolean {
+  if (spec.type === "schedule") return ["get", "list", "show"].includes(String(spec.do ?? "get"));
+  return [
+    "read_agent_result",
+    "weather",
+    "news",
+    "search_web",
+    "read_webpage",
+    "time",
+    "day",
+    "read_file",
+    "list_dir",
+  ].includes(spec.type);
+}
 
 export interface DispatchDeps {
+  /** Extra research rounds remain bounded and do not widen the tool scope. */
+  maxToolRounds?: number;
+  verifyCompletion?: (
+    task: string,
+    results: AgentResult[],
+    answer: string,
+  ) => Promise<import("../completion").CompletionVerdict>;
+  journal?: WorkflowJournal;
+  readAgentResult?: (id: string) => AgentResult | undefined;
+  consultAgent?: (agent: string, question: string) => Promise<ToolResult>;
+  informationOnly?: boolean;
   platform: Platform;
   memory: MemoryStore;
   /** Active brain config — gives the HTTP tools the user's keys + selected model. */
@@ -98,7 +126,14 @@ export interface DispatchDeps {
  * remember to wire a new one up.
  */
 export async function dispatch(spec: ActionSpec, deps: DispatchDeps): Promise<ToolResult> {
-  const result = await dispatchInner(spec, deps);
+  const result: ToolResult =
+    deps.informationOnly && !informationOnly(spec)
+      ? {
+          ok: false,
+          error: "blocked",
+          summary: "Information-only consultation cannot change anything or call another helper.",
+        }
+      : await dispatchInner(spec, deps);
   try {
     deps.onDispatched?.(spec, result);
   } catch {
@@ -116,6 +151,20 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
   const { platform, memory, remote } = deps;
   const httpCtx: HttpToolCtx = { config: deps.config, location: deps.location };
   switch (spec.type) {
+    case "read_agent_result": {
+      const result = deps.readAgentResult?.(String(spec.result_id ?? ""));
+      return result
+        ? {
+            ok: true,
+            summary: "Stored result found.",
+            data: { findings: [JSON.stringify(result)] },
+          }
+        : { ok: false, summary: "No such result in this workflow." };
+    }
+    case "consult_agent":
+      return deps.consultAgent
+        ? deps.consultAgent(String(spec.agent ?? ""), String(spec.question ?? ""))
+        : { ok: false, error: "blocked", summary: "Consultation is unavailable in this request." };
     // ── HTTP info-tools (port from Python, pure network) ──
     case "weather":
       return http.getWeather(httpCtx);
@@ -195,9 +244,10 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
           const r = runSchedule(payload);
           return {
             ok: r.ok,
-            summary: ev.ok
-              ? `${r.summary} It's in your calendar too.`
-              : `${r.summary} (${ev.summary})`,
+            summary:
+              ev.ok && ev.eventId
+                ? `${r.summary} It's in your calendar too.`
+                : `${r.summary} (${ev.summary})`,
           };
         }
       }
@@ -308,7 +358,9 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
 
     // ── One-step Android actions (DirectActions.kt) — no operator loop ──
     case "device": {
-      const action = String(spec.do ?? "").trim().toLowerCase();
+      const action = String(spec.do ?? "")
+        .trim()
+        .toLowerCase();
       // Brightness: an omitted level means "auto", never a silent 0%.
       const raw = spec.value;
       const value =
@@ -320,12 +372,31 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
     case "navigate": {
       const destination = String(spec.destination ?? "").trim();
       if (!destination) return { ok: false, summary: "Where to, sir?" };
-      return platform.direct.device({ action: "navigate", query: destination, mode: String(spec.mode ?? "") });
+      return platform.direct.device({
+        action: "navigate",
+        query: destination,
+        mode: String(spec.mode ?? ""),
+      });
     }
     case "play_media": {
       const query = String(spec.query ?? "").trim();
       if (!query) return { ok: false, summary: "What should I play, sir?" };
-      return platform.direct.device({ action: "play", query, app: String(spec.app ?? "") });
+      const app = String(spec.app ?? "");
+      const result = await platform.direct.device({ action: "play", query, app });
+      if (
+        result.error !== "not_playing" ||
+        deps.shouldStopPhoneTask?.() ||
+        (deps.onlyTools && !deps.onlyTools.has("phone_task"))
+      )
+        return result;
+      // Spotify may accept playFromSearch yet stay paused. Continue the SAME
+      // requested play action through the existing native operator, not a blind
+      // media-play key that could resume the old track and claim the new query.
+      return runPhone(
+        deps,
+        `Play the requested media ${JSON.stringify(query)} in ${app || "the installed music app"}. ` +
+          "Use the app's search and select a matching result. Verify actual playback and its title; resuming an unrelated old track does not complete this request.",
+      );
     }
     case "message":
     case "call":
@@ -459,22 +530,34 @@ async function runComm(deps: DispatchDeps, spec: ActionSpec): Promise<ToolResult
   const calling = spec.type === "call";
   const to = String(spec.to ?? "").trim();
   const text = String(spec.text ?? "").trim();
-  if (!to) return { ok: false, summary: calling ? "Who should I call, sir?" : "Who should I message, sir?" };
+  if (!to)
+    return {
+      ok: false,
+      summary: calling ? "Who should I call, sir?" : "Who should I message, sir?",
+    };
   if (!calling && !text) return { ok: false, summary: "What should the message say, sir?" };
 
   const direct = deps.platform.direct;
-  const app = calling ? (spec.app === "whatsapp" ? "whatsapp" : "phone") : String(spec.app ?? "whatsapp");
+  const app = calling
+    ? spec.app === "whatsapp"
+      ? "whatsapp"
+      : "phone"
+    : String(spec.app ?? "whatsapp");
   const video = calling && app === "whatsapp" && spec.video === true;
   const found = await direct.resolveContact(to, app);
   if (!found.ok) return { ok: false, summary: found.summary, error: found.error };
   const target = found.target;
 
-  const who = target.number && target.number !== target.name ? `${target.name} (${target.number})` : target.name;
+  const who =
+    target.number && target.number !== target.name
+      ? `${target.name} (${target.number})`
+      : target.name;
   const where = calling && app === "phone" ? "" : ` on ${COMM_APP_LABEL[target.app] ?? target.app}`;
   if (!deps.authorizePhoneAction) {
     return {
       ok: false,
-      summary: "I can't send messages or place calls without asking you first, and I have no way to ask here.",
+      summary:
+        "I can't send messages or place calls without asking you first, and I have no way to ask here.",
       error: "approval_unavailable",
     };
   }
@@ -737,7 +820,11 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
       summary: r.summary,
       ...(r.error ? { error: r.error } : {}),
       ...(r.needsApproval ? { needsApproval: true } : {}),
-      data: { findings: r.findings, verificationReceipt: r.verificationReceipt, acted: r.acted === true },
+      data: {
+        findings: r.findings,
+        verificationReceipt: r.verificationReceipt,
+        acted: r.acted === true,
+      },
     };
     if (result.error === "accessibility_disabled") {
       await deps.platform.openAccessibilitySettings().catch(() => {});

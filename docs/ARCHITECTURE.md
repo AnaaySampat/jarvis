@@ -35,10 +35,9 @@ The seam is `src/hooks/useAssistant.js`: it picks `useBrain` (in-app brain) on a
 stable hook. `useBrain.js` deliberately mirrors `useWebSocket`'s shape, so `App.jsx` and
 the HUD never learn which transport is behind them.
 
-The desktop app is a separate project, not in this repository. Python file names below
-(`main.py`, `llm/*_bridge.py`, `autopilot.py`, …) name what each part was ported from.
-Maintainers may keep a gitignored `reference/python-backend-spec/` copy of it as a
-blueprint; it is never edited, imported or shipped.
+`reference/python-backend-spec/` (local-only, gitignored — not in the public repo) is a
+read-only copy of the original Python backend: the blueprint to compare against, never
+edited, imported or shipped.
 
 ### What's in the brain
 
@@ -47,10 +46,10 @@ blueprint; it is never edited, imported or shipped.
 | Turn loop | `index.ts`, `loop.ts`, `ask.ts` | The observe→act orchestration ported from `main.py` |
 | Config | `config.ts`, `resolveConfig.ts`, `configSecrets.ts` | What provider/model we'd *like* to use; secrets live in the Keystore (see §5) |
 | Route ladder | `routes.ts`, `quota.ts`, `modelPolicy.ts`, `modelCatalog.ts`, `modelRanker.ts` | What we actually try, in what order (see §2) |
-| Providers | `providers/{gemini,openaiCompat,catalog,vertexAuth,models}.ts` | Gemini/Vertex in `gemini.ts`; Groq, OpenRouter, NVIDIA and Mistral share `openaiCompat.ts`. Ported from `llm/*_bridge.py` |
+| Providers | `providers/{gemini,groq,vertexAuth,models}.ts` | Ported from `llm/*_bridge.py` |
 | Tools | `tools/registry.ts`, `tools/dispatch.ts`, `tools/http.ts` | One advertisement point, one execution point (see §3) |
 | Phone operator | `operator/controller.ts` → **Kotlin** `OperatorCore.kt` / `NativeOperator.kt` | Drives other apps — the loop is native (see §4) |
-| Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` (+ `playbooks.ts`) | Three separate stores — check which one a feature reads (see §7) |
+| Memory | `memory/store.ts`, `memory/vectorStore.ts`, `memory/proceduralLearning.ts` | Three separate stores — check which one a feature reads |
 | Remote PC | `remote/pc.ts`, `remote/webrtcScreen.ts` | Pair to the Windows app (see §6) |
 | TV | `remote/tv.ts` → **Kotlin** `TvAdb.kt` | The user's Android TV over network ADB (see §6a) |
 | Wake-on-LAN | `platform/index.ts` `wolSend` → **Kotlin** `WakeOnLan.kt` | Switches the TV (`wakeTv`) or the paired PC (`RemotePC.wake`, the `wake_pc` tool) on from off |
@@ -269,6 +268,22 @@ the turn and dispatches nothing), and a round spent only on it is free, once. A 
 tools still go through `toSpec` → `dispatch` like any other: this decides what is
 *advertised*, never how a call runs. The desktop does the same in `live_tools.py`.
 
+Conversation completion review (2026-10-24) uses a second model only for complex
+objectives or multiple executed tools. A single tool's verified receipt determines
+simple-task status; native phone verification and action approvals are unchanged.
+Local weather questions return the weather tool's complete answer directly through
+the existing dispatcher/journal/memory path, avoiding two redundant model calls.
+Complex review accepts a whole fenced JSON object, retries malformed JSON once,
+and receives the actual final answer alongside action evidence. See
+[Agent workflow contracts](AGENT_WORKFLOWS.md).
+
+Plain local notification reads also go directly through dispatch to the existing
+permission-checked native reader. The formatted, code-redacted result is saved and
+displayed without a model call; a fallback model had repeatedly answered without
+executing the reader. Filtered, compound and restricted remote requests keep normal
+tool routing and scopes. Automatic model-switch notices are diagnostic logs on Android,
+not recurring warning popups; real runtime/access failures still use the warning UI.
+
 Roughly what's dispatched today: `weather`, `news`, `search_web`, `places`, `directions`,
 `set_location`, `reminder`, `schedule`, `agenda`, `clock`, `time`, `day`, `remember`,
 `forget`, `playbook`, `routine`, `qr_code`, `generate_image`, `record`, `clipboard`,
@@ -336,7 +351,7 @@ Platform limits found live (2026-10-18), each handled by an honest reply:
 - **Spotify** ignores `MEDIA_PLAY_FROM_SEARCH`, and its session's `playFromSearch` didn't
   start anything either. With a visible session only the player's own PLAYING counts
   (`isMusicActive` blipped true while it stayed idle).
-- **Paused apps** (parental controls, Digital Wellbeing). Starting one doesn't throw: Android
+- **Paused apps** (Family Link, Digital Wellbeing). Starting one doesn't throw: Android
   shows "App isn't available". Every app-targeted action checks `isPackageSuspended` first.
 
 > **The rule carried over from the Python brain: never claim a tool succeeded unless its
@@ -415,6 +430,10 @@ back into JS**, and don't add a mid-task step that needs the WebView awake.
   windows are dropped from the snapshot, blacked out of screenshots, and a coordinate
   gesture on it is refused — the operator had pressed it and cancelled itself. `enter` (the keyboard's Enter/Search key, `ACTION_IME_ENTER`) is
   R2 in any goal that mentions messaging, since Enter can send.
+- **Hardware facts.** Native observations include Android Build model, manufacturer,
+  Android version and SDK. An editable device name cannot substitute for the model
+  code. A read-only hardware query may use these facts without screen taps, while
+  retaining independent native completion verification.
 - **Truthful completion.** A `done` is only reported after the checker PASSes it, with a
   receipt the journal's compare-and-set accepts. The checker judges a **fresh** observation
   (plus a screenshot when it takes images, plus the facts noted during the task), and
@@ -676,7 +695,7 @@ Settings 2026-09-25.
 | `ShareInbox.kt` | Text shared to JARVIS from another app's Share sheet, taken by MainActivity (like a routine tap) and polled by JS (`poll_share`) |
 | `WakeOnLan.kt` | A Wake-on-LAN magic packet (six 0xFF, then the MAC ×16) to the broadcast address and the device's /24, ports 9 and 7, three times. `ok` means it left the phone; callers prove the wake by reaching the device. Pure half JVM-tested (`WakeOnLanTest.kt`) |
 | `DirectActions.kt` / `DirectMatch.kt` | One-step actions (§3): device controls, navigation and play intents, contact lookup + SMS/call/WhatsApp send, notification read. `DirectMatch` is the pure contact-ranking and notification-title matching, JVM-tested (`DirectMatchTest.kt`) |
-| `JarvisNotificationListener.kt` | Notification access: lists what's showing, and replies through a notification's own RemoteInput, confirmed only when the app updates or clears that notification |
+| `JarvisNotificationListener.kt` / `TimerControl.kt` | Notification access: lists what's showing, replies through approved RemoteInput, and stops only a single unambiguous timer using the resolved Clock package's own Cancel/Stop/Dismiss action. Timer cancellation succeeds only when that notification disappears; otherwise the timer screen opens with an explicit failure. |
 | `RoutineAlarms.kt` | Timed routines while the WebView is paused: JS hands it every timed routine on each save (`schedule_routines`); it keeps one exact `AlarmManager` alarm (`USE_EXACT_ALARM`) for the earliest, rolls each forward in SharedPreferences, re-works every time on a time zone change, and posts "Time for <name>". It never runs a routine — a tap opens JARVIS and the WebView runs it as an ordinary turn. The one in-app alarm: reminders and alarms go to the Clock app |
 | `PhonePlugin.kt` | The `@TauriPlugin` command surface |
 
@@ -709,24 +728,16 @@ device on the JVM: `OperatorCoreTest.kt` drives
 `OperatorLoop` with a fake device, a scripted model and a fake journal
 (`./gradlew :tauri-plugin-phone:testDebugUnitTest` from `src-tauri/gen/android`).
 
-### Speech: input in the WebView, output through native TTS
+### STT and TTS use the WebView, not a Kotlin plugin
 
-**Listening** stays in the WebView on purpose. `platform/stt.ts` records with
-`MediaRecorder` (Wry's WebView grants `getUserMedia` once `RECORD_AUDIO` is in the
-manifest) and transcribes with Groq Whisper (`whisper-large-v3`, temperature 0, a short
-vocabulary prompt), falling back to Vertex Chirp when Groq fails so one provider outage
-doesn't take voice input down. After "Hey Jarvis", `MicRecorder.untilSilence()` ends the
-recording ~0.9 s after you stop talking (an energy VAD on the same stream, 10 s ceiling)
-instead of a fixed window. Don't add a native speech-recognition plugin.
+This was deliberate. `platform/webspeech.ts` uses `window.speechSynthesis` for replies and
+`platform/stt.ts` uses `MediaRecorder` → Groq Whisper (falling back to Vertex Chirp when
+Groq fails, so one provider outage doesn't take voice input down) for listening, relying on Wry's
+WebView already granting `getUserMedia` once `RECORD_AUDIO` is in the manifest. It works
+and it's simpler — don't reintroduce a native STT/TTS plugin without a specific reason.
 
-**Speaking** goes through native Android TextToSpeech: Android System WebView does not
-implement `window.speechSynthesis`, so `platform/webspeech.ts` calls
-`plugin:phone|speak` and polls `poll_speaking` for real completion (the event bridge is
-unreliable, §5). `speechSynthesis` is only the browser-preview fallback. The same native
-commands also let the phone talk when the PC drives it remotely.
-
-Known gap: the wake-word engine and `MediaRecorder` can't share the mic, so the handoff
-after the wake cue drops roughly the first half-second of a command (STATUS.md).
+(The native `speak`/`stop_speaking`/`poll_speaking` commands are a *different* thing: the
+Android system TTS used when the phone is speaking *as* the remote-controlled device.)
 
 ---
 
@@ -750,9 +761,14 @@ forwards whole tasks to it.
   SDP/ICE rides over the same `pc.ts` WebSocket as `{type, data}` messages, then a real
   `RTCPeerConnection` carries the video (DTLS-SRTP, P2P or TURN-relayed). Touch input goes
   back over the WebSocket as `remote_input`, not through WebRTC.
+  A lost connection clears video and control, then permits two bounded fresh-session
+  recoveries. Closing cancels recovery and tears down the owned session. Android Back
+  closes live view through that same stop/disarm path.
 - **Lease-gated input.** `hooks/controlLease.js` is a fail-closed lease/sequence tracker
   so the UI can't emit an unleased or replayed input envelope. The host enforces auth
   independently; this stops the bug before it leaves the phone.
+  Local lease expiry counts down using elapsed time; an ACK without duration preserves
+  the existing expiry rather than resetting the displayed lease to zero.
 - **`send()` is fire-and-forget; `sendConfirmed()` is not.** Every outbound message is
   queued on `outboundChain` and signed asynchronously through the native identity bridge
   — which this file documents as prone to dropped callbacks. `send()` returns as soon as
@@ -843,7 +859,7 @@ and adds its address — over their tailnet.
   | Volume | `media volume --get`; if `--set` doesn't take, it falls back to volume keys and reads again |
   | Mute | `dumpsys audio` `Muted:` |
   | Power | `dumpsys power` `mWakefulness` |
-  | Playback | The app's `dumpsys media_session` entry: state 3 **and** a position that advances between two reads |
+  | Playback | The app's `dumpsys media_session` entry: state 3 **and** a position that advances between two reads; Netflix must also remain the focused package at final verification |
   | Remote-button presses | None; reported as "sent" |
 
 - **Netflix links need `-e source 30`.** Without it Netflix ignores
@@ -854,14 +870,17 @@ and adds its address — over their tailnet.
 - **The name → id lookup is checked against Netflix.** The id comes from grounded web
   search. Netflix's public title page (~1 MB, read whole: since Oct 2026 the name is in the
   embedded data near the end, see `titleNameIn`) then confirms which show it is. That is
-  why `https://www.netflix.com/*` is in the `http` capability.
+  why `https://www.netflix.com/*` is in the `http` capability. A season-page ID is
+  normalized only when its page supplies one unambiguous `topLevelVideoId` with
+  matching parent title data; requested-title matching still applies (2026-10-24).
 - **What this TV can and can't see.** Screenshots work (re-tested 2026-10-11: the launcher
   and Settings capture in full) except while a DRM app is in front: Netflix marks its video
   *and* its UI secure, so it can never be captured, and `uiautomator dump` is opaque inside
-  Netflix, YouTube and Prime too. A vision-based TV operator loop (reusing
-  `OperatorDevice`) is therefore possible outside Netflix but hasn't been built: the
-  earlier belief that every capture was black is why. Today anything in-app beyond play
-  and pause is remote-button presses. Measurements are in `docs/STATUS.md` "TV control".
+  Netflix, YouTube and Prime too. The vision loop described above works on capturable
+  screens: Home look and YouTube search passed live on 2026-10-24 after explicit
+  screenshot permission. Protected playback correctly refuses capture; leaving the
+  protected player may make the app menu capturable again. Measurements are in
+  `docs/STATUS.md` "TV control" and `TV-TESTING-2026-10-24.md`.
 
 ---
 
@@ -977,5 +996,5 @@ mid-boot. Don't "tidy" it back into an effect.
   commit. `tauri.settings.gradle` (absolute local paths) and keystores stay ignored.
 - **Check before you assume a feature is missing.** [STATUS.md](STATUS.md) records what's
   been verified on a real device; a lot of what looks unfinished has been tested live.
-- **If you use graphify**, run `graphify update .` after changing code to keep the
-  gitignored `graphify-out/` graph current. Nothing in the build depends on it.
+- **After changing code**, run `graphify update .` to keep the knowledge graph in
+  `graphify-out/` current (AST-only, no API cost).

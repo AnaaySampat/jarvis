@@ -23,6 +23,7 @@
         { "url": "https://nominatim.openstreetmap.org/*" },
         { "url": "https://router.project-osrm.org/*" },
         { "url": "https://overpass-api.de/*" },
+        { "url": "https://overpass.private.coffee/*" },
         { "url": "https://maps.mail.ru/*" },
         { "url": "https://news.google.com/*" },
         { "url": "https://generativelanguage.googleapis.com/*" },

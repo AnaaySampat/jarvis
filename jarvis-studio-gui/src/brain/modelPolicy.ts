@@ -48,6 +48,26 @@ export function taskModelClass(text: string): ChatModelClass {
   return "smart";
 }
 
+/** A second completion model is useful for synthesis or several requirements,
+ * not for checking a single tool's receipt. Actual multi-tool turns also qualify
+ * in the turn loop, even if their original wording looked simple. */
+export function isComplexTask(text: string): boolean {
+  if (taskModelClass(text) === "very-smart") return true;
+  const action =
+    "(?:open|close|launch|start|stop|play|pause|resume|set|turn|mute|unmute|" +
+    "search|find|read|check|inspect|return|go|send|email|share|forward|save|" +
+    "write|create|make|delete|move|copy|download|upload|install|" +
+    "summarize|summarise|translate|remind|schedule|call|text|message|add|remove)";
+  return new RegExp(
+    "(?:\\b(?:and(?:\\s+then)?|then|also|afterwards|next)\\s+|[;\\n]\\s*|[.!?]\\s+)(?:please\\s+)?" +
+      action +
+      "\\b|\\b(?:first|second|finally)\\s+" +
+      action +
+      "\\b",
+    "i",
+  ).test(text);
+}
+
 /**
  * True only for a request to CREATE or show a new image. Questions about image
  * technology, editing tutorials, or a description of an existing image remain
@@ -77,5 +97,29 @@ export function isImageGenerationRequest(text: string): boolean {
     ).test(request) ||
     /^(?:please\s+)?(?:draw|paint|illustrate|render)\b/i.test(request) ||
     /\bshow\s+(?:me\s+)?(?:what\s+)?[\s\S]{1,80}\slooks?\s+like\b/i.test(request)
+  );
+}
+/** A single local-weather lookup can use the tool's complete, readable answer.
+ * Deliberately excludes other cities, advice, comparisons and combined actions. */
+export function isDirectWeatherRequest(text: string): boolean {
+  const request = text
+    .trim()
+    .replace(/^(?:hey\s+)?jarvis[,.:]?\s+/i, "")
+    .replace(/^please\s+/i, "")
+    .replace(/[?!.,\s]+$/g, "");
+  return /^(?:(?:what(?:'s|’s| is)|how(?:'s|’s| is))\s+(?:the\s+)?(?:current\s+|local\s+)?weather(?:\s+like)?|(?:(?:can|could|would)\s+you\s+)?(?:tell|show|give)(?:\s+me)?\s+(?:the\s+)?(?:current\s+|local\s+)?weather(?:\s+forecast)?|(?:current\s+|local\s+)?weather(?:\s+forecast)?)(?:\s+(?:here|outside|today|tomorrow|now|right now|for today|for tomorrow|in my area|near me)){0,3}$/i.test(
+    request,
+  );
+}
+
+/** A plain request to read the local notification list needs the reader, not a
+ * model deciding whether it has access. Filters/compound actions keep full routing. */
+export function isDirectNotificationRequest(text: string): boolean {
+  const request = text
+    .trim()
+    .replace(/^(?:hey\s+)?jarvis[,.:]?\s+/i, "")
+    .replace(/[?!.,\s]+$/g, "");
+  return /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:read|show|list|check)(?:\s+(?:out loud|aloud))?(?:\s+me)?\s+(?:(?:all(?:\s+of)?\s+)?(?:my|the)\s+)?(?:(?:new|unread|current)\s+)?notifications?(?:\s+(?:aloud|out loud|for me|please))?(?:\s+and\s+tell\s+me\s+(?:what\s+they\s+are|what\s+they\s+say|their\s+contents?))?$/i.test(
+    request,
   );
 }
