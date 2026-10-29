@@ -1,5 +1,5 @@
 /**
- * OpenAI-compatible providers — Groq, OpenRouter, Mistral and NVIDIA NIM share one
+ * OpenAI-compatible providers — Groq, OpenRouter, Mistral, NVIDIA NIM and AvalAI share one
  * chat-completions wire shape, so they share this one class, parameterised by preset.
  *
  * Why more than Groq: the user runs on free tiers only, and every free tier has a
@@ -54,13 +54,19 @@ export const OPENAI_COMPAT = {
     modelsUrl: "https://integrate.api.nvidia.com/v1/models",
     maxTokensField: "max_tokens",
   },
+  avalai: {
+    label: "AvalAI",
+    chatUrl: "https://api.avalai.ir/v1/chat/completions",
+    modelsUrl: "https://api.avalai.ir/v1/models",
+    maxTokensField: "max_tokens",
+  },
 } satisfies Record<string, CompatPreset>;
 
 export type CompatId = keyof typeof OPENAI_COMPAT;
 
 /** The pooled free providers, in the order the ladder tries them after Gemini/Groq.
  *  Mistral last: its free tier trains on what it's sent. */
-export const EXTRA_PROVIDERS = ["openrouter", "nvidia", "mistral"] as const;
+export const EXTRA_PROVIDERS = ["openrouter", "nvidia", "mistral", "avalai"] as const;
 export type ExtraProviderId = (typeof EXTRA_PROVIDERS)[number];
 
 export function isCompatProvider(id: string): id is CompatId {
