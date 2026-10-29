@@ -209,5 +209,5 @@ const PICKERS: Record<ExtraProviderId, (json: ModelListing) => string[]> = {
   openrouter: pickOpenRouter,
   mistral: pickMistral,
   nvidia: pickNvidia,
-  avalai: (json) => (json.data ?? []).map((m) => m.id).filter((id) => typeof id === "string" && id.length > 0).slice(0, CANDIDATES_PER_PROVIDER),
+  avalai: (json) => rankBySize((json?.data ?? []).map((m: Entry) => m?.id).filter((id: unknown): id is string => typeof id === "string" && !NOT_CHAT.test(id))),
 };
