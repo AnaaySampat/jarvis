@@ -30,6 +30,7 @@ export interface BrainConfig {
     openrouter?: string[];
     mistral?: string[];
     nvidia?: string[];
+    avalai?: string[];
     /** Web-search backup when Gemini grounding can't answer. Not a chat model. */
     tavily?: string[];
   };
