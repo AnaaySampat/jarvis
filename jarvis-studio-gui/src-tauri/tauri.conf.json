@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "JARVIS",
+  "productName": "JESSI",
   "version": "2.5.0",
-  "identifier": "com.jarvis.app",
+  "identifier": "com.jessi.assistant",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "J.A.R.V.I.S",
+        "title": "JESSI",
         "width": 1100,
         "height": 720,
         "minWidth": 800,
@@ -66,13 +66,20 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.qrserver.com; media-src 'self' data: blob: mediastream:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost https://tauri.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://localhost:1421 ws://localhost:8765 ws://127.0.0.1:8765 ws: wss: stun: turn: turns: https://generativelanguage.googleapis.com https://api.groq.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://ipwho.is https://ipapi.co https://nominatim.openstreetmap.org https://router.project-osrm.org https://overpass-api.de https://maps.mail.ru https://news.google.com https://oauth2.googleapis.com https://*.aiplatform.googleapis.com https://*.speech.googleapis.com"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.qrserver.com; media-src 'self' data: blob: mediastream:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost https://tauri.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://localhost:1421 ws://localhost:8765 ws://127.0.0.1:8765 ws: wss: stun: turn: turns: https://generativelanguage.googleapis.com https://api.groq.com https://api.avalai.ir https://api.open-meteo.com https://air-quality-api.open-meteo.com https://ipwho.is https://ipapi.co https://nominatim.openstreetmap.org https://router.project-osrm.org https://overpass-api.de https://maps.mail.ru https://news.google.com https://oauth2.googleapis.com https://*.aiplatform.googleapis.com https://*.speech.googleapis.com"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
     "shortDescription": "JARVIS voice assistant for Windows",
     "longDescription": "A JARVIS-style AI voice assistant with an Iron-Man HUD interface. Wake word, local transcription, cloud LLM, and PC automation.",
     "copyright": "Copyright © 2026 JARVIS contributors",
@@ -80,7 +87,9 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "startMenuFolder": "JARVIS"
       }
     }
