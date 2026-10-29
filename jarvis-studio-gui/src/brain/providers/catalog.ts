@@ -1,5 +1,5 @@
 /**
- * Which models the pooled free providers (OpenRouter, NVIDIA NIM, Mistral) should be
+ * Which models the pooled free providers (OpenRouter, NVIDIA NIM, Mistral, AvalAI) should be
  * asked — discovered from each provider's own /models listing, cached on device.
  *
  * Discovered, never pinned. "Every pinned model id is a time bomb" (ARCHITECTURE §2)
@@ -209,4 +209,5 @@ const PICKERS: Record<ExtraProviderId, (json: ModelListing) => string[]> = {
   openrouter: pickOpenRouter,
   mistral: pickMistral,
   nvidia: pickNvidia,
+  avalai: (json) => (json.data ?? []).map((m) => m.id).filter((id) => typeof id === "string" && id.length > 0).slice(0, CANDIDATES_PER_PROVIDER),
 };
