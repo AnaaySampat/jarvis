@@ -42,6 +42,7 @@ const PROVIDER_NAME = {
   openrouter: "OpenRouter",
   nvidia: "NVIDIA NIM",
   mistral: "Mistral",
+  avalai: "AvalAI",
   offline: "Offline",
 };
 
@@ -361,6 +362,7 @@ export default function Settings({
   const [openrouterKey, setOpenrouterKey] = useState("");
   const [mistralKey, setMistralKey] = useState("");
   const [nvidiaKey, setNvidiaKey] = useState("");
+  const [avalaiKey, setAvalaiKey] = useState("");
   const [tavilyKey, setTavilyKey] = useState("");
   const [elevenKey, setElevenKey] = useState("");
   const [mapsKey, setMapsKey] = useState("");
@@ -434,6 +436,7 @@ export default function Settings({
     if (openrouterKey.trim()) cfg.openrouter_api_key = openrouterKey.trim();
     if (mistralKey.trim()) cfg.mistral_api_key = mistralKey.trim();
     if (nvidiaKey.trim()) cfg.nvidia_api_key = nvidiaKey.trim();
+    if (avalaiKey.trim()) cfg.avalai_api_key = avalaiKey.trim();
     if (tavilyKey.trim()) cfg.tavily_api_key = tavilyKey.trim();
     if (elevenKey.trim()) cfg.elevenlabs_api_key = elevenKey.trim();
     if (mapsKey.trim()) cfg.google_maps_key = mapsKey.trim();
@@ -602,7 +605,7 @@ export default function Settings({
   // the model list is exactly what those keys reach (sysInfo.reachable_models). An
   // option's value carries its provider ("groq::llama-…"): the same id can be
   // served by two providers, and picking a model picks its provider too.
-  const keyedProviders = ["gemini", "vertex", "groq", "openrouter", "nvidia", "mistral"].filter(
+  const keyedProviders = ["gemini", "vertex", "groq", "openrouter", "nvidia", "mistral", "avalai"].filter(
     (p) => (p === "vertex" ? sysInfo.has_vertex_sa : sysInfo[`has_${p}_key`]),
   );
   const reachable = (sysInfo.reachable_models || []).filter(
@@ -656,7 +659,7 @@ export default function Settings({
               <option value={providerMode}>{providerName} (no key)</option>
             )}
           </select>
-          {["openrouter", "nvidia", "mistral"].includes(providerMode) && (
+          {["openrouter", "nvidia", "mistral", "avalai"].includes(providerMode) && (
             <Warn>
               {providerName}&apos;s free models run on shared capacity and are often busy, so
               replies can be slow or fail.
@@ -805,6 +808,7 @@ export default function Settings({
             ["OpenRouter", "openrouter", openrouterKey, setOpenrouterKey, "sk-or-…"],
             ["NVIDIA NIM", "nvidia", nvidiaKey, setNvidiaKey, "nvapi-…"],
             ["Mistral", "mistral", mistralKey, setMistralKey, "Mistral API key"],
+            ["AvalAI", "avalai", avalaiKey, setAvalaiKey, "AvalAI API key"],
           ].map(([label, id, value, set, hint]) => (
             <KeyField
               key={id}
