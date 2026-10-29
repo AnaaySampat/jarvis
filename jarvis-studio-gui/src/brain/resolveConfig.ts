@@ -31,6 +31,7 @@ export interface StoredKeys {
   openrouterKey?: string;
   mistralKey?: string;
   nvidiaKey?: string;
+  avalaiKey?: string;
   tavilyKey?: string;
   model?: string;
   pinnedLocation?: string;
@@ -62,6 +63,7 @@ export const SCOPE_PROVIDERS = [
   "openrouter",
   "nvidia",
   "mistral",
+  "avalai",
 ] as const;
 
 /** The stored provider choice: a provider id, "auto", or "" (never chosen — older
@@ -101,6 +103,7 @@ export function resolveBrainConfig(stored: StoredKeys): BrainConfig {
     ["openrouter", stored.openrouterKey],
     ["mistral", stored.mistralKey],
     ["nvidia", stored.nvidiaKey],
+    ["avalai", stored.avalaiKey],
     ["tavily", stored.tavilyKey],
   ] as const) {
     const split = splitKeys(raw);
@@ -159,6 +162,7 @@ export function resolveBrainConfig(stored: StoredKeys): BrainConfig {
     openrouter: Boolean(keys.openrouter),
     nvidia: Boolean(keys.nvidia),
     mistral: Boolean(keys.mistral),
+    avalai: Boolean(keys.avalai),
   };
   const scope = mode && mode !== "auto" && hasKeyFor[mode] ? mode : "auto";
   const scoped = (c: BrainConfig, providerScope: string): BrainConfig => ({
