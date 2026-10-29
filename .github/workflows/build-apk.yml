@@ -1,6 +1,8 @@
 name: Build APK
 on:
   workflow_dispatch:
+  push:
+    branches: [jessi-avalai]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,5 +28,5 @@ jobs:
         run: npx tauri android build --debug --apk --target aarch64
       - uses: actions/upload-artifact@v4
         with:
-          name: jarvis-apk
+          name: jessi-apk
           path: jarvis-studio-gui/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
