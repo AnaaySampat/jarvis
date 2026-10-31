@@ -1,4 +1,4 @@
-﻿# JARVIS for Android
+# JARVIS for Android
 
 **Control your phone. Work on your PC. Command your TV.**
 
@@ -56,12 +56,12 @@ a **photo or screenshot** and ask JARVIS about it.
 
 ### Hand gestures (preview)
 
-On Android, open **Settings → Voice → Hand gestures** and tap **Start camera**.
-Hold an open palm to stop speech, a peace sign to start listening when JARVIS is
-idle, or a closed fist to stop the camera. Thumbs up gives detection feedback.
-Recognition runs on-device with a visible camera preview and Stop controls.
-Sessions end after five minutes, on screen lock, or when JARVIS is closed.
-See [gesture controls](docs/GESTURE-CONTROLS.md) for setup, limits and future uses.
+Open **Settings → Voice → Hand gestures**, choose a mode and start the camera.
+Controls include music/TV, PC slides, push-to-talk, instructions and timers,
+reading/bookmarks, saved routines, microphone mute, countdown photos, HUD pinch/drag
+and calibrated personal poses. Remap gestures and adjust hold/release timing.
+Recognition stays on-device with visible Stop controls and five-minute sessions.
+See [gesture controls](docs/GESTURE-CONTROLS.md) for setup, defaults and limitations.
 
 ### Your Windows PC, from your phone
 

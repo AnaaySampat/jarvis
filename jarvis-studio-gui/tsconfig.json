@@ -17,5 +17,5 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["src/brain"]
+  "include": ["src/brain", "src/gestures"]
 }

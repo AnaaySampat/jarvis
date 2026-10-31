@@ -28,6 +28,7 @@ const COMMANDS: &[&str] = &[
     "start_gesture_recognition",
     "stop_gesture_recognition",
     "poll_gesture_recognition",
+    "take_gesture_photo",
     "start_wake_word",
     "stop_wake_word",
     "poll_wake_word",

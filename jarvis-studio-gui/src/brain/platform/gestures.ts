@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Frame } from "../../gestures/engine";
 
 export type Gesture = "OPEN_PALM" | "PEACE" | "THUMBS_UP" | "FIST" | "UNKNOWN";
 export interface GestureState {
@@ -9,6 +10,7 @@ export interface GestureState {
   gesture: Gesture;
   detectedAt: number;
   summary: string;
+  frame?: Frame | null;
 }
 
 export const CAMERA_OFF: GestureState = {
@@ -22,13 +24,13 @@ export const CAMERA_OFF: GestureState = {
 };
 
 // A dropped bridge reply must not leave the controls or polling stuck forever.
-async function bounded<T>(promise: Promise<T>): Promise<T> {
+async function bounded<T>(promise: Promise<T>, timeout=4000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Camera did not respond. Try again.")), 4000);
+        timer = setTimeout(() => reject(new Error("Camera did not respond. Try again.")), timeout);
       }),
     ]);
   } finally {
@@ -36,12 +38,17 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
   }
 }
 
-export const startGestureCamera = () =>
-  bounded(invoke<{ ok: boolean; summary: string }>("plugin:phone|start_gesture_recognition"));
+export const startGestureCamera = (options={holdMs:600,releaseMs:400,confidence:0.8}) =>
+  bounded(invoke<{ ok: boolean; summary: string }>("plugin:phone|start_gesture_recognition",
+    {holdMs:options.holdMs,releaseMs:options.releaseMs,confidence:options.confidence}));
 export const stopGestureCamera = () =>
   bounded(invoke<{ ok: boolean; summary: string }>("plugin:phone|stop_gesture_recognition"));
 export const pollGestureCamera = () =>
   bounded(invoke<GestureState>("plugin:phone|poll_gesture_recognition"));
+export const nativeGestureCamera = {
+  start:startGestureCamera,stop:stopGestureCamera,poll:pollGestureCamera,
+  photo:()=>bounded(invoke<{ok:boolean;summary:string}>("plugin:phone|take_gesture_photo"),10000),
+};
 
 /** Consume every sequence, including ignored detections. Returning to the app,
  * dismissing approval, or remounting the UI must never replay an old gesture. */

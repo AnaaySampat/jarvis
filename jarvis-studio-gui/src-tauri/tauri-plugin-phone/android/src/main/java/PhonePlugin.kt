@@ -459,6 +459,13 @@ internal object TaskJournalPayloadPolicy {
  * `invoke("plugin:phone|<command>")` call. Methods are named to match the camelCase
  * names the Rust mobile layer forwards (run_mobile_plugin("isEnabled", …) etc.).
  */
+@InvokeArg
+class GestureStartArgs {
+    var holdMs: Int = 600
+    var releaseMs: Int = 400
+    var confidence: Float = 0.8f
+}
+
 @TauriPlugin
 class PhonePlugin(private val activity: Activity) : Plugin(activity) {
 
@@ -640,6 +647,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun startGestureRecognition(invoke: Invoke) {
+        val options = invoke.parseArgs(GestureStartArgs::class.java)
         activity.runOnUiThread {
             if (activity.isFinishing || activity.isDestroyed || !activity.hasWindowFocus()) {
                 invoke.resolve(result(false, "Open JARVIS to start the gesture camera."))
@@ -663,7 +671,10 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
             }
             try {
                 ContextCompat.startForegroundService(activity,
-                    Intent(activity, GestureCameraService::class.java).setAction(GestureCameraService.ACTION_START))
+                    Intent(activity, GestureCameraService::class.java).setAction(GestureCameraService.ACTION_START)
+                        .putExtra("holdMs", options.holdMs.coerceIn(200, 2000))
+                        .putExtra("releaseMs", options.releaseMs.coerceIn(200, 1500))
+                        .putExtra("confidence", if (options.confidence.isFinite()) options.confidence.coerceIn(0.65f, 0.98f) else 0.8f))
                 invoke.resolve(result(true, "Starting gesture camera..."))
             } catch (_: Exception) {
                 GestureCameraService.failedStart()
@@ -689,7 +700,23 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
             put("gesture", state.gesture)
             put("detectedAt", state.detectedAt)
             put("summary", state.summary)
+            put("frame", if (state.observedAt > 0) JSObject().apply {
+                put("seq", state.frameSeq)
+                put("observedAt", state.observedAt)
+                put("pose", state.pose)
+                put("score", state.score)
+                put("landmarks", JSArray().apply {
+                    state.landmarks.forEach { point ->
+                        put(JSArray().apply { point.forEach { put(it) } })
+                    }
+                })
+            } else JSONObject.NULL)
         })
+    }
+
+    @Command
+    fun takeGesturePhoto(invoke: Invoke) {
+        GestureCameraService.takePhoto { ok, summary -> invoke.resolve(result(ok, summary)) }
     }
 
     @Command

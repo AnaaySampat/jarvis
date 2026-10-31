@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
@@ -17,6 +18,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Size
 import android.view.Gravity
 import android.view.WindowManager
@@ -51,6 +54,11 @@ class GestureCameraService : LifecycleService() {
         val gesture: String = "UNKNOWN",
         val detectedAt: Long = 0,
         val summary: String = "Camera is off.",
+        val frameSeq: Int = 0,
+        val observedAt: Long = 0,
+        val pose: String = "UNKNOWN",
+        val score: Float = 0f,
+        val landmarks: List<List<Float>> = emptyList(),
     )
 
     companion object {
@@ -58,10 +66,21 @@ class GestureCameraService : LifecycleService() {
         const val ACTION_STOP = "com.jarvis.phone.GESTURE_STOP"
         @Volatile var state = State()
             private set
+        @Volatile private var instance: GestureCameraService? = null
+
+        fun takePhoto(done: (Boolean, String) -> Unit) {
+            Handler(Looper.getMainLooper()).post {
+                val service = instance
+                if (service == null || !state.running || service.closing) {
+                    done(false, "Start the gesture camera before taking a photo.")
+                } else service.schedulePhoto(done)
+            }
+        }
 
         @Synchronized fun prepareStart(): Boolean {
             if (state.running || state.starting) return false
             state = state.copy(starting = true, gesture = "UNKNOWN", detectedAt = 0,
+                observedAt = 0, pose = "UNKNOWN", score = 0f, landmarks = emptyList(),
                 summary = "Starting gesture camera...")
             return true
         }
@@ -74,7 +93,11 @@ class GestureCameraService : LifecycleService() {
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val latch = GestureLatch()
+    private var latch = GestureLatch()
+    private var confidence = 0.8f
+    @Volatile private var photoAt = 0L
+    @Volatile private var photoToken = 0
+    private var photoDone: ((Boolean, String) -> Unit)? = null
     private var provider: ProcessCameraProvider? = null
     private var preview: Preview? = null
     private var analysis: ImageAnalysis? = null
@@ -96,6 +119,7 @@ class GestureCameraService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF),
             ContextCompat.RECEIVER_NOT_EXPORTED)
     }
@@ -108,6 +132,9 @@ class GestureCameraService : LifecycleService() {
         }
         if (started || closing) return START_NOT_STICKY
         started = true
+        latch = GestureLatch(intent.getIntExtra("holdMs", 600).coerceIn(200, 2000).toLong(),
+            intent.getIntExtra("releaseMs", 400).coerceIn(200, 1500).toLong())
+        confidence = intent.getFloatExtra("confidence", 0.8f).let { if (it.isFinite()) it.coerceIn(0.65f, 0.98f) else 0.8f }
         try {
             if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                 finish("Unlock your phone and open JARVIS to start the camera.")
@@ -233,6 +260,7 @@ class GestureCameraService : LifecycleService() {
         var rotated: Bitmap? = null
         try {
             val now = SystemClock.uptimeMillis()
+            val capturedAt = System.currentTimeMillis()
             if (closing || now - lastFrameAt < 125) return // at most eight inferences/sec
             lastFrameAt = now
             bitmap = image.toBitmap() // CameraX handles row/pixel stride, including padding
@@ -244,7 +272,19 @@ class GestureCameraService : LifecycleService() {
             val result = try { recognizer?.recognizeForVideo(input, now) } finally { input.close() }
             val category = result?.gestures()?.firstOrNull()?.firstOrNull()
             val gesture = GestureRecognition.recognize(category?.categoryName() ?: "",
-                category?.score() ?: 0f)
+                category?.score() ?: 0f, confidence)
+            val points = result?.landmarks()?.firstOrNull()?.map { listOf(it.x(), it.y(), it.z()) } ?: emptyList()
+            if (photoAt > 0 && now >= photoAt && gesture != GestureRecognition.Gesture.FIST) {
+                photoAt = 0
+                val token = photoToken
+                val saved = saveSnapshot(rotated, token)
+                main.post {
+                    if (token != photoToken) return@post
+                    photoDone?.invoke(saved.first, saved.second)
+                    photoDone = null
+                    if (!closing) state = state.copy(summary = saved.second)
+                }
+            }
             failures = 0
             val event = latch.update(gesture, now)
             main.post {
@@ -253,9 +293,13 @@ class GestureCameraService : LifecycleService() {
                 if (!state.running) {
                     state = state.copy(running = true, starting = false, summary = "Hold a gesture for a moment.")
                 }
-                statusText.text = when (gesture) {
-                    GestureRecognition.Gesture.UNKNOWN -> "Hold your hand in view"
-                    else -> gesture.name.replace('_', ' ')
+                state = state.copy(frameSeq = state.frameSeq + 1, observedAt = capturedAt,
+                    pose = gesture.name, score = category?.score() ?: 0f, landmarks = points)
+                if (photoDone == null) {
+                    statusText.text = when (gesture) {
+                        GestureRecognition.Gesture.UNKNOWN -> "Hold your hand in view"
+                        else -> gesture.name.replace('_', ' ')
+                    }
                 }
                 if (event != null) {
                     state = state.copy(seq = state.seq + 1, gesture = event.name,
@@ -280,6 +324,66 @@ class GestureCameraService : LifecycleService() {
         stopSelf()
     }
 
+    private fun schedulePhoto(done: (Boolean, String) -> Unit) {
+        if (photoDone != null) { done(false, "A photo countdown is already running."); return }
+        photoDone = done
+        val token = ++photoToken
+        photoAt = SystemClock.uptimeMillis() + 3000
+        fun countdown() {
+            if (closing || photoDone == null || token != photoToken) return
+            val seconds = ((photoAt - SystemClock.uptimeMillis() + 999) / 1000).coerceAtLeast(0)
+            statusText.text = if (seconds > 0) "Photo in $seconds..." else "Capturing photo..."
+            state = state.copy(summary = statusText.text.toString())
+            if (seconds > 0) main.postDelayed({ countdown() }, 1000)
+        }
+        countdown()
+        main.postDelayed({
+            if (photoDone != null && token == photoToken) {
+                photoToken++
+                photoAt = 0; photoDone?.invoke(false, "No camera frame arrived for the photo."); photoDone = null
+            }
+        }, 8000)
+    }
+
+    private fun saveSnapshot(bitmap: Bitmap, token: Int): Pair<Boolean, String> {
+        if (closing || token != photoToken) return false to "Photo cancelled."
+        val name = "JARVIS-${System.currentTimeMillis()}.jpg"
+        if (Build.VERSION.SDK_INT >= 29) {
+            val resolver = contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/JARVIS")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = try { resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) }
+                catch (_: Exception) { return false to "Could not create the photo. Check available storage." }
+                ?: return false to "Could not create the photo."
+            return try {
+                val saved = resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) } == true
+                if (!saved || closing || token != photoToken) {
+                    resolver.delete(uri, null, null)
+                    false to "Photo failed or was cancelled."
+                } else {
+                    val updated = resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+                    if (updated == 1) true to "Saved camera snapshot to Pictures/JARVIS/$name."
+                    else { resolver.delete(uri, null, null); false to "Could not finish saving the photo." }
+                }
+            } catch (_: Exception) {
+                try { resolver.delete(uri, null, null) } catch (_: Exception) { }
+                false to "Could not save the photo. Check available storage."
+            }
+        }
+        return try {
+            val folder = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+                ?: return false to "Photo storage is unavailable."
+            val file = java.io.File(folder, name)
+            val saved = file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            if (!saved || closing || token != photoToken) { file.delete(); false to "Photo failed or was cancelled." }
+            else true to "Saved camera snapshot in JARVIS's app Pictures folder: $name."
+        } catch (_: Exception) { false to "Could not save the photo. Check available storage." }
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
         finish("Camera stopped when JARVIS was closed.")
         super.onTaskRemoved(rootIntent)
@@ -287,6 +391,11 @@ class GestureCameraService : LifecycleService() {
 
     override fun onDestroy() {
         closing = true
+        if (instance === this) instance = null
+        photoAt = 0
+        photoToken++
+        photoDone?.invoke(false, "Photo cancelled because the camera stopped.")
+        photoDone = null
         main.removeCallbacksAndMessages(null)
         if (state.running || state.starting) {
             state = state.copy(running = false, starting = false, summary = "Camera is off.")
