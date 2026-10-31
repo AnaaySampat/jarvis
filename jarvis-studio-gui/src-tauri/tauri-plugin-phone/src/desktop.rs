@@ -44,7 +44,8 @@ macro_rules! unavailable_command {
 }
 
 impl<R: Runtime> Phone<R> {
-    unavailable_command!(start_gesture_recognition());
+    unavailable_command!(start_gesture_recognition(GestureStartRequest));
+    unavailable_command!(take_gesture_photo());
     unavailable_command!(stop_gesture_recognition());
     pub fn poll_gesture_recognition(&self) -> crate::Result<GestureStateResponse> {
         Ok(GestureStateResponse {

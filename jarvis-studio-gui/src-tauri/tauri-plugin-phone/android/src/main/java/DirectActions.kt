@@ -148,6 +148,19 @@ internal object DirectActions {
                 "volume_up" -> volumeStep(act, AudioManager.ADJUST_RAISE, a.value)
                 "volume_down" -> volumeStep(act, AudioManager.ADJUST_LOWER, a.value)
                 "mute" -> volumeStep(act, AudioManager.ADJUST_MUTE, 1)
+                "unmute" -> volumeStep(act, AudioManager.ADJUST_UNMUTE, 1)
+                "mute_toggle" -> {
+                    val manager = act.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    volumeStep(act, if (manager.isStreamMute(AudioManager.STREAM_MUSIC))
+                        AudioManager.ADJUST_UNMUTE else AudioManager.ADJUST_MUTE, 1)
+                }
+                "microphone_mute", "microphone_unmute" -> {
+                    val manager = act.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val mute = a.action == "microphone_mute"
+                    manager.isMicrophoneMute = mute
+                    if (manager.isMicrophoneMute == mute) res(true, "Android reports microphone ${if (mute) "muted" else "unmuted"}.")
+                    else res(false, "Android did not change the microphone mute state.")
+                }
                 "brightness" -> brightness(act, a.value)
                 "auto_rotate_on" -> autoRotate(act, true)
                 "auto_rotate_off" -> autoRotate(act, false)

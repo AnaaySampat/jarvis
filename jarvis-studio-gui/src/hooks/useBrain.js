@@ -45,6 +45,7 @@ import {
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
 import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
+import { GestureRequests } from "../gestures/request";
 import { nativeTvShell, normMac, parseLink, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
 import { invoke } from "@tauri-apps/api/core";
@@ -709,6 +710,8 @@ export function useBrain() {
   // WhatsApp on the phone: notification access (null until the native side says).
   const [waAccess, setWaAccess] = useState(null);
   const pcRef = useRef(null);
+  const gestureRequestsRef = useRef(null);
+  if (gestureRequestsRef.current === null) gestureRequestsRef.current = new GestureRequests();
   // The one-shot pairing PIN. Kept in a ref (never persisted to storage) and fed to
   // the RemotePC below; it's only needed for the first pairing.claim, after which
   // reconnects authenticate with a signed auth.response.
@@ -847,6 +850,7 @@ export function useBrain() {
       onStateChange: (s) => {
         setPcState(s);
         if (s !== "online") {
+          gestureRequestsRef.current.close();
           clearControlLease();
           if (wantScreenRef.current && s === "offline") {
             setScreenState("connecting");
@@ -876,6 +880,7 @@ export function useBrain() {
       },
       onEvent: (ev) => {
         const e = ev.event;
+        if (e === "gesture_result") { gestureRequestsRef.current.receive(ev.data); return; }
         if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
         if (e === "phone.command") void pcCommandRef.current?.(ev.data);
         if (
@@ -1036,6 +1041,7 @@ export function useBrain() {
     pc.connect();
     return () => {
       pc.close();
+      gestureRequestsRef.current.close();
       clearControlLease();
       if (pcRef.current === pc) pcRef.current = null;
     };
@@ -1232,6 +1238,15 @@ export function useBrain() {
     pcRef.current?.signal("disarm_control", lease || {});
     clearControlLease();
   }, [clearControlLease, nextControlLeaseEnvelope]);
+
+  const gesturePcAction = useCallback((action) => {
+    const lease = nextControlLeaseEnvelope();
+    if (!lease || !pcRef.current?.isOnline) return Promise.resolve({
+      ok:false,summary:"Open the PC live view and arm control before using PC gestures.",
+    });
+    return gestureRequestsRef.current.request((data) =>
+      pcRef.current?.signal("gesture_action", { ...data, ...lease }) || false, action);
+  }, [nextControlLeaseEnvelope]);
 
   // Emergency stop for the remote-desktop view: halts the PC's hands NOW — disarms
   // direct touch control AND breaks any running pc_task/autopilot loop at its next
@@ -1501,6 +1516,8 @@ export function useBrain() {
   const userInteractedRef = useRef(false);
   const micRef = useRef(null); // MicRecorder (push-to-talk)
   const listeningRef = useRef(false);
+  const listenGenerationRef = useRef(0);
+  const listenStartingRef = useRef(false);
   // Hard ceiling on one push-to-talk recording (see startListen).
   const listenTimerRef = useRef(undefined);
   const finishListenRef = useRef(null);
@@ -2202,17 +2219,23 @@ export function useBrain() {
 
   // ── Voice input (push-to-talk → mic → Groq Whisper → brain) ────────────────
   const startListen = useCallback(async () => {
-    if (busyRef.current || listeningRef.current) return;
+    if (busyRef.current || listeningRef.current || listenStartingRef.current) return false;
     if (!stored.groqKey && !stored.vertexSaJson) {
       pushWarning(
         "Voice input needs either a Vertex AI Service Account or Groq API key. Add one in Settings.",
       );
-      return;
+      return false;
     }
+    const generation = ++listenGenerationRef.current;
+    listenStartingRef.current = true;
     try {
       webSpeechTTS.stop(); // don't record JARVIS talking over you
       if (!micRef.current) micRef.current = new MicRecorder();
       await micRef.current.start();
+      if (generation !== listenGenerationRef.current) {
+        await micRef.current.stop();
+        return false;
+      }
       listeningRef.current = true;
       setStatus("listening");
       // Tap-to-talk needs a second tap to send. If it never comes, listeningRef
@@ -2222,15 +2245,30 @@ export function useBrain() {
       listenTimerRef.current = setTimeout(() => {
         void finishListenRef.current?.();
       }, MAX_LISTEN_MS);
+      return true;
     } catch (e) {
       pushWarning("Couldn't access the microphone: " + (e?.message || e));
       listeningRef.current = false;
       setStatus("idle");
+      return false;
+    } finally {
+      listenStartingRef.current = false;
     }
     // vertexSaJson is read above but was missing here, so a Vertex-only user (who
     // never gets a Groq key) kept the pre-hydration closure all session and the mic
     // refused to start.
   }, [stored.groqKey, stored.vertexSaJson, pushWarning]);
+
+  const cancelListen = useCallback(async () => {
+    listenGenerationRef.current++;
+    clearTimeout(listenTimerRef.current);
+    const wasListening = listeningRef.current;
+    listeningRef.current = false;
+    if (wasListening && micRef.current) {
+      try { await micRef.current.stop(); } catch { /* Discard, never transcribe. */ }
+    }
+    if (wasListening && !busyRef.current) setStatus("idle");
+  }, []);
 
   // Stop recording, transcribe, and send the recognised text as a turn.
   const finishListen = useCallback(async () => {
@@ -2707,6 +2745,8 @@ export function useBrain() {
     sendCorrection: () => {},
     finishListen,
     pttStart: startListen,
+    cancelListen,
+    gesturePcAction,
 
     resetConversation,
     newConversation,

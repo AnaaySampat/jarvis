@@ -14,7 +14,10 @@ class GestureRecognitionTest {
             assertEquals(Gesture.UNKNOWN, GestureRecognition.recognize("Victory", score))
         }
         assertEquals(Gesture.UNKNOWN, GestureRecognition.recognize("None", 1f))
-        assertEquals(Gesture.UNKNOWN, GestureRecognition.recognize("Pointing_Up", 1f))
+        assertEquals(Gesture.POINT_UP, GestureRecognition.recognize("Pointing_Up", 1f))
+        assertEquals(Gesture.THUMBS_DOWN, GestureRecognition.recognize("Thumb_Down", 0.9f))
+        assertEquals(Gesture.LOVE, GestureRecognition.recognize("ILoveYou", 0.9f))
+        assertEquals(Gesture.PEACE, GestureRecognition.recognize("Victory", 0.7f, 0.65f))
     }
 
     @Test fun deliberateHoldEmitsOnceUntilReleased() {

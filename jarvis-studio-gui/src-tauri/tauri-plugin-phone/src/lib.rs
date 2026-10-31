@@ -66,6 +66,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::start_gesture_recognition,
             commands::stop_gesture_recognition,
             commands::poll_gesture_recognition,
+            commands::take_gesture_photo,
             commands::start_wake_word,
             commands::stop_wake_word,
             commands::poll_wake_word,

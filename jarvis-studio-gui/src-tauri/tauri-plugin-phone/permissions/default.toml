@@ -28,6 +28,7 @@ permissions = [
     "allow-start-gesture-recognition",
     "allow-stop-gesture-recognition",
     "allow-poll-gesture-recognition",
+    "allow-take-gesture-photo",
     "allow-start-wake-word",
     "allow-stop-wake-word",
     "allow-poll-wake-word",

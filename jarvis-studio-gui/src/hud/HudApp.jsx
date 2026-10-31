@@ -315,7 +315,7 @@ export function JarvisHUD({
   const column = (side) =>
     (order[side] || [])
       .filter(shown)
-      .map((k) => CARDS[k])
+      .map((k) => CARDS[k] && <div key={k} data-gesture-card={k} style={{display:"contents"}}>{CARDS[k]}</div>)
       .filter(Boolean);
 
   // A task from the PC or the operator runs without a turn of its own, so the status
@@ -381,6 +381,7 @@ export function JarvisHUD({
               <button
                 key={n.id}
                 className={`home-nav-btn${openNav[n.id][0] ? " is-on" : ""}`}
+                data-gesture-safe="true"
                 onClick={openNav[n.id][1]}
                 title={n.label}
               >

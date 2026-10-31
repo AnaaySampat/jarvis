@@ -29,6 +29,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-start-gesture-recognition`
 - `allow-stop-gesture-recognition`
 - `allow-poll-gesture-recognition`
+- `allow-take-gesture-photo`
 - `allow-start-wake-word`
 - `allow-stop-wake-word`
 - `allow-poll-wake-word`
@@ -1562,6 +1563,32 @@ Enables the swipe command without any pre-configured scope.
 <td>
 
 Denies the swipe command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-take-gesture-photo`
+
+</td>
+<td>
+
+Enables the take_gesture_photo command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-take-gesture-photo`
+
+</td>
+<td>
+
+Denies the take_gesture_photo command without any pre-configured scope.
 
 </td>
 </tr>

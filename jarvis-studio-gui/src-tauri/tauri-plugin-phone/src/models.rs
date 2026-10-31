@@ -85,6 +85,25 @@ pub struct GestureStateResponse {
     pub gesture: String,
     pub detected_at: i64,
     pub summary: String,
+    pub frame: Option<GestureFrameResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GestureFrameResponse {
+    pub seq: i32,
+    pub observed_at: i64,
+    pub pose: String,
+    pub score: f32,
+    pub landmarks: Vec<[f32; 3]>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GestureStartRequest {
+    pub hold_ms: i32,
+    pub release_ms: i32,
+    pub confidence: f32,
 }
 
 /// Polled wake-word state. `seq` is a monotonic detection counter (JS reacts when it

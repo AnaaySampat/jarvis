@@ -25,9 +25,20 @@ macro_rules! phone_command {
     };
 }
 
-phone_command!(start_gesture_recognition() -> ActionResponse);
+#[command]
+pub(crate) async fn start_gesture_recognition<R: Runtime>(
+    app: AppHandle<R>, hold_ms: Option<i32>, release_ms: Option<i32>, confidence: Option<f32>,
+) -> crate::Result<ActionResponse> {
+    let score = confidence.filter(|value| value.is_finite()).unwrap_or(0.8);
+    app.phone().start_gesture_recognition(GestureStartRequest {
+        hold_ms: hold_ms.unwrap_or(600).clamp(200, 2000),
+        release_ms: release_ms.unwrap_or(400).clamp(200, 1500),
+        confidence: score.clamp(0.65, 0.98),
+    })
+}
 phone_command!(stop_gesture_recognition() -> ActionResponse);
 phone_command!(poll_gesture_recognition() -> GestureStateResponse);
+phone_command!(take_gesture_photo() -> ActionResponse);
 
 /// Optional v2 TaskSpec fields keep older callers source-compatible. Kotlin still
 /// validates and derives the authenticated source identity before persistence.

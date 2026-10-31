@@ -3,7 +3,10 @@ import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import { JarvisHUD } from "./hud/HudApp";
 import { DEFAULT_DIRECTION } from "./hud/hudConstants";
 import Settings from "./components/Settings";
-import { useGestureControls } from "./hooks/useGestureControls";
+import { useGestureModes } from "./gestures/useGestureModes";
+import { androidGestureHost } from "./gestures/androidHost";
+import { nativeGestureCamera } from "./brain/platform/gestures";
+import GestureWorkspace from "./gestures/GestureWorkspace";
 import { inTauri } from "./brain/tools/httpClient";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
@@ -140,6 +143,8 @@ export default function App() {
     stopControl,
     finishListen,
     pttStart,
+    cancelListen,
+    gesturePcAction,
     respondPermission,
     respondClarify,
     setMute,
@@ -176,12 +181,21 @@ export default function App() {
   const unifiedTasks = taskCenterTasks || agentTasks || [];
   const anyTaskActive =
     taskCenterActive ?? unifiedTasks.some((task) => ACTIVE_TASK_STATES.has(task.status));
-  const gestures = useGestureControls({
+  const gestureHost = useMemo(() => androidGestureHost({
+    listen:triggerListen, pttStart, finishListen, cancelListen, stopSpeech, runAction,
+    pcAction:gesturePcAction, sendMessage,
+    isReady:()=>status==="idle" && !anyTaskActive,
+    order:screen?.order || {left:["system","power","agenda"],right:["weather","network","terminal"]},
+    sendScreen,
+  }),[triggerListen,pttStart,finishListen,cancelListen,stopSpeech,runAction,
+    gesturePcAction,sendMessage,status,anyTaskActive,screen,sendScreen]);
+  const gestures = useGestureModes({
+    camera:nativeGestureCamera,
     enabled: IS_MOBILE && inTauri(),
-    onListen: triggerListen,
-    onStopSpeech: stopSpeech,
+    host:gestureHost,
     canListen: status === "idle" && !anyTaskActive,
     blocked: Boolean(permissionRequest || phoneApproval || clarifyRequest),
+    latestReply:[...messages].reverse().find((m)=>m.role==="jarvis")?.text || "",
   });
 
   // App owns the overlay state so JARVIS can drive them via ui_action too.
@@ -854,6 +868,7 @@ export default function App() {
 
   return (
     <>
+      <GestureWorkspace controls={gestures} />
       <JarvisHUD
         config={hudConfig}
         toolbar={toolbar}
