@@ -715,6 +715,18 @@
           "markdownDescription": "Denies the pick_folder command without any pre-configured scope."
         },
         {
+          "description": "Enables the poll_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-poll-gesture-recognition",
+          "markdownDescription": "Enables the poll_gesture_recognition command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the poll_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-poll-gesture-recognition",
+          "markdownDescription": "Denies the poll_gesture_recognition command without any pre-configured scope."
+        },
+        {
           "description": "Enables the poll_routine_tap command without any pre-configured scope.",
           "type": "string",
           "const": "allow-poll-routine-tap",
@@ -895,6 +907,18 @@
           "markdownDescription": "Denies the speak command without any pre-configured scope."
         },
         {
+          "description": "Enables the start_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-gesture-recognition",
+          "markdownDescription": "Enables the start_gesture_recognition command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-gesture-recognition",
+          "markdownDescription": "Denies the start_gesture_recognition command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_wake_word command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-wake-word",
@@ -905,6 +929,18 @@
           "type": "string",
           "const": "deny-start-wake-word",
           "markdownDescription": "Denies the start_wake_word command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-gesture-recognition",
+          "markdownDescription": "Enables the stop_gesture_recognition command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_gesture_recognition command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-gesture-recognition",
+          "markdownDescription": "Denies the stop_gesture_recognition command without any pre-configured scope."
         },
         {
           "description": "Enables the stop_speaking command without any pre-configured scope.",
@@ -1099,10 +1135,10 @@
           "markdownDescription": "Denies the wol_send command without any pre-configured scope."
         },
         {
-          "description": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`\n- `allow-tv-shell`\n- `allow-tv-capture`\n- `allow-wol-send`\n- `allow-media-now`\n- `allow-arrival-sync`\n- `allow-home-network`\n- `allow-poll-share`\n- `allow-whatsapp-config`\n- `allow-poll-whatsapp`\n- `allow-whatsapp-reply`\n- `allow-schedule-routines`\n- `allow-poll-routine-tap`\n- `allow-device-action`\n- `allow-comm-action`\n- `allow-notification-action`",
+          "description": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-gesture-recognition`\n- `allow-stop-gesture-recognition`\n- `allow-poll-gesture-recognition`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`\n- `allow-tv-shell`\n- `allow-tv-capture`\n- `allow-wol-send`\n- `allow-media-now`\n- `allow-arrival-sync`\n- `allow-home-network`\n- `allow-poll-share`\n- `allow-whatsapp-config`\n- `allow-poll-whatsapp`\n- `allow-whatsapp-reply`\n- `allow-schedule-routines`\n- `allow-poll-routine-tap`\n- `allow-device-action`\n- `allow-comm-action`\n- `allow-notification-action`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`\n- `allow-tv-shell`\n- `allow-tv-capture`\n- `allow-wol-send`\n- `allow-media-now`\n- `allow-arrival-sync`\n- `allow-home-network`\n- `allow-poll-share`\n- `allow-whatsapp-config`\n- `allow-poll-whatsapp`\n- `allow-whatsapp-reply`\n- `allow-schedule-routines`\n- `allow-poll-routine-tap`\n- `allow-device-action`\n- `allow-comm-action`\n- `allow-notification-action`"
+          "markdownDescription": "Allows the JARVIS brain to drive the phone via the AccessibilityService.\n#### This default permission set includes:\n\n- `allow-is-enabled`\n- `allow-observe`\n- `allow-tap`\n- `allow-tap-xy`\n- `allow-long-press`\n- `allow-double-tap`\n- `allow-set-text`\n- `allow-type-text`\n- `allow-scroll`\n- `allow-back`\n- `allow-home`\n- `allow-swipe`\n- `allow-open-app`\n- `allow-close-app`\n- `allow-open-url`\n- `allow-set-volume`\n- `allow-read-clipboard`\n- `allow-open-system-settings`\n- `allow-open-accessibility-settings`\n- `allow-speak`\n- `allow-stop-speaking`\n- `allow-poll-speaking`\n- `allow-start-gesture-recognition`\n- `allow-stop-gesture-recognition`\n- `allow-poll-gesture-recognition`\n- `allow-start-wake-word`\n- `allow-stop-wake-word`\n- `allow-poll-wake-word`\n- `allow-show-stop-overlay`\n- `allow-hide-stop-overlay`\n- `allow-poll-stop-overlay`\n- `allow-request-overlay-permission`\n- `allow-get-device-stats`\n- `allow-capture-screenshot`\n- `allow-pick-folder`\n- `allow-list-directory`\n- `allow-read-file`\n- `allow-clock-action`\n- `allow-calendar-action`\n- `allow-task-begin`\n- `allow-task-checkpoint`\n- `allow-task-finish`\n- `allow-task-cancel`\n- `allow-task-status`\n- `allow-operator-start`\n- `allow-operator-status`\n- `allow-config-secret-set`\n- `allow-config-secret-get`\n- `allow-config-secret-delete`\n- `allow-identity-info`\n- `allow-identity-sign-auth`\n- `allow-identity-sign-envelope`\n- `allow-identity-sign-pairing`\n- `allow-identity-verify-host-challenge`\n- `allow-identity-verify-host-envelope`\n- `allow-tv-shell`\n- `allow-tv-capture`\n- `allow-wol-send`\n- `allow-media-now`\n- `allow-arrival-sync`\n- `allow-home-network`\n- `allow-poll-share`\n- `allow-whatsapp-config`\n- `allow-poll-whatsapp`\n- `allow-whatsapp-reply`\n- `allow-schedule-routines`\n- `allow-poll-routine-tap`\n- `allow-device-action`\n- `allow-comm-action`\n- `allow-notification-action`"
         }
       ]
     }

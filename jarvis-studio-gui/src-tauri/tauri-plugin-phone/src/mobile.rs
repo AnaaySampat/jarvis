@@ -45,6 +45,9 @@ macro_rules! mobile_command {
 }
 
 impl<R: Runtime> Phone<R> {
+    mobile_command!(start_gesture_recognition() -> ActionResponse, "startGestureRecognition");
+    mobile_command!(stop_gesture_recognition() -> ActionResponse, "stopGestureRecognition");
+    mobile_command!(poll_gesture_recognition() -> GestureStateResponse, "pollGestureRecognition");
     mobile_command!(is_enabled() -> IsEnabledResponse, "isEnabled");
     mobile_command!(observe() -> ObserveResponse, "observe");
     mobile_command!(tap(payload: TapRequest) -> ActionResponse, "tap");

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-await invoke("plugin:phone|start_gesture_recognition");
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import { JarvisHUD } from "./hud/HudApp";
 import { DEFAULT_DIRECTION } from "./hud/hudConstants";
 import Settings from "./components/Settings";
+import { useGestureControls } from "./hooks/useGestureControls";
+import { inTauri } from "./brain/tools/httpClient";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
 import MobileRemotePC from "./components/MobileRemotePC";
@@ -175,6 +176,13 @@ export default function App() {
   const unifiedTasks = taskCenterTasks || agentTasks || [];
   const anyTaskActive =
     taskCenterActive ?? unifiedTasks.some((task) => ACTIVE_TASK_STATES.has(task.status));
+  const gestures = useGestureControls({
+    enabled: IS_MOBILE && inTauri(),
+    onListen: triggerListen,
+    onStopSpeech: stopSpeech,
+    canListen: status === "idle" && !anyTaskActive,
+    blocked: Boolean(permissionRequest || phoneApproval || clarifyRequest),
+  });
 
   // App owns the overlay state so JARVIS can drive them via ui_action too.
   const [chatOpen, setChatOpen] = useState(false);
@@ -993,6 +1001,7 @@ export default function App() {
       {showSettings && (
         <Settings
           initialPage={settingsPage}
+          gestureControls={gestures}
           sysInfo={sysInfo}
           onClose={() => setShowSettings(false)}
           onSave={(cfg) => sendConfig(cfg)}
@@ -1078,7 +1087,7 @@ export default function App() {
           onTriggerListen={triggerListen}
           onCommandMode={setPcCommandMode}
         />
-      )}await invoke("plugin:phone|stop_gesture_recognition");
+      )}
 
       {/* Booting: shown until the backend WebSocket connects (frozen backend start
           + first-run download). Client-side only, so it shows even if the backend

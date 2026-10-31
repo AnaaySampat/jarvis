@@ -639,6 +639,60 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun startGestureRecognition(invoke: Invoke) {
+        activity.runOnUiThread {
+            if (activity.isFinishing || activity.isDestroyed || !activity.hasWindowFocus()) {
+                invoke.resolve(result(false, "Open JARVIS to start the gesture camera."))
+                return@runOnUiThread
+            }
+            if (ContextCompat.checkSelfPermission(activity, android.Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(activity, arrayOf(android.Manifest.permission.CAMERA), 103)
+                invoke.resolve(result(false, "Grant camera permission, then tap Start camera again."))
+                return@runOnUiThread
+            }
+            if (!Settings.canDrawOverlays(activity)) {
+                activity.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${activity.packageName}")))
+                invoke.resolve(result(false, "Allow display over other apps, then tap Start camera again."))
+                return@runOnUiThread
+            }
+            if (!GestureCameraService.prepareStart()) {
+                invoke.resolve(result(true, "Gesture camera is already starting or running."))
+                return@runOnUiThread
+            }
+            try {
+                ContextCompat.startForegroundService(activity,
+                    Intent(activity, GestureCameraService::class.java).setAction(GestureCameraService.ACTION_START))
+                invoke.resolve(result(true, "Starting gesture camera..."))
+            } catch (_: Exception) {
+                GestureCameraService.failedStart()
+                invoke.resolve(result(false, GestureCameraService.state.summary))
+            }
+        }
+    }
+
+    @Command
+    fun stopGestureRecognition(invoke: Invoke) {
+        activity.stopService(Intent(activity, GestureCameraService::class.java))
+        invoke.resolve(result(true, "Camera stop requested."))
+    }
+
+    @Command
+    fun pollGestureRecognition(invoke: Invoke) {
+        val state = GestureCameraService.state
+        invoke.resolve(JSObject().apply {
+            put("foreground", !activity.isFinishing && !activity.isDestroyed && activity.hasWindowFocus())
+            put("running", state.running)
+            put("starting", state.starting)
+            put("seq", state.seq)
+            put("gesture", state.gesture)
+            put("detectedAt", state.detectedAt)
+            put("summary", state.summary)
+        })
+    }
+
+    @Command
     fun startWakeWord(invoke: Invoke) {
         if (androidx.core.content.ContextCompat.checkSelfPermission(activity, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             androidx.core.app.ActivityCompat.requestPermissions(activity, arrayOf(android.Manifest.permission.RECORD_AUDIO), 101)

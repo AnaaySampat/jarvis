@@ -25,6 +25,10 @@ macro_rules! phone_command {
     };
 }
 
+phone_command!(start_gesture_recognition() -> ActionResponse);
+phone_command!(stop_gesture_recognition() -> ActionResponse);
+phone_command!(poll_gesture_recognition() -> GestureStateResponse);
+
 /// Optional v2 TaskSpec fields keep older callers source-compatible. Kotlin still
 /// validates and derives the authenticated source identity before persistence.
 #[command]

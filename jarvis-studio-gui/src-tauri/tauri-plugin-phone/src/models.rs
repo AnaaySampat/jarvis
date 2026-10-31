@@ -75,6 +75,18 @@ pub struct IsEnabledResponse {
     pub enabled: bool,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GestureStateResponse {
+    pub foreground: bool,
+    pub running: bool,
+    pub starting: bool,
+    pub seq: i32,
+    pub gesture: String,
+    pub detected_at: i64,
+    pub summary: String,
+}
+
 /// Polled wake-word state. `seq` is a monotonic detection counter (JS reacts when it
 /// grows); `listening` reports whether the engine is currently up so JS can restart it
 /// if it died. Polling this over the reliable request/response path avoids the Tauri

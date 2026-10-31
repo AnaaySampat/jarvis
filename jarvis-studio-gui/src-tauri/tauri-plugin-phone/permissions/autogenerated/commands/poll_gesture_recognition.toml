@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-poll-gesture-recognition"
+description = "Enables the poll_gesture_recognition command without any pre-configured scope."
+commands.allow = ["poll_gesture_recognition"]
+
+[[permission]]
+identifier = "deny-poll-gesture-recognition"
+description = "Denies the poll_gesture_recognition command without any pre-configured scope."
+commands.deny = ["poll_gesture_recognition"]

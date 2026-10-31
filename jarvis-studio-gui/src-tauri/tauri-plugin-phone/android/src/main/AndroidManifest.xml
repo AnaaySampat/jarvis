@@ -11,9 +11,10 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.CAMERA" />
 
-<uses-feature
-    android:name="android.hardware.camera"
-    android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Agenda items are mirrored into the user's real calendar via CalendarContract
          (PhonePlugin.calendarAction), so they show up in Google Calendar and sync to
@@ -65,6 +66,11 @@
         tools:ignore="ProtectedPermissions" />
 
     <application>
+        <service
+            android:name="com.jarvis.phone.GestureCameraService"
+            android:exported="false"
+            android:foregroundServiceType="camera"
+            android:stopWithTask="true" />
         <!-- The JARVIS accessibility service. Enabled by the user in Settings ▸
              Accessibility (it cannot be granted programmatically). The manifest
              merger folds this into the app's final manifest. -->

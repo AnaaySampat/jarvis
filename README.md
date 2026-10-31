@@ -54,6 +54,15 @@ Pick an agent from the row in chat, use a handle such as `@research`, or say
 Agent handoffs and returned findings appear in the conversation. You can also attach
 a **photo or screenshot** and ask JARVIS about it.
 
+### Hand gestures (preview)
+
+On Android, open **Settings → Voice → Hand gestures** and tap **Start camera**.
+Hold an open palm to stop speech, a peace sign to start listening when JARVIS is
+idle, or a closed fist to stop the camera. Thumbs up gives detection feedback.
+Recognition runs on-device with a visible camera preview and Stop controls.
+Sessions end after five minutes, on screen lock, or when JARVIS is closed.
+See [gesture controls](docs/GESTURE-CONTROLS.md) for setup, limits and future uses.
+
 ### Your Windows PC, from your phone
 
 Pair by scanning a QR code, then **send whole tasks to your PC**, watch its screen

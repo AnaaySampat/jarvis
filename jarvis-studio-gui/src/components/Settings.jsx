@@ -10,6 +10,7 @@ import { modelClassFor } from "../brain/modelPolicy";
 import * as quota from "../brain/quota";
 import Icon from "./Icon";
 import StateMessage from "./StateMessage";
+import GestureControls from "./GestureControls";
 import { ActionRow, Field, Group, More, Toggle, WIDE_QUERY, Warn } from "./Sheet";
 import { useAndroidBack } from "../hooks/useAndroidBack";
 
@@ -290,6 +291,7 @@ export default function Settings({
   onRerankModels,
   onRepairSetup,
   onOpenCustomize,
+  gestureControls,
 }) {
   // Re-discover models when the panel opens so the dropdown is current (e.g. a
   // local Ollama model pulled since launch, or a key just added in another client).
@@ -875,52 +877,55 @@ export default function Settings({
   );
 
   const voicePage = (
-    <Group>
-      {IS_MOBILE ? (
-        <>
-          <Toggle
-            label="“Hey Jarvis” wake word"
-            checked={wakeWordOn}
-            onChange={setWakeWordOn}
-            hint="Listens on the phone itself. Nothing is sent until it hears the wake word."
-          />
-          <div className="sp-field">
-            <More>
-              Needs microphone permission. Speech-to-text uses Cloud Speech-to-Text on Vertex, or
-              Groq Whisper on Groq and Gemini. Replies are spoken by the phone&apos;s built-in
-              text-to-speech.
-            </More>
-          </div>
-        </>
-      ) : (
-        <Field label="Voice">
-          <select className="sp-input" value={tts} onChange={(e) => setTts(e.target.value)}>
-            {TTS_OPTS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          {tts === "piper" && (
-            <div className="sp-desc">
-              Private and unlimited. The 60 MB voice downloads the first time JARVIS speaks.
+    <>
+      <Group>
+        {IS_MOBILE ? (
+          <>
+            <Toggle
+              label="“Hey Jarvis” wake word"
+              checked={wakeWordOn}
+              onChange={setWakeWordOn}
+              hint="Listens on the phone itself. Nothing is sent until it hears the wake word."
+            />
+            <div className="sp-field">
+              <More>
+                Needs microphone permission. Speech-to-text uses Cloud Speech-to-Text on Vertex, or
+                Groq Whisper on Groq and Gemini. Replies are spoken by the phone&apos;s built-in
+                text-to-speech.
+              </More>
             </div>
-          )}
-          {tts === "elevenlabs" &&
-            (sysInfo.has_elevenlabs_key ? (
+          </>
+        ) : (
+          <Field label="Voice">
+            <select className="sp-input" value={tts} onChange={(e) => setTts(e.target.value)}>
+              {TTS_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {tts === "piper" && (
               <div className="sp-desc">
-                The most natural voice, but the free tier is about 10k characters a month.
+                Private and unlimited. The 60 MB voice downloads the first time JARVIS speaks.
               </div>
-            ) : (
-              <Warn>ElevenLabs needs a key. Add it in API keys.</Warn>
-            ))}
-        </Field>
-      )}
-      <div className="sp-field sp-row">
-        <span className="sp-label">Wake phrase</span>
-        <span className="sp-value sp-mono">{sysInfo.wakeWord || "hey_jarvis"}</span>
-      </div>
-    </Group>
+            )}
+            {tts === "elevenlabs" &&
+              (sysInfo.has_elevenlabs_key ? (
+                <div className="sp-desc">
+                  The most natural voice, but the free tier is about 10k characters a month.
+                </div>
+              ) : (
+                <Warn>ElevenLabs needs a key. Add it in API keys.</Warn>
+              ))}
+          </Field>
+        )}
+        <div className="sp-field sp-row">
+          <span className="sp-label">Wake phrase</span>
+          <span className="sp-value sp-mono">{sysInfo.wakeWord || "hey_jarvis"}</span>
+        </div>
+      </Group>
+      {IS_MOBILE && <GestureControls controls={gestureControls} />}
+    </>
   );
 
   const automationPage = (
@@ -1332,7 +1337,7 @@ export default function Settings({
         title: "Voice",
         icon: "volume",
         desc: "How JARVIS sounds, wakes up and speaks up on its own.",
-        words: "wake word speech tts hey jarvis",
+        words: "wake word speech tts hey jarvis hand gesture camera",
         value: IS_MOBILE
           ? wakeWordOn
             ? "Wake word on"

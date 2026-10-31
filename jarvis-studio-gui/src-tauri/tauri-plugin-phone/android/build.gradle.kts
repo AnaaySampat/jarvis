@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.jarvis.phone"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -26,6 +26,12 @@ android {
 }
 
 dependencies {
+    // Explicit gesture-camera sessions; versions are pinned for reproducible APKs.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+    implementation("com.google.mediapipe:tasks-vision:1.0.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

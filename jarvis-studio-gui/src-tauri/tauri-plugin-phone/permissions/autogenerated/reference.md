@@ -26,6 +26,9 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-speak`
 - `allow-stop-speaking`
 - `allow-poll-speaking`
+- `allow-start-gesture-recognition`
+- `allow-stop-gesture-recognition`
+- `allow-poll-gesture-recognition`
 - `allow-start-wake-word`
 - `allow-stop-wake-word`
 - `allow-poll-wake-word`
@@ -994,6 +997,32 @@ Denies the pick_folder command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-poll-gesture-recognition`
+
+</td>
+<td>
+
+Enables the poll_gesture_recognition command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-poll-gesture-recognition`
+
+</td>
+<td>
+
+Denies the poll_gesture_recognition command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-poll-routine-tap`
 
 </td>
@@ -1384,6 +1413,32 @@ Denies the speak command without any pre-configured scope.
 <tr>
 <td>
 
+`phone:allow-start-gesture-recognition`
+
+</td>
+<td>
+
+Enables the start_gesture_recognition command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-start-gesture-recognition`
+
+</td>
+<td>
+
+Denies the start_gesture_recognition command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `phone:allow-start-wake-word`
 
 </td>
@@ -1403,6 +1458,32 @@ Enables the start_wake_word command without any pre-configured scope.
 <td>
 
 Denies the start_wake_word command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-stop-gesture-recognition`
+
+</td>
+<td>
+
+Enables the stop_gesture_recognition command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-stop-gesture-recognition`
+
+</td>
+<td>
+
+Denies the stop_gesture_recognition command without any pre-configured scope.
 
 </td>
 </tr>
