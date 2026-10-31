@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+await invoke("plugin:phone|start_gesture_recognition");
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import { JarvisHUD } from "./hud/HudApp";
 import { DEFAULT_DIRECTION } from "./hud/hudConstants";
@@ -1077,7 +1078,7 @@ export default function App() {
           onTriggerListen={triggerListen}
           onCommandMode={setPcCommandMode}
         />
-      )}
+      )}await invoke("plugin:phone|stop_gesture_recognition");
 
       {/* Booting: shown until the backend WebSocket connects (frozen backend start
           + first-run download). Client-side only, so it shows even if the backend
