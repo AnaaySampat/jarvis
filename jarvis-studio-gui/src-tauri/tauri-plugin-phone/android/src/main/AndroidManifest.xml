@@ -9,6 +9,11 @@
          (auto-granted), but SET_ALARM/SET_TIMER with EXTRA_SKIP_UI need it declared
          or the Clock app refuses the request. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+<uses-feature
+    android:name="android.hardware.camera"
+    android:required="false" />
 
     <!-- Agenda items are mirrored into the user's real calendar via CalendarContract
          (PhonePlugin.calendarAction), so they show up in Google Calendar and sync to
