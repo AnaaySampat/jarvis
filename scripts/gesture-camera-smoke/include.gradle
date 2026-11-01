@@ -1,0 +1,16 @@
+// Opt-in release test host; production Gradle settings remain unchanged.
+settingsEvaluated { settings ->
+    if (new File(settings.settingsDir, 'tauri.settings.gradle').exists()) {
+        settings.include ':gesture-camera-smoke'
+        settings.project(':gesture-camera-smoke').projectDir =
+            new File(settings.settingsDir, '../../../../scripts/gesture-camera-smoke')
+    }
+}
+
+// A controlled failing comparison, used only by this opt-in test host.
+gradle.projectsEvaluated {
+    def phone = gradle.rootProject.findProject(':tauri-plugin-phone')
+    if (phone != null && gradle.rootProject.findProperty('gestureSmokeBaseline') == 'true') {
+        phone.android.defaultConfig.consumerProguardFiles.clear()
+    }
+}

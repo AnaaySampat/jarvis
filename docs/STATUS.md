@@ -1,5 +1,14 @@
 # Status
 
+**2026-11-01 — Hand-gesture camera release fix:** reproduced startup failure in an
+optimized Android 16 test app with CAMERA and overlay access granted. MediaPipe
+initialization threw `RuntimeException: Field platform_ ... not found` because R8
+removed protobuf-lite fields. The phone plugin now exports consumer rules for the
+protobuf messages and JNI callbacks, and logs the actual startup failure. The
+[release regression](../scripts/gesture-camera-smoke/README.md) checks frame delivery,
+stop and restart with the bundled model. Post-fix release/device verification is
+pending; the pre-fix failure is confirmed. No physical phone is connected.
+
 Latest follow-up: **2026-10-24 evening**, installed and live-tested on SM-E156B;
 see [TV, model alerts and notification results](TV-TESTING-2026-10-24.md).
 Plain notification reads now use the native reader directly. The previously failing

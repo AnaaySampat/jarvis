@@ -20,6 +20,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.util.Size
 import android.view.Gravity
 import android.view.WindowManager
@@ -157,11 +158,13 @@ class GestureCameraService : LifecycleService() {
                             .setMinTrackingConfidence(0.65f)
                             .build())
                     main.post { if (!closing) bindCamera() }
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    Log.e("GestureCamera", "Could not load gesture model", error)
                     main.post { finish("Gesture model could not load. Restart JARVIS and try again.") }
                 }
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e("GestureCamera", "Could not start camera service or preview", error)
             finish("Camera could not start. Check camera and display-over-apps permissions.")
         }
         return START_NOT_STICKY
@@ -249,7 +252,8 @@ class GestureCameraService : LifecycleService() {
                     cameraPreview, cameraAnalysis)
                 // Running means a real frame reached the recognizer, not merely that
                 // Android accepted startForegroundService or bound a camera object.
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Log.e("GestureCamera", "Could not bind front camera", error)
                 finish("Front camera unavailable. Close other camera apps and try again.")
             }
         }, ContextCompat.getMainExecutor(this))
@@ -307,7 +311,8 @@ class GestureCameraService : LifecycleService() {
                     if (event == GestureRecognition.Gesture.FIST) finish("Camera stopped by closed fist.")
                 }
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            if (failures == 0) Log.e("GestureCamera", "Could not recognize camera frame", error)
             failures++
             if (failures >= 5) main.post { finish("Gesture recognition failed. Restart the camera to try again.") }
         } finally {
