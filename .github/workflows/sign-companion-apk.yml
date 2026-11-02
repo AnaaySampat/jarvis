@@ -61,7 +61,8 @@ jobs:
           "$build_tools/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KEY_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" "$candidate"
           "$build_tools/apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/jarvis-certificate.txt"
-          grep -Fq "Signer #1 certificate SHA-256 digest: $expected" "$RUNNER_TEMP/jarvis-certificate.txt"
+          signed_certificate=$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/jarvis-certificate.txt" | sort -u)
+          test "$signed_certificate" = "$expected"
           (cd signed && sha256sum JARVIS-v2.5.1-arm64.apk > SHA256SUMS.txt)
           cat signed/SHA256SUMS.txt
 
