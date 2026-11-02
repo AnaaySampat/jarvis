@@ -384,7 +384,7 @@ export function reduceRemoteTaskEvent(prev, event) {
     plan: data.plan || payload.plan || nested.plan || existing?.plan,
     retryInfo: textOf(payload.retry, nested.retry, data.retry, existing?.retryInfo),
     recoveryInfo: textOf(payload.recovery, nested.recovery, data.recovery, existing?.recoveryInfo),
-    waitingReason: isWaiting ? reason || "Waiting for attention on the PC." : "",
+    waitingReason: isWaiting ? reason || "Waiting for your answer on this phone." : "",
     approval,
     items: appendReceipt(existing?.items, line, receiptKey, state !== "failed"),
     lastSeq: seq > 0 ? seq : (existing?.lastSeq ?? -1),

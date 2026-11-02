@@ -1,0 +1,53 @@
+name: Verify companion APK package
+
+on:
+  push:
+    branches: ["verification/companion-20261102"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvis-release-apk
+          path: signed
+          run-id: 41485195116
+          github-token: ${{ github.token }}
+      - name: Check package security and native entry points
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=signed/JARVIS-v2.5.1-arm64.apk
+          (cd signed && sha256sum -c SHA256SUMS.txt)
+          analyzer=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/apkanalyzer' | sort -V | tail -n 1)
+          test -x "$analyzer"
+          test "$("$analyzer" manifest application-id "$apk")" = com.jarvis.app
+          test "$("$analyzer" manifest version-name "$apk")" = 2.5.1
+          test "$("$analyzer" manifest debuggable "$apk")" = false
+          "$analyzer" manifest print "$apk" > "$RUNNER_TEMP/jarvis-manifest.xml"
+          python - "$RUNNER_TEMP/jarvis-manifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          application = ET.parse(sys.argv[1]).getroot().find('application')
+          assert application is not None
+          assert application.get('{http://schemas.android.com/apk/res/android}allowBackup') == 'false'
+          print('Release package is not debuggable and Android backups are disabled.')
+          PY
+          # The project documents a past R8 startup crash when this JNI-only
+          # method was removed. Inspect the compiled APK, not generated sources.
+          "$analyzer" dex code --class com.jarvis.app.TauriActivity "$apk" > "$RUNNER_TEMP/jarvis-tauri.smali"
+          grep -q 'getPluginManager(' "$RUNNER_TEMP/jarvis-tauri.smali"
+          "$analyzer" dex code --class com.jarvis.phone.PhonePlugin "$apk" > "$RUNNER_TEMP/jarvis-phone.smali"
+          test -s "$RUNNER_TEMP/jarvis-phone.smali"
+          echo 'Tauri JNI plugin-manager entry point and phone plugin are present.'

@@ -25,7 +25,7 @@ import {
   wolSend,
 } from "../brain/platform";
 import { createStore, makeKV, readJson, writeJson } from "../brain/memory/store";
-import { applyRemote, localChanges } from "../brain/memory/sync";
+import { applyRemote, localChanges, MemorySyncExchange } from "../brain/memory/sync";
 import { digestDue, runDigest } from "../brain/memory/digest";
 import { configReady } from "../brain/config";
 import { WA_ASLEEP_REPLY, whatsappDecision } from "../brain/whatsapp";
@@ -44,7 +44,8 @@ import {
   loadScreenConfig,
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
-import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
+import { RemotePC, sanitizeWakeTargets, screenshotArtifacts } from "../brain/remote/pc";
+import { TaskPasskeyPrompt } from "../brain/remote/taskPasskeyPrompt";
 import { GestureRequests } from "../gestures/request";
 import { nativeTvShell, normMac, parseLink, tvAddresses } from "../brain/remote/tv";
 import { RemoteScreen } from "../brain/remote/webrtcScreen";
@@ -322,6 +323,11 @@ export function useBrain() {
   const [agentTasks, setAgentTasks] = useState(loadRecoveredTaskShells);
   const [permissionRequest, setPermissionRequest] = useState(null);
   const [clarifyRequest, setClarifyRequest] = useState(null);
+  const [pcPasskeyRequest, setPcPasskeyRequest] = useState(null);
+  const pcPasskeyGateRef = useRef(null);
+  if (pcPasskeyGateRef.current === null) pcPasskeyGateRef.current = new TaskPasskeyPrompt(setPcPasskeyRequest);
+  const respondPcPasskey = useCallback((value) => pcPasskeyGateRef.current.respond(value), []);
+  useEffect(() => () => pcPasskeyGateRef.current.dispose(), []);
   // JARVIS driving its own HUD (control_interface tool). App.jsx watches uiCommand.nonce.
   const [uiCommand, setUiCommand] = useState(null);
   const emitUiCommand = useCallback((cmd) => {
@@ -850,6 +856,7 @@ export function useBrain() {
       onStateChange: (s) => {
         setPcState(s);
         if (s !== "online") {
+          memorySyncExchangeRef.current.reset();
           gestureRequestsRef.current.close();
           clearControlLease();
           if (wantScreenRef.current && s === "offline") {
@@ -857,6 +864,7 @@ export function useBrain() {
             setScreenDetail("Lost the link to your PC — reconnecting…");
           }
         } else {
+          pcPinRef.current = "";
           // The original React promise does not survive Activity/WebView death,
           // but the accepted host task does. Restore each opaque subscription and
           // request its current status; replay starts strictly after our cursor.
@@ -880,6 +888,19 @@ export function useBrain() {
       },
       onEvent: (ev) => {
         const e = ev.event;
+        if (e === "task.status" && ev.data?.state === "succeeded" &&
+          ev.data.proof?.passed === true && Array.isArray(ev.data.proof.evidence_ids)) {
+          const images = screenshotArtifacts(ev.data.artifacts).filter(
+            (image) => ev.data.proof.evidence_ids.includes(image.id),
+          );
+          if (images.length) setMessages((prev) => [
+            ...prev,
+            ...images.filter((image) => !prev.some((message) => message.id === image.id)).map(
+              (image) => ({ role: "jarvis", id: image.id, image: image.image,
+                text: "Screenshot from your PC.", finalized: true, actions: [] }),
+            ),
+          ]);
+        }
         if (e === "gesture_result") { gestureRequestsRef.current.receive(ev.data); return; }
         if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
         if (e === "phone.command") void pcCommandRef.current?.(ev.data);
@@ -1101,22 +1122,33 @@ export function useBrain() {
   }, []);
 
   // Single chokepoint for "send a task to the PC": both the brain's pc_task tool and
-  // the manual PC-command mode go through here, so the fingerprint gate can't be
-  // sidestepped by either path.
+  // the manual PC-command mode go through here for fresh passkey entry and the
+  // fingerprint check. The laptop independently enforces the passkey.
   const runPcTask = useCallback(
     async (goal, kind = "browser") => {
-      if (!pcRef.current) return { ok: false, summary: "No PC is paired yet, sir." };
-      if (!(await requireBiometric("Confirm it's you to run a task on your PC"))) {
-        // Said plainly where the prompt was: a model paraphrased the old wording ("I need
-        // your fingerprint to run that on your PC") as "approve the prompt on your PC".
-        return {
-          ok: false,
-          summary:
-            "Nothing was sent to the PC: the fingerprint check on this phone was cancelled. " +
-            "Ask again and touch the phone's sensor when it asks, sir.",
-        };
+      const pc = pcRef.current;
+      if (!pc) return { ok: false, summary: "No PC is paired yet, sir." };
+      const entry = { passkey: await pcPasskeyGateRef.current.request(goal) };
+      if (entry.passkey === null) return { ok: false, error: "cancelled", summary: "The PC task was cancelled. Nothing was sent." };
+      try {
+        if (!(await requireBiometric("Confirm it's you to run a task on your PC"))) {
+          // Keep the location explicit: approval happens on this phone.
+          return {
+            ok: false,
+            summary:
+              "Nothing was sent to the PC: the fingerprint check on this phone was cancelled. " +
+              "Ask again and touch the phone's sensor when it asks, sir.",
+          };
+        }
+        if (pcRef.current !== pc || phoneTaskStopRef.current) {
+          return { ok: false, error: "cancelled", summary: "The PC task was cancelled. Nothing was sent." };
+        }
+        const result = pc.runTask(goal, kind, entry.passkey);
+        entry.passkey = null;
+        return await result;
+      } finally {
+        entry.passkey = null;
       }
-      return pcRef.current.runTask(goal, kind);
     },
     [requireBiometric],
   );
@@ -1254,6 +1286,7 @@ export function useBrain() {
   // in main.py). Clears controlArmed locally right away so the UI updates instantly
   // instead of waiting on the control_state round-trip.
   const stopRemoteControl = useCallback(() => {
+    pcPasskeyGateRef.current.respond(null);
     const lease = nextControlLeaseEnvelope();
     // Cancel the in-flight PC task too — stop_control alone only disarms direct
     // input; a running browser/autopilot task (incl. live-view command-mode tasks,
@@ -1317,6 +1350,7 @@ export function useBrain() {
   );
 
   const stopAllTasks = useCallback(() => {
+    pcPasskeyGateRef.current.respond(null);
     requestPhoneStop();
     const active = agentTasksRef.current.filter((task) => !TERMINAL_TASK_STATES.has(task.status));
     const phoneTasks = active.filter(
@@ -1531,7 +1565,7 @@ export function useBrain() {
   // routine run sends its steps but reads "Run bedtime". It's saved with the turn.
   // `photo` is a JPEG data URL the user attached (see sendUpload).
   const sendMessage = useCallback(
-    async (text, display, photo) => {
+    async (text, display, photo, targetPc = false) => {
       const t = (text || "").trim();
       if (!t || busyRef.current) return;
       // STOP belongs to the previous request. Clear it only once a new turn is
@@ -1540,9 +1574,9 @@ export function useBrain() {
       userInteractedRef.current = true; // gates the one-time overlay-permission prompt
       setMessages((prev) => [
         ...prev,
-        { role: "user", text: display || t, ...(photo ? { image: photo } : {}), id: uid() },
+        { role: "user", text: display || (targetPc ? `💻 On your PC: ${t}` : t), ...(photo ? { image: photo } : {}), id: uid() },
       ]);
-      if (pcCommandModeRef.current) {
+      if (targetPc || pcCommandModeRef.current) {
         busyRef.current = true;
         setStatus("thinking");
         let spoken = "";
@@ -2053,27 +2087,37 @@ export function useBrain() {
   // ── One memory with the PC (brain/memory/sync.ts, desktop memory_sync.py) ─────
   // Sent when the link comes up, every minute while it's up, and just after a memory
   // or routine change; the PC answers with its own changes (memory.synced, below).
-  const memorySyncSentRef = useRef(0);
+  const memorySyncExchangeRef = useRef(new MemorySyncExchange());
   const syncMemory = useCallback(async () => {
     const pc = pcRef.current;
     const hostId = pcConfig?.hostId;
     if (!pc?.isOnline || !hostId) return;
     const cur = readJson(kv, MEMORY_SYNC_KEY, {});
     const same = cur.host === hostId;
-    const startedAt = Date.now();
-    const changes = await localChanges(memoryRef.current, same ? cur.sent || 0 : 0);
-    memorySyncSentRef.current = startedAt;
-    pc.signal("memory.sync", { since: same ? cur.pc || 0 : 0, ...changes });
+    const exchange = memorySyncExchangeRef.current;
+    const request = exchange.begin(pc, hostId);
+    if (!request) return;
+    try {
+      const changes = await localChanges(memoryRef.current, same ? cur.sent || 0 : 0);
+      if (pcRef.current !== pc || !await pc.signalConfirmed("memory.sync", {
+        request_id: request.id, since: same ? cur.pc || 0 : 0, ...changes,
+      })) exchange.discard(request);
+    } catch {
+      exchange.discard(request); // retry next tick without advancing either cursor
+    }
   }, [pcConfig?.hostId]);
   const memorySynced = useCallback(
     async (data) => {
       const hostId = pcConfig?.hostId;
-      if (!hostId || !data || typeof data.now !== "number") return;
+      const pc = pcRef.current;
+      if (!pc || !hostId || !data) return;
+      const cursor = memorySyncExchangeRef.current.acknowledge(pc, hostId, data);
+      if (!cursor) return;
       const changed = await applyRemote(data, memoryRef.current, stored.vertexSaJson);
+      if (pcRef.current !== pc) return;
       writeJson(kv, MEMORY_SYNC_KEY, {
         host: hostId,
-        sent: memorySyncSentRef.current,
-        pc: data.now,
+        ...cursor,
       });
       if (changed) {
         await listMemory();
@@ -2610,6 +2654,7 @@ export function useBrain() {
     return true;
   }, []);
   const unpairPC = useCallback(() => {
+    pcPasskeyGateRef.current.respond(null);
     void stopScreen();
     pcPinRef.current = "";
     savePcConfig(null);
@@ -2673,6 +2718,8 @@ export function useBrain() {
     schedule,
     uiCommand,
     permissionRequest,
+    pcPasskeyRequest,
+    respondPcPasskey,
     clarifyRequest,
     muted,
     commands,

@@ -5,7 +5,7 @@ const schedule = vi.hoisted(() => vi.fn(async (_list: unknown[]): Promise<unknow
 const arrivals = vi.hoisted(() => vi.fn(async (_names: string[]): Promise<unknown> => null));
 vi.mock("../platform", () => ({ scheduleRoutineAlarms: schedule, syncArrivals: arrivals }));
 
-import { applyRemote, localChanges } from "./sync";
+import { applyRemote, localChanges, MemorySyncExchange } from "./sync";
 import { createStore, factTombstones } from "./store";
 import {
   addRoutine,
@@ -22,6 +22,54 @@ const memory = createStore();
 beforeEach(async () => {
   await memory.forget("everything");
   for (const r of listRoutines()) removeRoutine(r.name);
+});
+
+describe("memory exchange cursors", () => {
+  it("serializes exchanges and advances only the cursor actually acknowledged", () => {
+    const exchange = new MemorySyncExchange();
+    const connection = {};
+    const first = exchange.begin(connection, "host", 1000)!;
+    expect(exchange.begin(connection, "host", 2000)).toBeNull();
+    expect(exchange.acknowledge(connection, "host", { request_id: first.id, now: 3000 }))
+      .toEqual({ sent: 1000, pc: 3000 });
+    expect(exchange.begin(connection, "host", 4000)).not.toBeNull();
+    expect(exchange.acknowledge(connection, "host", { request_id: first.id, now: 3000 })).toBeNull();
+  });
+
+  it("ignores replies to expired requests and to another connection or host", () => {
+    const exchange = new MemorySyncExchange();
+    const connection = {};
+    const first = exchange.begin(connection, "host", 1000)!;
+    const second = exchange.begin(connection, "host", 32_000)!;
+    expect(exchange.acknowledge(connection, "host", { request_id: first.id, now: 3000 })).toBeNull();
+    expect(exchange.acknowledge({}, "host", { request_id: second.id, now: 33_000 })).toBeNull();
+    expect(exchange.acknowledge(connection, "other", { request_id: second.id, now: 33_000 })).toBeNull();
+    expect(exchange.acknowledge(connection, "host", { request_id: second.id, now: NaN })).toBeNull();
+    expect(exchange.acknowledge(connection, "host", { request_id: second.id, now: 33_000 }))
+      .toEqual({ sent: 32_000, pc: 33_000 });
+  });
+
+  it("retries failed writes and reconnects without acknowledging unsent changes", () => {
+    const exchange = new MemorySyncExchange();
+    const connection = {};
+    const first = exchange.begin(connection, "host", 1000)!;
+    exchange.discard(first);
+    const second = exchange.begin(connection, "host", 1001)!;
+    exchange.discard(first); // stale completion cannot clear the current request
+    expect(exchange.begin(connection, "host", 1002)).toBeNull();
+    exchange.reset(); // same RemotePC object, replacement authenticated socket
+    const third = exchange.begin(connection, "host", 1003)!;
+    expect(exchange.acknowledge(connection, "host", { request_id: second.id, now: 2000 })).toBeNull();
+    expect(exchange.acknowledge(connection, "host", { request_id: third.id, now: 2000 }))
+      .toEqual({ sent: 1003, pc: 2000 });
+  });
+
+  it("resends local changes safely when an older host does not echo request ids", () => {
+    const exchange = new MemorySyncExchange();
+    const connection = {};
+    exchange.begin(connection, "host", 1000);
+    expect(exchange.acknowledge(connection, "host", { now: 2000 })).toEqual({ sent: 0, pc: 2000 });
+  });
 });
 
 describe("one memory with the PC — facts", () => {
