@@ -18,8 +18,7 @@ const QrScanner = lazy(() => import("./QrScanner"));
  * tailnet peer who only photographed the code can't complete the pairing.
  *
  * The QR advertises the PC's Tailscale address; brain/remote/pc.ts connects over it and
- * (if an altHost LAN address was included) silently upgrades to the faster direct LAN
- * link when it detects they're on the same Wi-Fi — nothing for the user to switch by hand.
+ * uses it from any network. Direct LAN fallback requires a TLS-protected link.
  *
  * Built from the shared Sheet pieces, so it reads like Settings and the dock's menus.
  */
@@ -39,6 +38,8 @@ export default function MobileRemotePC({
   onPair,
   onUnpair,
   onViewScreen,
+  onSendTask,
+  taskBusy = false,
   onClose,
   tvConfig,
   onTvPair,
@@ -58,6 +59,7 @@ export default function MobileRemotePC({
   };
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
+  const [task, setTask] = useState("");
   // After a valid QR scan we hold the parsed pairing config here and ask for the
   // 6-digit PIN shown on the PC (which is deliberately NOT in the QR) before pairing.
   const [pendingPair, setPendingPair] = useState(null);
@@ -209,12 +211,54 @@ export default function MobileRemotePC({
               title="View and control the screen"
               desc={
                 online
-                  ? "Live screen, driven by touch. You arm control on the PC first."
+                  ? "Live screen, with control approved on this phone."
                   : "Available once the PC is online."
               }
               disabled={!online}
               onClick={onViewScreen}
             />
+          )}
+          {paired && onSendTask && (
+            <ActionRow
+              icon="camera"
+              title="Get a screenshot"
+              desc="Approve the capture on this phone. The image appears in chat."
+              disabled={taskBusy || pcState === "unauthorized"}
+              onClick={() => onSendTask("take a screenshot")}
+            />
+          )}
+          {paired && onSendTask && (
+            <Field
+              label="Send a task to your PC"
+              hint={
+                pcState === "unauthorized"
+                  ? "Scan a fresh pairing code to reconnect this phone."
+                  : online
+                    ? "Confirm on this phone when asked. Progress and the result appear in chat."
+                    : "JARVIS will try to reconnect before sending. Keep the PC and Tailscale on."
+              }
+            >
+              <form onSubmit={(event) => {
+                event.preventDefault();
+                if (task.trim() && !taskBusy && pcState !== "unauthorized") onSendTask(task.trim());
+              }}>
+                <textarea
+                  className="sp-input"
+                  rows={3}
+                  value={task}
+                  onChange={(event) => setTask(event.target.value)}
+                  placeholder="Open Notepad and write a shopping list"
+                  aria-label="Task for your Windows PC"
+                />
+                <button
+                  type="submit"
+                  className="sp-btn"
+                  disabled={!task.trim() || taskBusy || pcState === "unauthorized"}
+                >
+                  {taskBusy ? "Finish the current request first" : "Send to PC"}
+                </button>
+              </form>
+            </Field>
           )}
           <ActionRow
             icon="camera"
@@ -234,7 +278,7 @@ export default function MobileRemotePC({
             <More label="How pairing works">
               The code carries the PC&apos;s address and an expiring identity challenge, never a
               password. When Tailscale is set up it includes that address too, so JARVIS reaches the
-              PC from any network and switches to the faster direct link on the same Wi-Fi.
+              PC from any network. Keep Tailscale connected on both devices.
               {paired && pcConfig.hostFingerprint && (
                 <> This PC&apos;s identity: {pcConfig.hostFingerprint.slice(0, 24)}…</>
               )}

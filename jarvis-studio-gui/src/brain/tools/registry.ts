@@ -532,7 +532,8 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
             "pc_task",
             "Run a WHOLE task on the user's paired Windows PC (desktop apps or the " +
               "web) via the remote JARVIS. Use for anything that belongs on the " +
-              "computer rather than the phone. Give the complete task.",
+              "computer rather than the phone. Give the complete task. For a " +
+              "screenshot of the PC/laptop use pc_screenshot.",
             {
               goal: str("The whole task to run on the PC."),
               kind: str(
@@ -544,6 +545,12 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
               ),
             },
             ["goal"],
+          ),
+          fn(
+            "pc_screenshot",
+            "Capture a screenshot of the paired Windows PC/laptop and show it on this phone. " +
+              "The screen-capture approval is answered on this phone. Use this instead of " +
+              "take_screenshot when the user means their PC/laptop screen.",
           ),
           fn(
             "wake_pc",
@@ -712,6 +719,7 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
     goal: a.goal ?? "",
     kind: a.kind === "computer" ? "computer" : "browser",
   }),
+  pc_screenshot: () => ({ type: "pc_task", goal: "take a screenshot", kind: "computer" }),
   wake_pc: () => ({ type: "wake_pc" }),
   tv_control: (a) => ({
     type: "tv_control",

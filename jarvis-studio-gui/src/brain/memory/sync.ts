@@ -25,6 +25,47 @@ export interface MemoryChanges {
 
 const MAX = 1000;
 
+interface SyncRequest {
+  connection: object;
+  host: string;
+  id: string;
+  startedAt: number;
+}
+
+/** One acknowledged cursor per exchange. A late reply must not acknowledge
+ * facts collected by a later request (or by a replacement connection). */
+export class MemorySyncExchange {
+  private pending: SyncRequest | null = null;
+  private sequence = 0;
+
+  begin(connection: object, host: string, now = Date.now()): SyncRequest | null {
+    if (this.pending?.connection === connection && this.pending.host === host &&
+      now - this.pending.startedAt < 30_000) return null;
+    this.pending = { connection, host, id: `memory-${now}-${++this.sequence}`, startedAt: now };
+    return this.pending;
+  }
+
+  discard(request: SyncRequest): void {
+    if (this.pending === request) this.pending = null;
+  }
+
+  reset(): void {
+    this.pending = null;
+  }
+
+  acknowledge(connection: object, host: string, reply: { request_id?: unknown; now?: unknown }):
+    { sent: number; pc: number } | null {
+    const pending = this.pending;
+    if (!pending || pending.connection !== connection || pending.host !== host ||
+      typeof reply.now !== "number" || !Number.isSafeInteger(reply.now) || reply.now <= 0 ||
+      (reply.request_id !== undefined && reply.request_id !== pending.id)) return null;
+    this.pending = null;
+    // Older hosts don't echo ids. Resend local facts on their next exchange so
+    // an uncorrelated late reply cannot skip unsent changes; merges are idempotent.
+    return { sent: reply.request_id === pending.id ? pending.startedAt : 0, pc: reply.now };
+  }
+}
+
 /** Facts and routines added, changed or forgotten here since `since` (ms, inclusive). */
 export async function localChanges(memory: MemoryStore, since: number): Promise<MemoryChanges> {
   const facts: SyncedFact[] = (await memory.listFacts())

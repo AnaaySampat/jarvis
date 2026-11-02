@@ -37,6 +37,15 @@ describe("agent handover evaluations", () => {
     }
   });
 
+  it("keeps the returned PC screenshot pixels out of model tool results", () => {
+    const output = modelToolResult({ ok: true, summary: "Screenshot shown on the phone", data: {
+      proof: { passed: true, evidence_ids: ["shot-1"] },
+      artifacts: [{ id: "shot-1", kind: "image", data_url: "data:image/png;base64,cHJpdmF0ZQ==" }],
+    } }, "get a PC screenshot", "pc_task");
+    expect(output.ok).toBe(true);
+    expect(JSON.stringify(output)).not.toContain("cHJpdmF0ZQ==");
+  });
+
   it("accepts a native completion receipt and preserves findings", () => {
     const result = agentResult(
       {

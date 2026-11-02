@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   RemotePC,
   sanitizeWakeTargets,
+  screenshotArtifacts,
   type DeviceIdentityBridge,
   type RemotePCOptions,
 } from "./pc";
@@ -20,7 +21,7 @@ type WireMessage = {
 // timers instead of real network I/O.
 class FakeWS {
   static instances: FakeWS[] = [];
-  static outcome: (url: string) => "open" | "refuse" = () => "open";
+  static outcome: (url: string) => "open" | "refuse" | "hang" = () => "open";
   static autoAuthenticate = false;
   static hostCounter = 1;
   /** Extra auth.ready fields the fake PC sends (its Wake-on-LAN adapters). */
@@ -39,6 +40,7 @@ class FakeWS {
     this.protocols = typeof protocols === "string" ? [protocols] : (protocols ?? []);
     FakeWS.instances.push(this);
     const outcome = FakeWS.outcome(url);
+    if (outcome === "hang") return;
     setTimeout(() => {
       if (outcome === "open") {
         this.readyState = 1;
@@ -217,6 +219,15 @@ describe("RemotePC — durable v2 transport", () => {
     vi.useRealTimers();
   });
 
+  it("accepts only embedded raster screenshots without external image requests", () => {
+    const image = { id: "shot-1", kind: "image", data_url: "data:image/png;base64,c3ludGhldGlj" };
+    expect(screenshotArtifacts([image])).toEqual([{ id: "shot-1", image: image.data_url }]);
+    for (const data_url of ["https://example.test/track.png", "data:image/svg+xml;base64,PHN2Zz4="]) {
+      expect(screenshotArtifacts([{ ...image, data_url }])).toEqual([]);
+    }
+    expect(screenshotArtifacts(null)).toEqual([]);
+  });
+
   it("dials Tailscale first and silently upgrades to reachable LAN", async () => {
     const pc = new RemotePC({
       host: "1.2.3.4",
@@ -262,6 +273,7 @@ describe("RemotePC — durable v2 transport", () => {
     const pc = new RemotePC({
       host: "1.2.3.4",
       altHost: "100.100.100.1",
+      secure: true,
       ...autoAuthenticatedIdentity(),
       reconnectMs: 100,
       WebSocketImpl: FakeWS as unknown as NonNullable<RemotePCOptions["WebSocketImpl"]>,
@@ -274,6 +286,180 @@ describe("RemotePC — durable v2 transport", () => {
     await waitForOnline(pc);
     expect(pc.state).toBe("online");
     expect(pc.activeHost).toBe("1.2.3.4");
+  });
+
+  it("keeps plaintext LAN addresses out of a Tailscale reconnect cycle", async () => {
+    FakeWS.outcome = () => "refuse";
+    const pc = new RemotePC({
+      host: "192.168.1.20", altHost: "100.100.100.1", reconnectMs: 10,
+      WebSocketImpl: FakeWS,
+    });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(FakeWS.instances.length).toBeGreaterThan(1);
+    expect(FakeWS.instances.every((socket) => socket.url.includes("100.100.100.1"))).toBe(true);
+    pc.close();
+  });
+
+  it("formats Tailscale IPv6 hosts as WebSocket authorities", () => {
+    const pc = new RemotePC({ host: "fd7a:115c:a1e0::1234", WebSocketImpl: FakeWS });
+    expect(pc.url()).toBe("ws://[fd7a:115c:a1e0::1234]:8765/");
+    pc.close();
+  });
+
+  it("bounds a blackholed dial and tries the next address without waiting for onclose", async () => {
+    FakeWS.outcome = (url) => url.includes("100.100.100.1") ? "hang" : "open";
+    const pc = new RemotePC({
+      host: "192.168.1.20",
+      altHost: "100.100.100.1",
+      secure: true,
+      ...autoAuthenticatedIdentity(),
+      socketOpenTimeoutMs: 50,
+      reconnectMs: 10,
+      WebSocketImpl: FakeWS,
+    });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(100);
+    await waitForOnline(pc);
+    expect(FakeWS.instances[0].readyState).toBe(3);
+    expect(pc.activeHost).toBe("192.168.1.20");
+    pc.close();
+  });
+
+  it.each(["verifyHostChallenge", "signAuth"] as const)(
+    "ignores a delayed %s callback and queued events from a replaced connection",
+    async (method) => {
+      const identity = fakeIdentity();
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => { release = resolve; });
+      const original = identity[method];
+      if (method === "verifyHostChallenge") {
+        vi.mocked(identity.verifyHostChallenge).mockImplementationOnce(async (input) => {
+          await blocked;
+          return (original as DeviceIdentityBridge["verifyHostChallenge"])(input);
+        });
+      } else {
+        vi.mocked(identity.signAuth).mockImplementationOnce(async (input) => {
+          await blocked;
+          return (original as DeviceIdentityBridge["signAuth"])(input);
+        });
+      }
+      const pc = new RemotePC({
+        host: "100.100.100.1",
+        hostId: "host-pinned",
+        hostFingerprint: "sha256:host",
+        hostPublicKey: "host-public",
+        identityBridge: identity,
+        reconnectMs: 10,
+        WebSocketImpl: FakeWS,
+      });
+      pc.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      const old = FakeWS.instances[0];
+      old.receiveWire(hostChallenge("old-nonce"));
+      old.receiveWire(hostWire("auth.ready", { device_id: "stale-device" }, 99));
+      await vi.advanceTimersByTimeAsync(0);
+      old.drop();
+      await vi.advanceTimersByTimeAsync(20);
+      const fresh = FakeWS.instances.at(-1)!;
+      expect(fresh).not.toBe(old);
+      fresh.receiveWire(hostChallenge("fresh-nonce"));
+      const ready = hostWire("auth.ready", {
+        device_id: "phone-0123456789abcdef0123456789abcdef", scopes: ["tasks"],
+      }, 1);
+      ready.auth!.connection_nonce = "fresh-nonce";
+      fresh.receiveWire(ready);
+      await waitForOnline(pc);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pc.isOnline).toBe(true);
+      expect(await pc.signalConfirmed("memory.sync", { since: 0 })).toBe(true);
+      expect(fresh.sent.at(-1)?.auth?.connection_nonce).toBe("fresh-nonce");
+      pc.close();
+    },
+  );
+
+  it("does not deliver an old verified event or overwrite the replacement's counter", async () => {
+    const events: unknown[] = [];
+    const options = autoAuthenticatedIdentity();
+    const identity = options.identityBridge!;
+    const pc = new RemotePC({
+      host: "100.100.100.1", ...options, reconnectMs: 10,
+      onEvent: (event) => events.push(event.data), WebSocketImpl: FakeWS,
+    });
+    pc.connect();
+    await waitForOnline(pc);
+    let release!: () => void;
+    vi.mocked(identity.verifyHostEnvelope).mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ ok: true, verified: true });
+    }));
+    const old = FakeWS.instances[0];
+    old.receiveWire(hostWire("task.snapshot", { stale: true }, 99));
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    old.drop();
+    await vi.advanceTimersByTimeAsync(20);
+    await waitForOnline(pc);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    FakeWS.instances.at(-1)!.receive("task.snapshot", { fresh: true });
+    await vi.waitFor(() => expect(events).toContainEqual({ fresh: true }));
+    expect(events).not.toContainEqual({ stale: true });
+    expect(pc.isOnline).toBe(true);
+    pc.close();
+  });
+
+  it("keeps concurrent callers waiting for reconnect from replacing an active task", async () => {
+    const pc = new RemotePC({
+      host: "100.100.100.1", ...autoAuthenticatedIdentity(), WebSocketImpl: FakeWS,
+    });
+    const first = pc.runTask("first request");
+    const second = pc.runTask("second request");
+    await waitForOnline(pc);
+    const ws = FakeWS.instances.at(-1)!;
+    await waitForWire(ws, "task.submit");
+    expect((await second).ok).toBe(false);
+    const taskId = String(submitData(taskSubmit(ws)).task_id);
+    ws.receive("task.status", {
+      task_id: taskId, state: "succeeded", summary: "First request finished", proof: verifiedProof,
+    }, taskId);
+    expect((await first).ok).toBe(true);
+    expect(ws.sent.filter((message) => message.type === "task.submit")).toHaveLength(1);
+    pc.close();
+  });
+
+  it.each(["cancelTask", "cancelTaskConfirmed", "close"] as const)(
+    "%s prevents a request waiting for reconnect from being sent later",
+    async (method) => {
+      const pc = new RemotePC({
+        host: "100.100.100.1", ...autoAuthenticatedIdentity(), WebSocketImpl: FakeWS,
+      });
+      const pending = pc.runTask("do not send after Stop");
+      await pc[method]();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(await pending).toMatchObject({ ok: false, error: "cancelled" });
+      expect(FakeWS.instances.every((socket) => socket.sent.every(
+        (message) => message.type !== "task.submit",
+      ))).toBe(true);
+      pc.close();
+    },
+  );
+
+  it("sends the per-task passkey only on submission and retains no authorization for the next task", async () => {
+    const pc = new RemotePC({ host: "100.100.100.1", ...autoAuthenticatedIdentity(), WebSocketImpl: FakeWS });
+    pc.connect();
+    await waitForOnline(pc);
+    const first = pc.runTask("open Notepad", "computer", "test-only-passkey");
+    const ws = FakeWS.instances.at(-1)!;
+    await waitForWire(ws, "task.submit");
+    expect(submitData(taskSubmit(ws)).passkey).toBe("test-only-passkey");
+    const taskId = String(submitData(taskSubmit(ws)).task_id);
+    ws.receive("task.status", { task_id: taskId, state: "succeeded", proof: verifiedProof }, taskId);
+    expect((await first).ok).toBe(true);
+    const second = pc.runTask("next task", "computer");
+    await vi.waitFor(() => expect(ws.sent.filter((message) => message.type === "task.submit")).toHaveLength(2));
+    expect((ws.sent.filter((message) => message.type === "task.submit")[1].data as Record<string, unknown>).passkey).toBe("");
+    pc.close();
+    expect((await second).ok).toBe(false);
   });
 
   it("submits an explicit idempotent task and ignores premature chat terminals", async () => {
@@ -505,7 +691,7 @@ describe("RemotePC — durable v2 transport", () => {
     pc.connect();
     await vi.advanceTimersByTimeAsync(0);
     await waitForOnline(pc);
-    const task = pc.runTask("open a document");
+    const task = pc.runTask("open a document", "computer", "test-only-passkey");
     await vi.advanceTimersByTimeAsync(0);
     const ws1 = FakeWS.instances.at(-1)!;
     await waitForWire(ws1, "task.submit");
@@ -519,6 +705,7 @@ describe("RemotePC — durable v2 transport", () => {
     const second = submitData(taskSubmit(ws2));
     expect(second.task_id).toBe(first.task_id);
     expect(second.idempotency_key).toBe(first.idempotency_key);
+    expect(second.passkey).toBe("test-only-passkey");
 
     const taskId = String(first.task_id);
     ws2.receive("task.accepted", { state: "queued" }, taskId, 1);

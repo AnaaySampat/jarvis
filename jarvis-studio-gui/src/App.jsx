@@ -11,6 +11,7 @@ import { inTauri } from "./brain/tools/httpClient";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
 import MobileRemotePC from "./components/MobileRemotePC";
+import TaskPasskeyPrompt from "./components/TaskPasskeyPrompt";
 import RemoteDesktop from "./components/RemoteDesktop";
 import SetupProgress from "./components/SetupProgress";
 import BootOverlay from "./components/BootOverlay";
@@ -146,6 +147,8 @@ export default function App() {
     cancelListen,
     gesturePcAction,
     respondPermission,
+    pcPasskeyRequest,
+    respondPcPasskey,
     respondClarify,
     setMute,
     runAction,
@@ -1069,6 +1072,12 @@ export default function App() {
           pcState={pcState}
           onPair={pairPC}
           onUnpair={unpairPC}
+          taskBusy={["thinking", "working", "listening", "speaking"].includes(status)}
+          onSendTask={(task) => {
+            setRemoteOpen(false);
+            setChatOpen(true);
+            void sendMessage(task, undefined, undefined, true);
+          }}
           onViewScreen={() => {
             setRemoteOpen(false);
             setScreenOpen(true);
@@ -1126,6 +1135,9 @@ export default function App() {
       )}
 
       {/* ── Approve/Deny gate for dangerous actions ── */}
+      {IS_MOBILE && pcPasskeyRequest && (
+        <TaskPasskeyPrompt request={pcPasskeyRequest} onRespond={respondPcPasskey} />
+      )}
       {permissionRequest && (
         <div className="perm-overlay">
           <div className="perm-dialog" role="alertdialog" aria-label="Permission required">

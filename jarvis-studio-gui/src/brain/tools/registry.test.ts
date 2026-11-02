@@ -109,6 +109,11 @@ describe("toolPalette", () => {
     const withPc = toolPalette(cfg, { pcPaired: true });
     expect(withoutPc.some((t) => t.name === "pc_task")).toBe(false);
     expect(withPc.some((t) => t.name === "pc_task")).toBe(true);
+    expect(withoutPc.some((t) => t.name === "pc_screenshot")).toBe(false);
+    expect(withPc.some((t) => t.name === "pc_screenshot")).toBe(true);
+    expect(toSpec("pc_screenshot", {})).toEqual({
+      type: "pc_task", goal: "take a screenshot", kind: "computer",
+    });
     expect(withoutPc.some((t) => t.name === "wake_pc")).toBe(false);
     expect(withPc.some((t) => t.name === "wake_pc")).toBe(true);
     expect(toSpec("wake_pc", {})).toEqual({ type: "wake_pc" });

@@ -60,6 +60,20 @@ export interface WakeTarget {
   ip: string;
 }
 
+/** Only embedded raster images from the signed task result may enter chat.
+ * External URLs and active image formats must never turn a screenshot into a
+ * request to a third party or executable content. */
+export function screenshotArtifacts(value: unknown): Array<{ id: string; image: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).flatMap((entry) => {
+    const id = typeof entry?.id === "string" ? entry.id : "";
+    const image = typeof entry?.data_url === "string" ? entry.data_url : "";
+    return entry?.kind === "image" && id && id.length <= 256 && image.length <= 8 * 1024 * 1024 &&
+      /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)
+      ? [{ id, image }] : [];
+  });
+}
+
 /** The PC's `wake` list from auth.ready, kept only if well-formed (at most 4). */
 export function sanitizeWakeTargets(value: unknown): WakeTarget[] {
   if (!Array.isArray(value)) return [];
@@ -115,6 +129,9 @@ export interface RemotePCOptions extends RemotePCConfig {
   awaitingUserTimeoutMs?: number;
   /** How long to wait for the socket to come online before a task. Default 8s. */
   connectTimeoutMs?: number;
+  /** Maximum time for a TCP/WebSocket dial to open. Default 8s; a blackholed
+   * address must not prevent trying the next route indefinitely. */
+  socketOpenTimeoutMs?: number;
   /** How long to wait for the silent LAN-reachability probe to open before giving
    *  up and staying on the cross-network link. Default 2.5s. */
   lanProbeTimeoutMs?: number;
@@ -209,6 +226,8 @@ interface Pending {
   taskId: string;
   idempotencyKey: string;
   goal: string;
+  /** Transient only, retained until acceptance for an idempotent reconnect. */
+  passkey: string;
   /** Which PC surface runs this task — 'computer' drives native apps/files, 'browser'
    *  the web, 'research' the PC's research agent (agents.ts), 'auto' lets the DESKTOP
    *  classify (used by live-view command mode). */
@@ -241,6 +260,14 @@ const PROTOCOL_VERSION = 2;
  *  OPEN — so drop it and redial instead of swallowing the next task for minutes. */
 const LINK_SILENCE_MS = 50_000;
 const LINK_CHECK_MS = 5_000;
+
+function isTailscaleHost(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
+  const parts = normalized.split(".").map(Number);
+  return normalized.endsWith(".ts.net") || normalized.startsWith("fd7a:115c:a1e0:") ||
+    (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) &&
+      parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127);
+}
 
 function newId(prefix: string): string {
   const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -377,6 +404,7 @@ export class RemotePC {
   private ws: WebSocketLike | null = null;
   private _state: RemoteState = "idle";
   private pending: Pending | null = null;
+  private taskGeneration = 0;
   private manualClose = false;
   private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -407,6 +435,7 @@ export class RemotePC {
   private readonly maxMs: number;
   private readonly awaitingMs: number;
   private readonly connectMs: number;
+  private readonly socketOpenMs: number;
   private readonly reconnectBase: number;
   private readonly lanProbeMs: number;
   private readonly identity: DeviceIdentityBridge;
@@ -440,7 +469,7 @@ export class RemotePC {
   private readonly subscribedTaskIds = new Set<string>();
 
   constructor(opts: RemotePCOptions) {
-    this.opts = opts;
+    this.opts = { ...opts };
     this.cfg = {
       host: opts.host,
       altHost: opts.altHost,
@@ -458,6 +487,12 @@ export class RemotePC {
     this.hosts = [opts.altHost, opts.host]
       .map((h) => (h || "").trim())
       .filter((h, i, arr) => h && arr.indexOf(h) === i);
+    // Old QR records can contain both a LAN and a Tailscale address. The host
+    // refuses unencrypted LAN by default, so retrying it only delays recovery.
+    // Direct LAN fallback remains available when TLS protects the connection.
+    if (!opts.secure && this.hosts.some(isTailscaleHost)) {
+      this.hosts = this.hosts.filter(isTailscaleHost);
+    }
     const g = (globalThis as { WebSocket?: WebSocketCtor }).WebSocket;
     const impl = opts.WebSocketImpl ?? g;
     if (!impl) throw new Error("No WebSocket implementation available");
@@ -468,6 +503,7 @@ export class RemotePC {
     // Generous: a cold handshake can spend several native-bridge retry windows, and
     // a task asked for right after the app opens should wait for it, not fail.
     this.connectMs = opts.connectTimeoutMs ?? 20_000;
+    this.socketOpenMs = opts.socketOpenTimeoutMs ?? 8_000;
     this.reconnectBase = opts.reconnectMs ?? 3_000;
     this.lanProbeMs = opts.lanProbeTimeoutMs ?? 2_500;
     this.identity = opts.identityBridge ?? nativeIdentityBridge;
@@ -484,7 +520,8 @@ export class RemotePC {
   url(host: string = this.hosts[this.hostIdx] || this.cfg.host): string {
     const scheme = this.cfg.secure ? "wss" : "ws";
     const port = this.cfg.port ?? 8765;
-    return `${scheme}://${host}:${port}/`;
+    const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+    return `${scheme}://${authority}:${port}/`;
   }
 
   private authProtocols(): string[] {
@@ -511,6 +548,15 @@ export class RemotePC {
       return;
     }
     this.ws = ws;
+    // Each socket owns its queues. A native bridge callback from a dead socket
+    // may still be pending; it must neither block nor mutate its replacement.
+    this.incomingChain = Promise.resolve();
+    this.outboundChain = Promise.resolve();
+    this.sawChallenge = false;
+    this.authTimer = setTimeout(
+      () => this.bailTransient(ws, "connection did not open"),
+      this.socketOpenMs,
+    );
     ws.onopen = () => {
       if (this.ws !== ws) return;
       // NOTE: the backoff counter is deliberately NOT reset here. A socket that
@@ -521,9 +567,7 @@ export class RemotePC {
       // reconnect loop, each cycle running a full native-identity handshake. The
       // reset now lives in finishAuthenticated, i.e. only once the PC has actually
       // accepted us.
-      // "online" only once the backend actually speaks (auth confirmed). But an open
-      // socket past the auth gate is already trusted; mark online on open and let a
-      // 1008 close demote us to unauthorized.
+      // An open socket is not trusted until the pinned host's auth.ready verifies.
       this.authenticated = false;
       this.connectionNonce = "";
       this.hostId = "";
@@ -573,11 +617,7 @@ export class RemotePC {
       }
     };
     ws.onerror = () => {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
+      this.bailTransient(ws, "socket error");
     };
     ws.onclose = (ev) => this.handleClosed(ws, ev?.code, ev?.reason);
   }
@@ -697,10 +737,9 @@ export class RemotePC {
   private bailTransient(ws: WebSocketLike, why: string): void {
     if (this.ws !== ws) return;
     console.error(`[RemotePC] transient failure: ${why} — dropping link to retry`);
-    if (this.authTimer) {
-      clearTimeout(this.authTimer);
-      this.authTimer = null;
-    }
+    // A blackholed connection need not deliver onclose promptly (or at all).
+    // Detach it now; any eventual callbacks are ignored by the socket guard.
+    this.handleClosed(ws, 4000, "transient failure");
     try {
       ws.close(4000, "transient failure");
     } catch {
@@ -773,11 +812,13 @@ export class RemotePC {
       throw new IdentityRejected("host challenge signature failed");
     }
     if (!verified.ok) throw new Error("host challenge verification unavailable");
+    if (this.ws !== ws) return;
     this.hostId = hostId;
     this.connectionNonce = nonce;
     this.lastHostCounter = 0;
 
     const auth = await withIdentityBridgeRetry(() => this.identity.signAuth({ hostId, nonce }));
+    if (this.ws !== ws) return;
     if (!auth.ok || !auth.deviceId || !auth.signature || !Number.isSafeInteger(auth.counter)) {
       throw new Error("phone authentication signature failed");
     }
@@ -813,6 +854,7 @@ export class RemotePC {
       connectionNonce: this.connectionNonce,
       deviceName: this.cfg.deviceName || "Aura phone",
     }));
+    if (this.ws !== ws) return;
     if (!claim.ok || !claim.deviceId || !claim.publicKey || !claim.signature) {
       throw new Error("phone pairing signature failed");
     }
@@ -834,7 +876,7 @@ export class RemotePC {
     }, ws)) throw new Error("pairing connection closed");
   }
 
-  private async verifyHostMessage(msg: Record<string, unknown>): Promise<boolean> {
+  private async verifyHostMessage(msg: Record<string, unknown>, ws: WebSocketLike): Promise<boolean> {
     const auth = msg.auth;
     if (!auth || typeof auth !== "object") return false;
     const envelope = auth as Record<string, unknown>;
@@ -863,20 +905,24 @@ export class RemotePC {
       return false;
     }
     const signature = envelope.signature;
+    const hostId = this.hostId;
+    const connectionNonce = this.connectionNonce;
     const digest = await payloadDigest(envelopeContent(msg));
+    if (this.ws !== ws) return false;
     // Bridge failures propagate (→ transient reconnect); only a definitive
     // negative from a WORKING verifier returns false.
     const verified = await withIdentityBridgeRetry(() => this.identity.verifyHostEnvelope({
       publicKey: this.cfg.hostPublicKey || "",
       expectedFingerprint: this.cfg.hostFingerprint || "",
-      hostId: this.hostId,
-      connectionNonce: this.connectionNonce,
+      hostId,
+      connectionNonce,
       counter,
       messageType: event,
       taskId,
       payloadDigest: digest,
       signature,
     }));
+    if (this.ws !== ws) return false;
     if (!verified.ok || !verified.verified) {
       console.error(
         `[RemotePC] host envelope SIGNATURE failed: event=${event} counter=${counter} ` +
@@ -889,6 +935,7 @@ export class RemotePC {
   }
 
   close(): void {
+    this.taskGeneration += 1;
     this.manualClose = true;
     this.clearReconnect();
     this.authenticated = false;
@@ -1109,23 +1156,34 @@ export class RemotePC {
   async runTask(
     goal: string,
     kind: "browser" | "computer" | "research" | "auto" = "browser",
+    passkey = "",
   ): Promise<ToolResult> {
     const g = (goal || "").trim();
     if (!g) return { ok: false, summary: "What should I do on the PC, sir?" };
     if (this.pending) {
       return { ok: false, summary: "I'm still finishing the last PC task, sir — one moment." };
     }
+    const generation = this.taskGeneration;
     const online = await this.ensureOnline();
+    if (generation !== this.taskGeneration) {
+      return { ok: false, summary: "The PC request was cancelled before it was sent.", error: "cancelled" };
+    }
     if (!online) {
       const why =
         this._state === "unauthorized"
           ? "the phone identity or host pins were rejected — scan a fresh pairing QR."
-          : "make sure it's on, on the same network, and the JARVIS desktop app is running.";
+          : "open JARVIS on the PC and check Tailscale is connected on both devices.";
       return {
         ok: false,
         summary: `I can't reach your PC, sir — ${why}`,
         error: "unreachable",
       };
+    }
+    // Several callers can wait for the same reconnect. Only one may claim the
+    // task slot once it completes; otherwise the later caller strands the first
+    // task's Promise by replacing this.pending.
+    if (this.pending) {
+      return { ok: false, summary: "I'm still finishing the last PC task, sir — one moment." };
     }
     return new Promise<ToolResult>((resolve) => {
       const taskId = newId("task");
@@ -1135,6 +1193,7 @@ export class RemotePC {
         taskId,
         idempotencyKey: newId("idem"),
         goal: g,
+        passkey,
         kind,
         accepted: false,
         lastSeq: 0,
@@ -1180,6 +1239,7 @@ export class RemotePC {
         idempotency_key: p.idempotencyKey,
         source_device: this.deviceId,
         goal: p.goal,
+        passkey: p.passkey,
         kind: p.kind,
         capability_profile: "remote_default",
         deadline_ms: this.maxMs,
@@ -1210,6 +1270,7 @@ export class RemotePC {
 
   /** Request cancellation of the in-flight durable desktop task. */
   cancelTask(reason = "user_cancelled"): boolean {
+    this.taskGeneration += 1;
     const p = this.pending;
     if (!p || p.done) return false;
     const sent = this.cancelPending(reason);
@@ -1442,6 +1503,7 @@ export class RemotePC {
 
   /** Cancel the in-flight task, resolving with whether the cancel really went out. */
   async cancelTaskConfirmed(reason = "user_cancelled"): Promise<boolean> {
+    this.taskGeneration += 1;
     const p = this.pending;
     if (!p || p.done) return false;
     const sent = await this.sendConfirmed({
@@ -1469,6 +1531,7 @@ export class RemotePC {
     const p = this.pending;
     if (!p || p.done) return;
     p.done = true;
+    p.passkey = "";
     if (p.idleTimer) clearTimeout(p.idleTimer);
     if (p.maxTimer) clearTimeout(p.maxTimer);
     if (p.awaitingTimer) clearTimeout(p.awaitingTimer);
@@ -1495,6 +1558,7 @@ export class RemotePC {
     ws: WebSocketLike,
     alreadyVerified = false,
   ): Promise<void> {
+    if (this.ws !== ws) return;
     let msg: {
       v?: unknown;
       event?: unknown;
@@ -1528,7 +1592,9 @@ export class RemotePC {
       return;
     }
     if (!alreadyVerified) {
-      if (!(await this.verifyHostMessage(msg as Record<string, unknown>))) {
+      const verified = await this.verifyHostMessage(msg as Record<string, unknown>, ws);
+      if (this.ws !== ws) return;
+      if (!verified) {
         throw new Error("invalid host protocol signature");
       }
     }
@@ -1538,6 +1604,9 @@ export class RemotePC {
         throw new Error("authenticated device mismatch");
       }
       this.authenticated = true;
+      // A successful signed ready consumes the human-present pairing secret.
+      delete this.cfg.pin;
+      delete this.opts.pin;
       const wake = sanitizeWakeTargets(ready.wake);
       if (wake.length) {
         try {
@@ -1634,6 +1703,7 @@ export class RemotePC {
     }
 
     if (!p || p.done || !correlated) return;
+    if (this.ws !== ws) return;
     // Only a correlated task message proves progress. Weather, telemetry, a local
     // HUD conversation, or another phone's task can never extend this watchdog.
     if (!p.awaitingUser) this.bumpIdle();
@@ -1641,6 +1711,7 @@ export class RemotePC {
     switch (event) {
       case "task.accepted": {
         p.accepted = true;
+        p.passkey = "";
         this.send({
           v: PROTOCOL_VERSION,
           type: "task.subscribe",
@@ -1778,7 +1849,7 @@ function terminalResult(data: unknown): ToolResult {
       completed: Array.isArray(d.completed) ? d.completed : [],
       remaining: Array.isArray(d.remaining) ? d.remaining : [],
     },
-    error: ok ? undefined : state === "succeeded" ? "unverified_success"
+    error: ok ? undefined : typeof d.error_code === "string" ? d.error_code : state === "succeeded" ? "unverified_success"
       : d.status === "unverified" ? "unverified" : state || "unverified_failure",
   };
 }

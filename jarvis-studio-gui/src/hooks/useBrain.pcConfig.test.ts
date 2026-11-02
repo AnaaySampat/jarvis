@@ -36,6 +36,7 @@ describe("paired PC public-only persistence", () => {
       turnUser: "relay-user",
       turnCred: "relay-password-must-be-erased",
       unknown: "not-allowed",
+      passkey: "test-only-task-passkey",
     });
 
     expect(loadPcConfigFromStore(store)).toEqual(pinned);
@@ -44,6 +45,7 @@ describe("paired PC public-only persistence", () => {
     expect(store.get(PC_KEY)).not.toContain("relay-password");
     expect(store.get(PC_KEY)).not.toContain("turnUrl");
     expect(store.get(PC_KEY)).not.toContain("unknown");
+    expect(store.get(PC_KEY)).not.toContain("test-only-task-passkey");
   });
 
   it("removes bearer-only and unpinned legacy records", () => {
