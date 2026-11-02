@@ -1,0 +1,73 @@
+name: Sign verified companion APK
+
+on:
+  push:
+    branches: ["signing/companion-20261102"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Reuse the tested native build; do not compile or execute downloaded code.
+      - uses: actions/download-artifact@v4
+        with:
+          name: jarvis-unsigned-release-apk
+          path: unsigned
+          run-id: 41482965035
+          github-token: ${{ github.token }}
+
+      - name: Verify the original key and sign the APK
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Add all three Android signing secrets before running this job."
+            exit 1
+          fi
+          umask 077
+          keystore="$RUNNER_TEMP/jarvis-signing.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          expected=99b9ab96b6577a01567aade7e08525cb1f2e888c822672c76ecfb85d09631370
+          actual=$(keytool -exportcert -keystore "$keystore" -alias "$KEY_ALIAS" \
+            -storepass:env KEY_PASSWORD | openssl dgst -sha256 | awk '{print $NF}')
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::The supplied key does not match the published v2.5.0 APK. No update APK will be signed."
+            echo "Expected public certificate SHA256: $expected"
+            echo "Supplied public certificate SHA256: $actual"
+            exit 1
+          fi
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          candidate=unsigned/JARVIS-v2.5.1-arm64-unsigned.apk
+          test -f "$candidate"
+          "$build_tools/zipalign" -c 4 "$candidate"
+          mkdir -p signed
+          apk=signed/JARVIS-v2.5.1-arm64.apk
+          "$build_tools/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEY_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" "$candidate"
+          "$build_tools/apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/jarvis-certificate.txt"
+          grep -Fq "Signer #1 certificate SHA-256 digest: $expected" "$RUNNER_TEMP/jarvis-certificate.txt"
+          (cd signed && sha256sum JARVIS-v2.5.1-arm64.apk > SHA256SUMS.txt)
+          cat signed/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-release-apk
+          path: signed/
+          if-no-files-found: error
+          retention-days: 90
