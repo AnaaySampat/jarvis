@@ -87,6 +87,36 @@ async function show(next, ms = 900) {
   await advance(ms);
 }
 describe("gesture hook lifecycle regressions", () => {
+  it("starts recognizing immediately without waiting for the idle poll", async () => {
+    await act(async () => {
+      await controls.start();
+    });
+    await advance(500);
+    pose = "OPEN_PALM";
+    await advance(750);
+    expect(host.stopSpeech).toHaveBeenCalledTimes(1);
+  });
+  it("never overlaps bridge polls when a refresh arrives during an existing request", async () => {
+    let complete;
+    camera.poll.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    await advance(1000);
+    const pending = camera.poll.mock.calls.length;
+    await act(async () => {
+      await controls.start();
+    });
+    await advance(500);
+    expect(camera.poll).toHaveBeenCalledTimes(pending);
+    await act(async () => {
+      complete({ running: false, summary: "Off" });
+    });
+    await advance(0);
+    expect(camera.poll).toHaveBeenCalledTimes(pending + 1);
+  });
   it("starts a new engine when a second camera session restarts sequence at zero", async () => {
     await start();
     await show("OPEN_PALM");

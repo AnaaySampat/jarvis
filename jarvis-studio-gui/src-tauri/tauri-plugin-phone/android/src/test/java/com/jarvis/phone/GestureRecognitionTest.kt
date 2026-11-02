@@ -49,4 +49,44 @@ class GestureRecognitionTest {
         assertNull(latch.update(Gesture.FIST, 1299))
         assertEquals(Gesture.FIST, latch.update(Gesture.FIST, 1300))
     }
+
+    @Test fun briefDropoutPausesRatherThanDiscardsTheHold() {
+        val latch = GestureLatch()
+        latch.update(Gesture.FIST, 0)
+        latch.update(Gesture.FIST, 250)
+        assertNull(latch.update(Gesture.UNKNOWN, 300))
+        assertNull(latch.update(Gesture.FIST, 400))
+        assertNull(latch.update(Gesture.FIST, 600))
+        assertEquals(Gesture.FIST, latch.update(Gesture.FIST, 700))
+    }
+
+    @Test fun sustainedDropoutRequiresAnotherFullHold() {
+        val latch = GestureLatch()
+        latch.update(Gesture.FIST, 0)
+        latch.update(Gesture.UNKNOWN, 300)
+        latch.update(Gesture.UNKNOWN, 500)
+        assertNull(latch.update(Gesture.FIST, 600))
+        assertNull(latch.update(Gesture.FIST, 1199))
+        assertEquals(Gesture.FIST, latch.update(Gesture.FIST, 1200))
+    }
+
+    @Test fun sensorLandmarksKeepUprightPointerAndSwipeCoordinates() {
+        val expected = mapOf(
+            0 to floatArrayOf(0.2f, 0.7f, 0.3f),
+            90 to floatArrayOf(0.3f, 0.2f, 0.4f),
+            180 to floatArrayOf(0.8f, 0.3f, 0.3f),
+            270 to floatArrayOf(0.7f, 0.8f, 0.4f),
+        )
+        for ((rotation, point) in expected) {
+            assertArrayEquals(point, GestureRecognition.uprightLandmark(
+                0.2f, 0.7f, 0.3f, rotation, 640, 480).toFloatArray(), 0.000001f)
+        }
+    }
+
+    @Test fun oppositeRotationsPreserveCalibrationGeometryAndDepth() {
+        val rotated = GestureRecognition.uprightLandmark(0.2f, 0.7f, -0.3f, 90, 640, 480)
+        val restored = GestureRecognition.uprightLandmark(
+            rotated[0], rotated[1], rotated[2], 270, 480, 640)
+        assertArrayEquals(floatArrayOf(0.2f, 0.7f, -0.3f), restored.toFloatArray(), 0.000001f)
+    }
 }

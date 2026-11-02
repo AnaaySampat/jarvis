@@ -18,6 +18,17 @@ object GestureRecognition {
             else -> Gesture.UNKNOWN
         }
     }
+
+    /** MediaPipe projects landmarks back onto the original sensor image even
+     * when preprocessing rotates it. Publish upright coordinates as before,
+     * including depth's normalization by the upright image width. */
+    fun uprightLandmark(x: Float, y: Float, z: Float, rotation: Int, width: Int, height: Int): List<Float> =
+        when (rotation) {
+            90 -> listOf(1f - y, x, z * width / height)
+            180 -> listOf(1f - x, 1f - y, z)
+            270 -> listOf(y, 1f - x, z * width / height)
+            else -> listOf(x, y, z)
+        }
 }
 
 /** Require a deliberate hold. One held pose emits once; brief tracking dropouts
@@ -29,15 +40,23 @@ class GestureLatch(
     private var candidate = GestureRecognition.Gesture.UNKNOWN
     private var since = 0L
     private var emitted = GestureRecognition.Gesture.UNKNOWN
+    private var gapAt: Long? = null
 
     fun update(gesture: GestureRecognition.Gesture, nowMs: Long): GestureRecognition.Gesture? {
+        if (gesture == GestureRecognition.Gesture.UNKNOWN) {
+            val start = gapAt ?: nowMs.also { gapAt = it }
+            if (nowMs - start > 180) candidate = GestureRecognition.Gesture.UNKNOWN
+            if (nowMs - start >= releaseMs) emitted = GestureRecognition.Gesture.UNKNOWN
+            return null
+        }
+        gapAt?.let { start ->
+            if (nowMs - start <= 180 && candidate == gesture) since += nowMs - start
+            else candidate = GestureRecognition.Gesture.UNKNOWN
+        }
+        gapAt = null
         if (candidate != gesture) {
             candidate = gesture
             since = nowMs
-        }
-        if (gesture == GestureRecognition.Gesture.UNKNOWN) {
-            if (nowMs - since >= releaseMs) emitted = GestureRecognition.Gesture.UNKNOWN
-            return null
         }
         if (nowMs - since < holdMs || gesture == emitted) return null
         emitted = gesture

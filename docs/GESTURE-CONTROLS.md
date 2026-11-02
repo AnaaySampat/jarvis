@@ -51,15 +51,20 @@ in the UI.
 
 ## Platform integration
 
-Android uses CameraX, a bundled MediaPipe model and a sequential worker at up to
-eight analysis frames per second. Raw landmarks, epoch timestamps and monotonic
+Android uses CameraX, a bundled MediaPipe model and a sequential worker targeting
+about fifteen analysis frames per second, with latest-frame backpressure on slower
+devices. MediaPipe handles rotation during preprocessing; an extra rotated bitmap
+is made only for an explicit photo. Raw landmarks, epoch timestamps and monotonic
 sequences pass through Kotlin → Rust → Tauri. Native fist and Stop controls remain
 independent of JavaScript polling. Images are saved only for explicit photo actions.
 Model provenance and license are in the native assets/GESTURE-MODEL.md file.
 
 Windows uses a separate getUserMedia camera and MediaPipe WASM worker. The pinned
 npm runtime and verified model are copied locally by predev/prebuild; no CDN is
-needed. One transferable bitmap is in flight at a time. Inference uses a monotonic
+needed. Decoded video frames drive capture at up to fifteen inferences per second;
+only one transferable bitmap is in flight, and slower inference lowers the rate
+without accumulating work. Analysis images are bounded to 640 pixels on their
+longest edge. A stalled feed stops the camera after ten seconds. Inference uses a monotonic
 clock; transported timestamps use epoch milliseconds. Camera permission and
 save/download behavior depend on WebView2 and Windows privacy settings.
 Model provenance and license are in public/gesture-assets/GESTURE-MODEL.md.
@@ -69,7 +74,13 @@ change. They use signed pairing, the existing live-view/biometric control lease,
 an allowlist and correlated acknowledgements. Old companions time out visibly.
 The gesture camera cannot grant computer-control access.
 
-A hold emits once. Every poll ticks the engine even without new frames, so tracking
+A hold emits once. Brief unknown/low-confidence dropouts of up to 180 ms pause the
+hold without discarding it; uncertain time does not count toward the hold. A
+different recognized pose or longer dropout starts a new hold. Hold and swipe
+timing use capture timestamps rather than bridge delivery time. Active polling
+targets a 67 ms period including bridge time, with no overlapping requests; Start
+and Stop refresh immediately instead of waiting for the idle poll.
+Every poll ticks the engine even without new frames, so tracking
 loss releases push-to-talk and cursor state. New sessions accept restarted frame
 counters. Host identity changes and text edits do not discard holds. Reading and
 instruction commands interrupt current speech and queue the latest navigation.
@@ -94,8 +105,12 @@ allowlisting, compact bookmarks, storage failure, pinch/dropout, swipes, request
 timeouts and webcam cleanup. Android JUnit compiles the service; Windows backend
 tests cover action allowlists, control leases, replay, timers and speech interruption.
 
-The Windows worker/model also loads and processes a blank frame in headless Chrome.
-This checks the bundled WASM path, not camera permission or hand accuracy.
+The Windows browser regression starts the bundled worker/model with a synthetic
+camera, checks sustained frame delivery, then stops, restarts and verifies resource
+cleanup. From the Windows repository root, run
+`node scripts/check-gesture-webcam.mjs` with Node 22+ and Chromium installed (set
+`CHROMIUM_PATH` if necessary). This checks the actual WASM and browser capture path;
+it does not establish physical camera permission or hand accuracy.
 
 Physical acceptance remains: both hands and varied lighting; permission denial and
 revocation; camera occupied; rapid start/stop; minimize/lock/recents; fist during

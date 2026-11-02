@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ACTIONS,
   GestureEngine,
@@ -28,11 +28,15 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
   const bookmarksRef = useRef(bookmarks);
   const [calibrating, setCalibrating] = useState(false);
   const [cursor, setCursor] = useState(null);
-  const pages = readerPages(config.reader);
-  const steps = config.steps
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const pages = useMemo(() => readerPages(config.reader), [config.reader]);
+  const steps = useMemo(
+    () =>
+      config.steps
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [config.steps],
+  );
   const page = clampIndex(pageIndex, pages.length),
     step = clampIndex(stepIndex, steps.length);
   const context = useRef({ host, blocked, canListen, step, page });
@@ -50,15 +54,20 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
   const pttAttempt = useRef(0);
   const alive = useRef(true);
   const cameraRef = useRef(camera);
-  const policy = JSON.stringify([
-    config.mode,
-    config.holdMs,
-    config.releaseMs,
-    config.confidence,
-    config.bindings,
-    config.customPoses,
-    config.mirror,
-  ]);
+  const refresh = useRef(() => {});
+  const policy = useMemo(
+    () =>
+      JSON.stringify([
+        config.mode,
+        config.holdMs,
+        config.releaseMs,
+        config.confidence,
+        config.bindings,
+        config.customPoses,
+        config.mirror,
+      ]),
+    [config],
+  );
 
   useEffect(() => {
     context.current = { host, blocked, canListen, step, page };
@@ -115,6 +124,8 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
     alive.current = true;
     let disposed = false,
       timer;
+    let polling = false,
+      refreshPending = false;
     const cancelPtt = () => {
       pttAttempt.current++;
       if (pttOwned.current) context.current.host.cancelListen?.();
@@ -156,7 +167,10 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
           card.classList.add("gesture-selected");
         }
       }
-      setCursor({ x, y, down: Boolean(drag.current) });
+      const down = Boolean(drag.current);
+      setCursor((old) =>
+        old?.x === x && old?.y === y && old?.down === down ? old : { x, y, down },
+      );
     };
     const navigation = (action) =>
       action.startsWith("steps.") ||
@@ -331,6 +345,13 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
         }
     };
     const poll = async () => {
+      if (polling) {
+        refreshPending = true;
+        return;
+      }
+      clearTimeout(timer);
+      polling = true;
+      const startedAt = performance.now();
       let delay = 1000;
       try {
         const snapshot = await cameraRef.current.poll();
@@ -349,7 +370,7 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
             ? old
             : snapshot,
         );
-        delay = snapshot.running || snapshot.starting ? 100 : 1000;
+        delay = snapshot.running || snapshot.starting ? 67 : 1000;
         const visible = snapshot.foreground !== false && !document.hidden;
         if (!snapshot.running) {
           consume(engine.current.reset());
@@ -427,8 +448,17 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
           queuedNavigation.current = null;
         }
       } finally {
-        if (!disposed) timer = setTimeout(poll, delay);
+        polling = false;
+        if (!disposed) {
+          // Include bridge time in the period; never overlap native requests.
+          const wait = refreshPending ? 0 : Math.max(0, delay - (performance.now() - startedAt));
+          refreshPending = false;
+          timer = setTimeout(poll, wait);
+        }
       }
+    };
+    refresh.current = () => {
+      void poll();
     };
     const flush = () => {
       try {
@@ -469,6 +499,7 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
       disposed = true;
       alive.current = false;
       clearTimeout(timer);
+      refresh.current = () => {};
       cancelPtt();
       queuedNavigation.current = null;
       document.removeEventListener("visibilitychange", hidden);
@@ -502,9 +533,8 @@ export function useGestureModes({ camera, enabled, host, blocked, canListen, lat
         ? cameraRef.current.start(configRef.current)
         : cameraRef.current.stop());
       setMessage(response.ok ? "" : response.summary || "");
-      const snapshot = await cameraRef.current.poll();
-      setStatus(snapshot);
-      // Leave running.current to poll: it must observe the false -> true edge.
+      // Use the single polling loop, including during a pending bridge call.
+      refresh.current();
     } catch (error) {
       setMessage(String(error?.message || error));
     } finally {

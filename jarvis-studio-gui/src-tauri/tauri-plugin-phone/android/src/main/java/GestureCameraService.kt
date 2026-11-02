@@ -40,8 +40,10 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import java.util.concurrent.Executors
 
@@ -262,25 +264,33 @@ class GestureCameraService : LifecycleService() {
     private fun analyze(image: ImageProxy) {
         var bitmap: Bitmap? = null
         var rotated: Bitmap? = null
+        var input: MPImage? = null
         try {
             val now = SystemClock.uptimeMillis()
             val capturedAt = System.currentTimeMillis()
-            if (closing || now - lastFrameAt < 125) return // at most eight inferences/sec
+            if (closing || now - lastFrameAt < 66) return // about fifteen inferences/sec at 30 fps
             lastFrameAt = now
             bitmap = image.toBitmap() // CameraX handles row/pixel stride, including padding
-            rotated = if (image.imageInfo.rotationDegrees == 0) bitmap else {
-                val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
-                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            }
-            val input = BitmapImageBuilder(rotated).build()
-            val result = try { recognizer?.recognizeForVideo(input, now) } finally { input.close() }
+            // Let MediaPipe rotate during preprocessing instead of allocating and
+            // copying a second bitmap on every analysis frame.
+            input = BitmapImageBuilder(bitmap).build()
+            val options = ImageProcessingOptions.builder()
+                .setRotationDegrees(image.imageInfo.rotationDegrees).build()
+            val result = recognizer?.recognizeForVideo(input, options, now)
             val category = result?.gestures()?.firstOrNull()?.firstOrNull()
             val gesture = GestureRecognition.recognize(category?.categoryName() ?: "",
                 category?.score() ?: 0f, confidence)
-            val points = result?.landmarks()?.firstOrNull()?.map { listOf(it.x(), it.y(), it.z()) } ?: emptyList()
+            val points = result?.landmarks()?.firstOrNull()?.map {
+                GestureRecognition.uprightLandmark(it.x(), it.y(), it.z(),
+                    image.imageInfo.rotationDegrees, bitmap.width, bitmap.height)
+            } ?: emptyList()
             if (photoAt > 0 && now >= photoAt && gesture != GestureRecognition.Gesture.FIST) {
                 photoAt = 0
                 val token = photoToken
+                rotated = if (image.imageInfo.rotationDegrees == 0) bitmap else {
+                    val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
+                    Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                }
                 val saved = saveSnapshot(rotated, token)
                 main.post {
                     if (token != photoToken) return@post
@@ -300,10 +310,11 @@ class GestureCameraService : LifecycleService() {
                 state = state.copy(frameSeq = state.frameSeq + 1, observedAt = capturedAt,
                     pose = gesture.name, score = category?.score() ?: 0f, landmarks = points)
                 if (photoDone == null) {
-                    statusText.text = when (gesture) {
+                    val label = when (gesture) {
                         GestureRecognition.Gesture.UNKNOWN -> "Hold your hand in view"
                         else -> gesture.name.replace('_', ' ')
                     }
+                    if (statusText.text.toString() != label) statusText.text = label
                 }
                 if (event != null) {
                     state = state.copy(seq = state.seq + 1, gesture = event.name,
@@ -317,7 +328,9 @@ class GestureCameraService : LifecycleService() {
             if (failures >= 5) main.post { finish("Gesture recognition failed. Restart the camera to try again.") }
         } finally {
             if (rotated !== bitmap) rotated?.recycle()
-            bitmap?.recycle()
+            // MPImage owns the bitmap. Keep it alive through an explicit photo.
+            input?.close()
+            if (input == null) bitmap?.recycle()
             image.close()
         }
     }

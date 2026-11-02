@@ -44,6 +44,50 @@ describe("gesture session policy", () => {
     feed("OPEN_PALM", 1800);
     expect(feed("OPEN_PALM", 2400)).toHaveLength(1);
   });
+  it("pauses a hold across a brief low-confidence frame without counting the gap", () => {
+    const { feed } = stream();
+    feed("OPEN_PALM", 500);
+    feed("OPEN_PALM", 750);
+    expect(feed("OPEN_PALM", 800, 0.5)).toEqual([]);
+    expect(feed("OPEN_PALM", 900)).toEqual([]);
+    expect(feed("OPEN_PALM", 1100)).toEqual([]);
+    expect(feed("OPEN_PALM", 1200)).toEqual([
+      { kind: "action", action: "voice.stop", pose: "OPEN_PALM" },
+    ]);
+    feed("UNKNOWN", 1250);
+    feed("OPEN_PALM", 1350);
+    expect(feed("OPEN_PALM", 2000)).toEqual([]);
+  });
+  it("restarts the hold after sustained tracking loss or another recognized pose", () => {
+    const { feed } = stream();
+    feed("OPEN_PALM", 500);
+    feed("UNKNOWN", 800);
+    feed("UNKNOWN", 1000);
+    expect(feed("OPEN_PALM", 1100)).toEqual([]);
+    expect(feed("OPEN_PALM", 1500)).toEqual([]);
+    feed("THUMBS_UP", 1600);
+    expect(feed("OPEN_PALM", 1700)).toEqual([]);
+    expect(feed("OPEN_PALM", 2200)).toEqual([]);
+    expect(feed("OPEN_PALM", 2300)[0]).toMatchObject({ action: "voice.stop" });
+  });
+  it("does not admit a delayed push-to-talk start during a tracking dropout", () => {
+    const { engine, feed } = stream();
+    feed("PEACE", 500);
+    feed("PEACE", 1100);
+    feed("UNKNOWN", 1200);
+    expect(engine.confirmPttStart()).toBe(false);
+  });
+  it("does not count bridge delays as time holding a gesture", () => {
+    const { engine, feed } = stream();
+    feed("OPEN_PALM", 500);
+    const delayed = (seq: number, capture: number, delivered: number) =>
+      engine.feed(
+        { seq, observedAt: T + capture, pose: "OPEN_PALM", score: 1, landmarks: [] },
+        { visible: true, blocked: false, now: T + delivered },
+      );
+    expect(delayed(4, 800, 1300)).toEqual([]);
+    expect(delayed(5, 1100, 1400)[0]).toMatchObject({ action: "voice.stop" });
+  });
   it("finishes only admitted PTT when a camera stops producing frames", () => {
     const { engine, feed } = stream();
     feed("PEACE", 500);

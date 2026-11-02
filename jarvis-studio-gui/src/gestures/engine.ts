@@ -271,6 +271,7 @@ export class GestureEngine {
   private lastFrame = 0;
   private candidate = "UNKNOWN";
   private since = 0;
+  private gapAt = 0;
   private emitted = "";
   private releaseAt = 0;
   private ptt = false;
@@ -281,7 +282,11 @@ export class GestureEngine {
   private neutralSince = 0;
   constructor(private config: GestureConfig) {}
   confirmPttStart(): boolean {
-    if (this.needsNeutral || this.config.bindings[this.config.mode][this.candidate] !== "voice.ptt")
+    if (
+      this.needsNeutral ||
+      this.gapAt ||
+      this.config.bindings[this.config.mode][this.candidate] !== "voice.ptt"
+    )
       return false;
     this.ptt = true;
     return true;
@@ -302,12 +307,33 @@ export class GestureEngine {
     this.ptt = false;
     this.pinched = false;
     this.candidate = "UNKNOWN";
+    this.since = 0;
+    this.gapAt = 0;
+    this.releaseAt = 0;
     this.emitted = "";
     this.anchor = null;
     this.lastFrame = 0;
     this.needsNeutral = true;
     this.neutralSince = 0;
     return events;
+  }
+  private trackCandidate(pose: string, now: number) {
+    // Pause a hold across a brief classifier dropout. Uncertain time never
+    // counts toward the hold, and another recognized pose starts a new hold.
+    if (pose === "UNKNOWN") {
+      if (!this.gapAt) this.gapAt = now;
+      if (now - this.gapAt > 180) this.candidate = "UNKNOWN";
+      return;
+    }
+    if (this.gapAt) {
+      if (now - this.gapAt <= 180 && pose === this.candidate) this.since += now - this.gapAt;
+      else this.candidate = "UNKNOWN";
+      this.gapAt = 0;
+    }
+    if (pose !== this.candidate) {
+      this.candidate = pose;
+      this.since = now;
+    }
   }
   feed(frame: Frame, context: { visible: boolean; blocked: boolean; now: number }): GestureEvent[] {
     if (frame.seq <= this.seq) return [];
@@ -319,19 +345,17 @@ export class GestureEngine {
       context.now < frame.observedAt
     )
       return this.reset();
-    const now = context.now;
+    // Hold/swipe timing follows capture time, independent of bridge/poll jitter.
+    const now = frame.observedAt;
     const events: GestureEvent[] =
       this.lastFrame && (now - this.lastFrame > 2000 || now < this.lastFrame) ? this.reset() : [];
     this.lastFrame = now;
     let pose = frame.score >= this.config.confidence ? frame.pose : "UNKNOWN";
     if (this.config.customPoses.length && pose !== "FIST")
       pose = customPose(frame.landmarks, this.config.customPoses) || pose;
+    this.trackCandidate(pose, now);
     if (pose === "FIST") {
       // Fist remains reserved on every platform, including during calibration.
-      if (this.candidate !== pose) {
-        this.candidate = pose;
-        this.since = now;
-      }
       if (now - this.since >= this.config.holdMs) return [...this.reset(), { kind: "stop" }];
       return events;
     }
@@ -380,10 +404,6 @@ export class GestureEngine {
         return events;
       }
     } else this.anchor = null;
-    if (pose !== this.candidate) {
-      this.candidate = pose;
-      this.since = now;
-    }
     if (pose === "UNKNOWN") {
       if (!this.releaseAt) this.releaseAt = now;
       if (now - this.releaseAt >= this.config.releaseMs) {
