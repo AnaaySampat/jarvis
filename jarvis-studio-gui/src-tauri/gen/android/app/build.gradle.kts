@@ -70,6 +70,10 @@ android {
             // a production key, or fall back to the debug keystore for local installs.
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
+            } else if (System.getenv("JARVIS_UNSIGNED_RELEASE") == "1") {
+                // Release candidates can be compiled without replacing the user's
+                // signing identity. The resulting APK requires local signing.
+                null
             } else {
                 signingConfigs.getByName("debug")
             }

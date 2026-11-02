@@ -71,9 +71,15 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            if [ "$PUBLISH" = "true" ] || [ "$REQUIRE_SIGNING" = "true" ]; then
+            if [ "$PUBLISH" = "true" ]; then
               echo "::error::No signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEYSTORE_PASSWORD). An APK signed with a throwaway key can't update the installed app, so nothing is published."
               exit 1
+            fi
+            if [ "$REQUIRE_SIGNING" = "true" ]; then
+              echo "::warning::Signing secrets are missing. Building an unsigned release APK for local signing; no replacement key is generated."
+              echo "JARVIS_UNSIGNED_RELEASE=1" >> "$GITHUB_ENV"
+              echo "APK_UNSIGNED=true" >> "$GITHUB_ENV"
+              exit 0
             fi
             echo "::warning::No signing secrets: this dry run is signed with a throwaway debug key."
             exit 0
@@ -90,8 +96,14 @@ jobs:
       - name: Name it
         run: |
           version=$(node -p "require('./package.json').version")
-          name="JARVIS-v${version}-arm64.apk"
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk "$name"
+          if [ "$APK_UNSIGNED" = "true" ]; then
+            name="JARVIS-v${version}-arm64-unsigned.apk"
+            source=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          else
+            name="JARVIS-v${version}-arm64.apk"
+            source=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          fi
+          cp "$source" "$name"
           echo "APK=jarvis-studio-gui/$name" >> "$GITHUB_ENV"
 
       - name: Publish the release
@@ -105,5 +117,5 @@ jobs:
         if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: jarvis-release-apk
+          name: ${{ env.APK_UNSIGNED == 'true' && 'jarvis-unsigned-release-apk' || 'jarvis-release-apk' }}
           path: ${{ env.APK }}
