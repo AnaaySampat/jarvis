@@ -1,13 +1,23 @@
 # Status
 
-**2026-11-01 — Hand-gesture camera release fix:** reproduced startup failure in an
-optimized Android 16 test app with CAMERA and overlay access granted. MediaPipe
-initialization threw `RuntimeException: Field platform_ ... not found` because R8
-removed protobuf-lite fields. The phone plugin now exports consumer rules for the
-protobuf messages and JNI callbacks, and logs the actual startup failure. The
-[release regression](../scripts/gesture-camera-smoke/README.md) checks frame delivery,
-stop and restart with the bundled model. Post-fix release/device verification is
-pending; the pre-fix failure is confirmed. No physical phone is connected.
+**2026-11-02 — Hand-gesture camera crash:** the connected SM-E156B's installed
+2.5.2 release repeatedly crashed with `ExceptionInInitializerError` while loading
+MediaPipe Graph. The cause was Flogger's `no caller found on the stack`: R8
+optimized away stack frames its logger factory needs. The optimized
+[release regression](../scripts/gesture-camera-smoke/README.md) reproduced this on
+the same phone before the fix. Consumer rules now preserve Flogger as well as the
+protobuf-lite fields and JNI callbacks addressed on 2026-11-01. Model startup,
+frame analysis and cleanup also handle `LinkageError` so Java/JNI initialization
+failures end the camera session instead of crashing JARVIS. **Post-fix physical
+phone regression passed:** recognized frames, stop and restart, with the bundled
+model and R8 enabled. Typecheck, lint and 558 JS tests passed (9 skipped). Signed local
+2.5.3 release APK installed in place on the SM-E156B (Android 16), with the same
+signing certificate. **App-level verification passed:** Settings > Voice > Start
+camera reached Camera on with actual recognition frames; three start/stop cycles
+kept the same app process alive and produced no camera/runtime errors. The
+closed-fist stop gesture also fired successfully. Camera left off; APK saved to
+`Download/JARVIS-2.5.3-camera-fix.apk` on the phone. No release was published.
+
 Ecosystem foundation preview, **2026-10-31**: conversation task cards, scoped STOP,
 Ecosystem Health, private diagnostics, pinned Windows/Android contracts and release
 gates are implemented behind Settings → Ecosystem Health → Foundation preview.

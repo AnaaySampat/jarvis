@@ -18,3 +18,10 @@
 # remove or rename fields (e.g. bitField0_) even though serialization needs them.
 # https://github.com/protocolbuffers/protobuf/blob/main/java/lite.md
 -keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
+
+# MediaPipe initializes FluentLogger while loading Graph. Flogger locates its
+# caller by walking the Java stack; R8 inlining/merging its factory and caller
+# finder removes frames it requires ("no caller found on the stack"). Keep this
+# small logging runtime intact, including its stack-walking helpers.
+# https://github.com/google/flogger/issues/388
+-keep class com.google.common.flogger.** { *; }

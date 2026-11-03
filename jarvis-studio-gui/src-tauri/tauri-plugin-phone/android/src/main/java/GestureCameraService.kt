@@ -161,8 +161,11 @@ class GestureCameraService : LifecycleService() {
                             .build())
                     main.post { if (!closing) bindCamera() }
                 } catch (error: Exception) {
-                    Log.e("GestureCamera", "Could not load gesture model", error)
-                    main.post { finish("Gesture model could not load. Restart JARVIS and try again.") }
+                    modelLoadFailed(error)
+                } catch (error: LinkageError) {
+                    // JNI loading and static initializers throw Errors, not Exceptions.
+                    // Stop this session instead of killing the whole app process.
+                    modelLoadFailed(error)
                 }
             }
         } catch (error: Exception) {
@@ -170,6 +173,11 @@ class GestureCameraService : LifecycleService() {
             finish("Camera could not start. Check camera and display-over-apps permissions.")
         }
         return START_NOT_STICKY
+    }
+
+    private fun modelLoadFailed(error: Throwable) {
+        Log.e("GestureCamera", "Could not load gesture model", error)
+        main.post { finish("Gesture model could not load. Restart JARVIS and try again.") }
     }
 
     private fun showForeground() {
@@ -322,6 +330,9 @@ class GestureCameraService : LifecycleService() {
                     if (event == GestureRecognition.Gesture.FIST) finish("Camera stopped by closed fist.")
                 }
             }
+        } catch (error: LinkageError) {
+            Log.e("GestureCamera", "Gesture runtime could not process a camera frame", error)
+            main.post { finish("Gesture recognition could not load. Restart JARVIS and try again.") }
         } catch (error: Exception) {
             if (failures == 0) Log.e("GestureCamera", "Could not recognize camera frame", error)
             failures++
@@ -426,7 +437,17 @@ class GestureCameraService : LifecycleService() {
         overlay?.let { try { getSystemService(WindowManager::class.java).removeView(it) } catch (_: Exception) { } }
         overlay = null
         // Close the model behind any current inference, on the same worker.
-        worker.execute { recognizer?.close(); recognizer = null }
+        worker.execute {
+            try {
+                recognizer?.close()
+            } catch (error: Exception) {
+                Log.e("GestureCamera", "Could not close gesture model", error)
+            } catch (error: LinkageError) {
+                Log.e("GestureCamera", "Gesture runtime unavailable during cleanup", error)
+            } finally {
+                recognizer = null
+            }
+        }
         worker.shutdown()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
