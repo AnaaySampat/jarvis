@@ -214,7 +214,11 @@ export async function runTurn(
   const journal = deps.journal ?? new WorkflowJournal();
   const objective = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const run = journal.begin(objective);
-  const scopedDeps = { ...deps, readAgentResult: (id: string) => journal.readResult(run.id, id) };
+  const scopedDeps = {
+    ...deps,
+    shouldStopPhoneTask: () => journal.shouldStop(run.id) || Boolean(deps.shouldStopPhoneTask?.()),
+    readAgentResult: (id: string) => journal.readResult(run.id, id),
+  };
   try {
     const output = await runTurnSteps(
       messages,
@@ -227,6 +231,7 @@ export async function runTurn(
     );
     if (
       deps.verifyCompletion &&
+      !scopedDeps.shouldStopPhoneTask() &&
       run.state !== "suspended" &&
       run.results.length &&
       (run.results.length > 1 || isComplexTask(objective)) &&
@@ -282,7 +287,20 @@ export async function runTurn(
         : run.state === "succeeded"
           ? "succeeded"
           : "unverified");
+    run.outcome = output.status;
+    if (scopedDeps.shouldStopPhoneTask() || output.toolResults.some((r) => r.error === "cancelled")) {
+      run.state = "suspended";
+      run.outcome = "cancelled";
+      run.reason = "Stopped by the user. Already-started actions must be checked before retrying.";
+      output.status = "unverified";
+      if (!output.toolResults.some((r) => r.error === "cancelled"))
+        output.reply = "Stopped.";
+    }
     return output;
+  } catch (error) {
+    run.reason = "Execution interrupted. Inspect completed and pending work before retrying.";
+    run.outcome = run.pending ? "unverified" : "failed";
+    throw error;
   } finally {
     if (run.state === "running") run.state = "suspended";
     journal.save(run);
@@ -323,6 +341,10 @@ async function runTurnSteps(
     }
     if (run.metrics) run.metrics.model_decisions++;
     const reply = await chatOverLadder(convo, tools, deps.config, onFallback);
+    if (deps.shouldStopPhoneTask?.()) {
+      run.state = "suspended";
+      return { reply: "Stopped.", toolResults, calledTools };
+    }
 
     if (!reply.toolCalls.length) {
       // One silent recovery round, as main.py did: the claim is never spoken, and the
@@ -364,6 +386,11 @@ async function runTurnSteps(
       round--;
     }
     for (const call of reply.toolCalls) {
+      // STOP may arrive during a model call or the preceding tool in this batch.
+      if (deps.shouldStopPhoneTask?.()) {
+        run.state = "suspended";
+        return { reply: "Stopped.", toolResults, calledTools };
+      }
       calledTools.push(call.name);
       const isPhoneTask = call.name === "phone_task";
       let result: ToolResult;

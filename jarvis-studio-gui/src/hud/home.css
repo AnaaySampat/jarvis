@@ -632,3 +632,19 @@
 .home--cards-hud .rt-name { color: var(--ac2); }
 .home--font-hud .rt-name { font-family: var(--disp); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
 .home--font-hud .rt-when, .home--font-hud .rt-note { font-family: var(--mono); letter-spacing: 0.04em; }
+
+/* Focus and overflow improvements preserve the user's accent and corner variables. */
+.home :is(button, [role="button"], a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ac2, var(--ac));
+  outline-offset: 3px;
+}
+.home-col > *, .home-hero > * { min-width: 0; }
+.home :is(.stat-l, .stat-v, .stat-s, .hero-greet, .hero-status) { overflow-wrap: anywhere; }
+.home .stat-v { font-variant-numeric: tabular-nums lining-nums; }
+.home-conn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 720px) {
+  .home-nav-btn { min-height: 44px; }
+  .home :is(.home-top, .home-nav, .home-tools) { min-width: 0; }
+  .home .home-nav { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .home .home-nav::-webkit-scrollbar { display: none; }
+}

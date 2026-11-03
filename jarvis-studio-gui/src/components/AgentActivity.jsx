@@ -3,6 +3,7 @@ import StateMessage from "./StateMessage";
 import ModalPanel from "./ModalPanel";
 import { stepIcon } from "../hooks/agentActivity";
 import { ACTIVE_TASK_STATES, TERMINAL_TASK_STATES } from "../hooks/taskCenter";
+import { taskDisplayState, TASK_LABELS } from "../hooks/workflowTasks";
 
 const STATUS = {
   accepted: { label: "accepted", cls: "activity-pill--run" },
@@ -25,6 +26,7 @@ const STATUS = {
 };
 
 function taskIcon(task) {
+  if (task.kind === "workflow") return "WF";
   if (task.kind === "phone" || task.source === "phone") return "PH";
   if (task.kind === "browser") return "WEB";
   return "PC";
@@ -55,10 +57,15 @@ function approvalExpiry(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onStopAll }) {
+function updatedTime(value) {
+  const date = new Date(value);
+  return value && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onStopAll, onReview }) {
   const [zoom, setZoom] = useState(null);
   const ordered = [...(tasks || [])].sort(
-    (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
+    (a, b) => (updatedTime(b.updatedAt)?.getTime() || 0) - (updatedTime(a.updatedAt)?.getTime() || 0),
   );
   const hasActive = ordered.some((task) => ACTIVE_TASK_STATES.has(task.status));
 
@@ -85,21 +92,23 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
       <>
         {ordered.length === 0 ? (
           <StateMessage variant="empty" icon="inbox" title="No tasks yet">
-            PC and phone work you hand to JARVIS appears here with live progress, recovery details
+            Conversations, PC and phone work appear here with live progress, recovery details
             and the evidence it verified against.
           </StateMessage>
         ) : (
           <div className="activity-list">
             {ordered.map((task) => {
               const status = STATUS[task.status] || STATUS.running;
+              const displayState = taskDisplayState(task);
+              const updated = updatedTime(task.updatedAt);
               const plan = planLines(task.plan);
-              const canStop = !TERMINAL_TASK_STATES.has(task.status);
+              const canStop = ACTIVE_TASK_STATES.has(task.status) || (task.source !== "workflow" && !TERMINAL_TASK_STATES.has(task.status));
               return (
                 <article key={task.id} className="activity-task">
                   <div className="activity-task-hd">
                     <span className="activity-task-ico">{taskIcon(task)}</span>
                     <span className="activity-task-goal">{task.goal || "Task"}</span>
-                    <span className={`activity-pill ${status.cls}`}>{status.label}</span>
+                    <span className={`activity-pill ${status.cls}`}>{TASK_LABELS[displayState]}</span>
                     {canStop && onStopTask && (
                       <button
                         className="activity-task-stop"
@@ -113,10 +122,11 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
 
                   <div className="activity-meta">
                     <span>
-                      {task.source === "phone" || task.kind === "phone"
+                      {task.deviceLabel || (task.source === "phone" || task.kind === "phone"
                         ? "On this phone"
-                        : "Windows host"}
+                        : "Windows host")}
                     </span>
+                    {updated && <time dateTime={updated.toISOString()}>Updated {updated.toLocaleString()}</time>}
                     {Number.isFinite(Number(task.currentStep)) && Number(task.currentStep) > 0 && (
                       <span>
                         Step {task.currentStep}
@@ -132,6 +142,11 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
                     </div>
                   )}
                   {task.retryInfo && <div className="activity-notice">Retry: {task.retryInfo}</div>}
+                  {task.completed?.length > 0 && <div className="activity-notice"><strong>Completed</strong><ul>{task.completed.map((line, i) => <li key={i}>{line}</li>)}</ul></div>}
+                  {task.remaining?.length > 0 && <div className="activity-notice"><strong>Remaining</strong><ul>{task.remaining.map((line, i) => <li key={i}>{line}</li>)}</ul></div>}
+                  {["needs_you", "partial"].includes(displayState) && onReview && (
+                    <button className="activity-clear" onClick={() => onReview(task)}>Review saved work</button>
+                  )}
                   {task.waitingReason && (
                     <div className="activity-notice activity-notice--waiting">
                       Waiting: {task.waitingReason}

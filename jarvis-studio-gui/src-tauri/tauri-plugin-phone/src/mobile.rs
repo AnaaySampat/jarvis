@@ -50,6 +50,8 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(stop_gesture_recognition() -> ActionResponse, "stopGestureRecognition");
     mobile_command!(poll_gesture_recognition() -> GestureStateResponse, "pollGestureRecognition");
     mobile_command!(is_enabled() -> IsEnabledResponse, "isEnabled");
+    mobile_command!(health_status() -> HealthStatusResponse, "healthStatus");
+    mobile_command!(health_export(payload: HealthExportRequest) -> ActionResponse, "healthExport");
     mobile_command!(observe() -> ObserveResponse, "observe");
     mobile_command!(tap(payload: TapRequest) -> ActionResponse, "tap");
     mobile_command!(tap_xy(payload: TapXyRequest) -> ActionResponse, "tapXy");
@@ -65,6 +67,7 @@ impl<R: Runtime> Phone<R> {
     mobile_command!(close_app(payload: CloseAppRequest) -> ActionResponse, "closeApp");
     mobile_command!(open_url(payload: OpenUrlRequest) -> ActionResponse, "openUrl");
     mobile_command!(set_volume(payload: VolumeRequest) -> ActionResponse, "setVolume");
+    mobile_command!(set_wake_sensitivity(payload: VolumeRequest) -> ActionResponse, "setWakeSensitivity");
     mobile_command!(read_clipboard() -> ActionResponse, "readClipboard");
     mobile_command!(open_system_settings(payload: SystemSettingsRequest) -> ActionResponse, "openSystemSettings");
     mobile_command!(open_accessibility_settings() -> ActionResponse, "openAccessibilitySettings");

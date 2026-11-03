@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "canonical": "aura-android",
+  "sha256": {
+    "bundle.json": "d305ce62d7ee4eb2b5aaa27cf7b42593c1cfd667754c6fc32f709e6e44a7f748",
+    "golden.json": "9913e43130189a22cfa704078dfdab2f278264c2942eb4fe7a3886128220067b",
+    "task-states.json": "4f244e3b01dc51e4e88d170c8abf8130d12f76166149b82306a369f9ca75eb0e"
+  }
+}

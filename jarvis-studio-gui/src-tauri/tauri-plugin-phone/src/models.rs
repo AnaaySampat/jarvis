@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthStatusResponse {
+    pub ok: bool,
+    pub app_version: String,
+    pub sdk: i32,
+    pub permissions: std::collections::BTreeMap<String, bool>,
+    pub battery_exempt: bool,
+    pub background_restricted: bool,
+    pub wake_listening: bool,
+    pub portable_background: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthExportRequest { pub diagnostics_json: String }
+
 /// On-screen bounds in device pixels.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bounds {

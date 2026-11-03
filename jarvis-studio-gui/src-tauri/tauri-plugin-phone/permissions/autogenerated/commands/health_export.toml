@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-health-export"
+description = "Enables the health_export command without any pre-configured scope."
+commands.allow = ["health_export"]
+
+[[permission]]
+identifier = "deny-health-export"
+description = "Denies the health_export command without any pre-configured scope."
+commands.deny = ["health_export"]

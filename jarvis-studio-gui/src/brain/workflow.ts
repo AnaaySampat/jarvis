@@ -13,6 +13,8 @@ export interface Workflow {
   plan: string[];
   results: AgentResult[];
   pending: { id: string; tool: string; state: "intent_recorded" } | null;
+  outcome?: import("./results").ResultStatus | "cancelled";
+  cancelRequested?: boolean;
   reason?: string;
   completion?: import("./completion").CompletionVerdict;
   metrics?: {
@@ -27,6 +29,14 @@ export interface Workflow {
 }
 const KEY = "jarvis.android.workflows.v1";
 const liveWorkflows = new Set<string>();
+const stopRequests = new Set<string>();
+const listeners = new Set<() => void>();
+
+/** In-process notifications only: checkpoint contents never travel in DOM events. */
+export function subscribeWorkflows(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
 export class WorkflowJournal {
   private kv: KV;
@@ -63,9 +73,15 @@ export class WorkflowJournal {
       records.some(
         (r) =>
           !r ||
+          r.version !== 1 ||
           typeof r.id !== "string" ||
+          typeof r.objective !== "string" ||
+          !Number.isFinite(r.updated) ||
+          !Array.isArray(r.plan) || r.plan.some((step: unknown) => typeof step !== "string") ||
           !["running", "succeeded", "suspended"].includes(r.state) ||
-          !Array.isArray(r.results),
+          !Array.isArray(r.results) ||
+          r.results.some((result: AgentResult) => !result || typeof result.summary !== "string" || typeof result.ok !== "boolean") ||
+          (r.pending !== null && (!r.pending || typeof r.pending.id !== "string" || typeof r.pending.tool !== "string" || r.pending.state !== "intent_recorded")),
       )
     ) {
       throw new Error("Workflow journal is invalid. Inspect stored work before continuing.");
@@ -73,6 +89,7 @@ export class WorkflowJournal {
     return records as Workflow[];
   }
   save(run: Workflow): void {
+    if (stopRequests.has(run.id)) run.cancelRequested = true;
     if (run.state !== "running") this.live.delete(run.id);
     run.updated = Date.now();
     const metrics = (run.metrics ??= {
@@ -96,7 +113,26 @@ export class WorkflowJournal {
     if (!writeJson(this.kv, KEY, kept))
       throw new Error("Workflow checkpoint could not be saved; no further action was run.");
     if (run.state === "running") this.live.add(run.id);
+    else stopRequests.delete(run.id);
+    for (const listener of listeners) {
+      try { listener(); } catch { /* Observers cannot prevent checkpoint persistence. */ }
+    }
   }
+  list(): Workflow[] { return this.all(); }
+
+  requestStop(id: string): boolean {
+    const run = this.all().find((item) => item.id === id);
+    if (!run || run.state !== "running" || !this.live.has(id)) return false;
+    stopRequests.add(id);
+    run.cancelRequested = true;
+    this.save(run);
+    return true;
+  }
+
+  shouldStop(id: string): boolean { return stopRequests.has(id); }
+
+  /** Hide finished cards without deleting the journal or any unresolved work. */
+  // The UI owns dismissal; this journal deliberately has no destructive clear action.
   begin(objective: string): Workflow {
     const run: Workflow = {
       version: 1,

@@ -4,10 +4,12 @@ import type { LLMReply } from "./providers";
 const replies: LLMReply[] = [];
 const seen: string[][] = [];
 const seenTools: string[][] = [];
+let onReply: (() => void) | undefined;
 vi.mock("./ask", () => ({
   chatOverLadder: async (convo: Array<{ content: string }>, tools?: Array<{ name: string }>) => {
     seen.push(convo.map((m) => m.content));
     seenTools.push((tools ?? []).map((t) => t.name));
+    onReply?.();
     return replies.shift() ?? { text: "(script exhausted)", toolCalls: [] };
   },
 }));
@@ -46,6 +48,7 @@ beforeEach(() => {
   seenTools.length = 0;
   dispatched.length = 0;
   results.length = 0;
+  onReply = undefined;
 });
 
 describe("runTurn — a phone task that acted and failed is not re-run", () => {
@@ -90,6 +93,32 @@ describe("runTurn — a phone task that acted and failed is not re-run", () => {
 });
 
 describe("runTurn — STOP", () => {
+  it("does not dispatch a model reply that arrived after STOP and does not cancel the next turn", async () => {
+    const journal = new WorkflowJournal();
+    const call = { text: "", toolCalls: [{ id: "one", name: "set_timer", args: { seconds: 1 } }] };
+    replies.push(call);
+    onReply = () => {
+      const current = journal.list().find((run) => run.state === "running");
+      expect(current).toBeDefined();
+      journal.requestStop(current!.id);
+    };
+    await runTurn([{ role: "user", content: "First timer" }], [], { ...deps, journal });
+    expect(dispatched).toEqual([]);
+    onReply = undefined;
+    replies.push(call, { text: "Timer set", toolCalls: [] });
+    await runTurn([{ role: "user", content: "Next timer" }], [], { ...deps, journal });
+    expect(dispatched).toEqual(["clock"]);
+  });
+  it("prevents later tools in the same response after STOP", async () => {
+    replies.push({ text: "", toolCalls: [
+      { id: "one", name: "set_timer", args: { seconds: 1 } },
+      { id: "two", name: "set_alarm", args: { hour: 8, minute: 0 } },
+    ] });
+    await runTurn([{ role: "user", content: "Timer and alarm" }], [], {
+      ...deps, shouldStopPhoneTask: () => dispatched.length > 0,
+    });
+    expect(dispatched).toEqual(["clock"]);
+  });
   it("ends the turn on the task's own words, with no model round to recast it", async () => {
     // Live 2026-10-20: STOP mid TV task, then "I wasn't able to complete that task on
     // your TV. Would you like me to try again…?"

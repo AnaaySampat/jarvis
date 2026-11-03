@@ -16,6 +16,19 @@ import { inTauri } from "../tools/httpClient";
 import type { PhoneMedia } from "../remote/tv";
 import { makeKV, readJson, writeJson } from "../memory/store";
 
+export interface NativeHealth {
+  ok: boolean;
+  appVersion: string;
+  sdk: number;
+  permissions: Record<string, boolean>;
+  batteryExempt: boolean;
+  backgroundRestricted: boolean;
+  wakeListening: boolean;
+  portableBackground: boolean;
+}
+export const readEcosystemHealth = () => phoneJson<NativeHealth>("health_status", {});
+export const exportDiagnostics = (diagnosticsJson: string) => phoneInvoke("health_export", { diagnosticsJson });
+
 export interface TextToSpeech {
   speak(text: string): Promise<void>;
   stop(): Promise<void>;

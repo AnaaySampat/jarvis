@@ -657,6 +657,12 @@ Two features already work around it the same way — **poll a monotonic sequence
   greeting precedes the name (`heardWakePhrase`, which also takes Whisper's "Kay"/"A." for
   "Hey"), and is whatever follows the last one (`commandAfterWake`). A failed
   transcription now drops the command — there's no separate recording to fall back on.
+  **Sensitivity (2026-10-31):** Settings → Voice saves a 0–100 sensitivity through
+  `set_wake_sensitivity` → `setWakeSensitivity`. Native preferences persist it and
+  the running listener reads it for each score. `WakeSensitivity.kt` maps 0 to 0.60,
+  60 (the default) to the existing 0.35, and 100 to 0.18. The microphone source,
+  greeting-required transcript check and singleton lifecycle are unchanged. The UI
+  waits for a successful native save and reports a failure instead of accepting it.
 - Cross-app STOP: `platform/stopOverlay.ts` polls `poll_stop_overlay` every 250 ms.
 - Routine notifications: the routine tick in `useBrain.js` (30 s, and on becoming visible)
   polls `poll_routine_tap` for a new `seq`. The tap's intent is taken in **`MainActivity`**
@@ -966,9 +972,55 @@ singleton (`syncWakeWord()`, keyed by a config-hash signature) deliberately *not
 a React effect's mount/unmount. StrictMode's mount→unmount→remount was killing the engine
 mid-boot. Don't "tidy" it back into an effect.
 
+### English guidance and imported skills
+
+`brain/taskGuidance.ts` selects a compact English task guide for the TypeScript chat
+prompt. `brain/skillStore.ts` stores reviewed user imports in WebView local storage;
+Settings → Skills manages import, preview, activation and removal. Imports begin
+disabled. Enabled keyword skills require a matching English word/phrase; unkeyed
+skills are general guidance. No unrelated-skill fallback is used. At most three
+matching skills and 18,000 instruction characters enter a local main-chat prompt.
+Imported text is JSON-encoded as untrusted reference material and never executes.
+Incoming PC/WhatsApp requests and scoped consultations do not receive local imports.
+The existing dispatch, permissions and verification boundaries remain in place.
+See [USER_SKILLS.md](USER_SKILLS.md) for formats, limits and storage behavior.
+
+The home-screen CSS keeps Customize's accent and corner variables while adding
+focus, touch, reduced-motion and overflow refinements; small control radii remain
+derived from the selected corner setting.
+
+
 ---
 
 ## 9. Conventions
+
+### Ecosystem foundation preview (2026-10-31)
+
+`WorkflowJournal` remains the conversation checkpoint owner. Its in-process
+subscription updates the existing Tasks view alongside native Room and signed PC
+tasks; no tools run from the task cards. A per-workflow STOP request survives stale
+in-flight object writes, is checked after model calls and between tools, and is
+cleared at completion. Interrupted effects retain their pending intent for manual
+reconciliation. The original version-1 records remain readable; malformed records
+are preserved and fail closed. Room migration for portable conversation jobs belongs
+to milestone 2, after the foundation acceptance gate.
+
+The existing phone bridge adds `health_status` → `healthStatus` and
+`health_export` → `healthExport`. Health is read-only and does not request
+permissions. Repair buttons open the existing system/setup screens. Diagnostic
+export is reconstructed from closed vocabularies and bounded numeric fields in
+both TypeScript and Kotlin before Android shares a single cache file. Native
+permissions and readiness refresh when the page opens or returns to the foreground.
+Provider configuration is distinct from verified availability. Optional source
+version metadata arrives in the existing host-signed `auth.ready`; old peers need
+no new feature support. Stable updates remain the default; opt-in beta checks
+GitHub prereleases with an independent daily check window and prerelease ordering.
+
+`contracts/ecosystem-v1` owns the canonical JSON schemas and golden fixtures;
+Windows vendors a byte-identical SHA-256-pinned copy. These are contract scaffolding,
+not a new executor. The foundation gate consumes measured acceptance evidence;
+scripted tests cannot substitute for live runs. See
+[the implementation report](ECOSYSTEM-IMPLEMENTATION.md).
 
 - **Tests are colocated** — `foo.test.ts` sits next to `foo.ts` (vitest), not in a
   separate `tests/` tree. Follow that for new modules.

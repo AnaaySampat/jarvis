@@ -225,7 +225,7 @@ export function reduceNativeStatus(prev, status, { recovered = false } = {}) {
   const unverifiedSuccess = state === "succeeded" && !verified;
   if (unverifiedSuccess) state = "failed";
   const result = unverifiedSuccess
-    ? "Completion was withheld because the native record has no verified evidence. Please run the task again."
+    ? "Completion was withheld because the native record has no verified evidence. Inspect the device before another attempt."
     : textOf(status.result);
   const terminal = TERMINAL_TASK_STATES.has(state);
   const waitingReason =
@@ -388,7 +388,7 @@ export function reduceRemoteTaskEvent(prev, event) {
     approval,
     items: appendReceipt(existing?.items, line, receiptKey, state !== "failed"),
     lastSeq: seq > 0 ? seq : (existing?.lastSeq ?? -1),
-    updatedAt: data.created_at || data.updated_at || Date.now(),
+    updatedAt: data.updated_at || data.created_at || Date.now(),
   };
   if (index >= 0) tasks.splice(index, 1);
   return replaceTask(tasks, task);

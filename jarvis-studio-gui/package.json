@@ -18,7 +18,11 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:live": "vitest run replay.live",
-    "test:workflow": "vitest run src/brain/workflow.test.ts src/brain/results.test.ts src/brain/completion.test.ts"
+    "test:workflow": "vitest run src/brain/workflow.test.ts src/brain/results.test.ts src/brain/completion.test.ts",
+    "test:foundation": "vitest run src/brain/workflow.test.ts src/brain/loop.test.ts src/brain/ecosystemHealth.test.ts src/hooks/workflowTasks.test.ts src/hooks/taskCenter.test.ts src/brain/schedule/routines.test.ts src/brain/remote/pc.test.ts src/brain/remote/tv.test.ts src/brain/whatsapp.test.ts",
+    "test:contracts": "node ../scripts/check-contracts.mjs",
+    "test:release-gate": "node --test ../scripts/foundation-gate.test.mjs",
+    "check:foundation-gate": "node ../scripts/foundation-gate.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -38,6 +42,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "ajv": "^6.15.0",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",

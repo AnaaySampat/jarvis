@@ -8,7 +8,16 @@ import {
 } from "../brain/platform";
 import { modelClassFor } from "../brain/modelPolicy";
 import * as quota from "../brain/quota";
+import { normalizeWakeSensitivity } from "../brain/platform/wakeword";
+import {
+  loadSkills,
+  parseSkillFile,
+  saveSkills,
+  MAX_SKILLS,
+  MAX_SKILL_FILE_CHARS,
+} from "../brain/skillStore";
 import Icon from "./Icon";
+import EcosystemHealth from "./EcosystemHealth";
 import StateMessage from "./StateMessage";
 import GestureControls from "./GestureControls";
 import { ActionRow, Field, Group, More, Toggle, WIDE_QUERY, Warn } from "./Sheet";
@@ -292,6 +301,10 @@ export default function Settings({
   onRepairSetup,
   onOpenCustomize,
   gestureControls,
+  pcState,
+  pcVersion,
+  tasks,
+  onPair,
 }) {
   // Re-discover models when the panel opens so the dropdown is current (e.g. a
   // local Ollama model pulled since launch, or a key just added in another client).
@@ -336,6 +349,11 @@ export default function Settings({
     sysInfo.provider_mode || (IS_MOBILE ? "auto" : "groq"),
   );
   const [wakeWordOn, setWakeWordOn] = useState(sysInfo.wake_word !== false);
+  const [wakeSensitivity, setWakeSensitivity] = useState(
+    normalizeWakeSensitivity(sysInfo.wake_sensitivity),
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [autoSwitch, setAutoSwitch] = useState(sysInfo.auto_switch_models !== false);
   const [offlineModel, setOfflineModel] = useState(sysInfo.offline_model ?? "");
   const [ollamaUrl, setOllamaUrl] = useState(sysInfo.ollama_url ?? "http://localhost:11434");
@@ -382,6 +400,41 @@ export default function Settings({
   // set_overlay) so saving Settings doesn't silently reset it to "except".
   const [ovlMode] = useState(sysInfo.overlay?.mode ?? "except");
   const [newApp, setNewApp] = useState("");
+  const [skills, setSkills] = useState(() => loadSkills());
+  const [skillMessage, setSkillMessage] = useState("");
+  const [importingSkill, setImportingSkill] = useState(false);
+
+  const importSkill = async (event) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    setImportingSkill(true);
+    try {
+      if (file.size > MAX_SKILL_FILE_CHARS * 4) throw new Error("The skill file is too large.");
+      const imported = parseSkillFile(file.name, await file.text());
+      const current = loadSkills();
+      if (current.length >= MAX_SKILLS) throw new Error("You have reached the 50-skill limit.");
+      const next = [...current, imported];
+      saveSkills(next);
+      setSkills(next);
+      setSkillMessage(`Imported “${imported.name}”. Review its instructions, then enable it.`);
+    } catch (error) {
+      setSkillMessage(error?.message || "Could not import this skill.");
+    } finally {
+      input.value = "";
+      setImportingSkill(false);
+    }
+  };
+
+  const changeSkills = (next) => {
+    try {
+      saveSkills(next);
+      setSkills(next);
+      setSkillMessage("Skill library saved.");
+    } catch (error) {
+      setSkillMessage(error?.message || "Could not save the skill library.");
+    }
+  };
 
   const addApp = () => {
     const a = newApp
@@ -418,6 +471,7 @@ export default function Settings({
     };
     cfg.auto_switch_models = autoSwitch;
     if (IS_MOBILE) cfg.wake_word = wakeWordOn;
+    if (IS_MOBILE) cfg.wake_sensitivity = wakeSensitivity;
     if (IS_MOBILE) {
       cfg.pc_commands = pcCommands;
       cfg.wa_mode = waMode;
@@ -445,10 +499,22 @@ export default function Settings({
   const [cfgOnOpen] = useState(cfgNow);
   const dirty = cfgNow !== cfgOnOpen;
 
-  const handleSave = () => {
-    onSave(buildCfg());
-    onRefreshModels && onRefreshModels();
-    onClose();
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      if ((await onSave(buildCfg())) === false) {
+        setSaveError("Some settings could not be saved. Check the warning and try again.");
+        return;
+      }
+      onRefreshModels && onRefreshModels();
+      onClose();
+    } catch (error) {
+      setSaveError(error?.message || "Could not save settings. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const geminiSelected = isGemini(model);
@@ -887,6 +953,23 @@ export default function Settings({
               onChange={setWakeWordOn}
               hint="Listens on the phone itself. Nothing is sent until it hears the wake word."
             />
+          <Field label={`Wake word sensitivity: ${wakeSensitivity}`}>
+            <input
+              aria-label="Wake word sensitivity"
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={wakeSensitivity}
+              onChange={(event) => setWakeSensitivity(Number(event.target.value))}
+              disabled={!wakeWordOn}
+              style={{ width: "100%" }}
+            />
+            <p className="sp-desc">
+              Higher catches quieter speech but can trigger more often. Lower is stricter. Default:
+              60. Applies when you save changes.
+            </p>
+          </Field>
             <div className="sp-field">
               <More>
                 Needs microphone permission. Speech-to-text uses Cloud Speech-to-Text on Vertex, or
@@ -1231,8 +1314,111 @@ export default function Settings({
     </>
   );
 
+  const skillsPage = (
+    <>
+      <Group title="Import a skill">
+        <Field label="Choose skill file">
+          <input
+            aria-label="Choose skill file"
+            className="sp-input"
+            type="file"
+            accept=".md,.markdown,.txt,.json,text/markdown,text/plain,application/json"
+            onChange={importSkill}
+            disabled={importingSkill}
+          />
+          <p className="sp-desc">
+            Import English instructions from Markdown, text or JSON. Skills are saved immediately on
+            this device. Review each import before enabling it.
+          </p>
+          <p className="sp-desc">
+            Optional keywords limit a skill to matching requests. Without keywords, an enabled skill
+            provides general guidance. Up to three matching skills are used per request.
+          </p>
+          <a
+            className="sp-link"
+            href={
+              "data:text/markdown;charset=utf-8," +
+              encodeURIComponent(
+                "---\nname: Research Helper\ndescription: Compare reliable sources\nkeywords: research, sources\n---\nPrefer primary sources. State uncertainty and cite your sources.",
+              )
+            }
+            download="jarvis-skill-template.md"
+          >
+            Download example skill
+          </a>
+          {skillMessage && (
+            <p className="sp-desc" role="status" aria-live="polite">
+              {skillMessage}
+            </p>
+          )}
+        </Field>
+      </Group>
+      <Group title={`Your skills (${skills.length})`}>
+        {!skills.length ? (
+          <StateMessage icon="spark" title="No custom skills yet">
+            Import a skill for a reusable writing style, research method or checklist.
+          </StateMessage>
+        ) : (
+          skills.map((skill) => (
+            <div className="skill-entry" key={skill.id}>
+              <div className="skill-entry-info">
+                <div className="sp-label">{skill.name}</div>
+                <div className="sp-desc">{skill.description || skill.sourceName}</div>
+                <div className="sp-desc">
+                  {skill.keywords.length
+                    ? `Keywords: ${skill.keywords.join(", ")}`
+                    : "General guidance"}
+                </div>
+                <details>
+                  <summary>Review instructions</summary>
+                  <pre>{skill.content}</pre>
+                </details>
+                <label className="sp-check">
+                  <input
+                    type="checkbox"
+                    checked={skill.enabled}
+                    onChange={(event) =>
+                      changeSkills(
+                        skills.map((item) =>
+                          item.id === skill.id ? { ...item, enabled: event.target.checked } : item,
+                        ),
+                      )
+                    }
+                  />
+                  Use this skill
+                </label>
+              </div>
+              <button
+                type="button"
+                className="dirlist-rm"
+                aria-label={`Remove skill ${skill.name}`}
+                onClick={() => changeSkills(skills.filter((item) => item.id !== skill.id))}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))
+        )}
+      </Group>
+      <Group title="About skills">
+        <p className="sp-desc">
+          Skills guide replies; they do not add tools or permissions. Imported scripts are never
+          executed. Up to 50 skills are stored locally, with 12,000 instruction characters per
+          skill.
+        </p>
+      </Group>
+    </>
+  );
+
   const diagnosticsPage = (
     <>
+      {IS_MOBILE && <Group title="Ecosystem beta">
+        <Toggle label="Foundation preview" checked={sysInfo.ecosystem_beta === true} onChange={(value) => void onSave({ ecosystem_beta: value })} hint="Enables conversation task cards, Ecosystem Health and private diagnostics. Device acceptance is pending; later milestones remain unavailable." />
+      </Group>}
+      {IS_MOBILE && <Group title="Updates">
+        <Toggle label="Include beta updates" checked={sysInfo.update_channel === "beta"} onChange={(value) => void onSave({ update_channel: value ? "beta" : "stable" })} hint="Stable is the default. Beta also checks prereleases; installing remains your choice. Existing installers and app data are retained." />
+      </Group>}
+      {IS_MOBILE && sysInfo.ecosystem_beta === true && <EcosystemHealth sysInfo={sysInfo} pcState={pcState || "idle"} pcVersion={pcVersion} tasks={tasks} onNavigate={setPage} onPair={onPair} onTest={onRepairSetup} />}
       <Group title="Now">
         <div className="sp-field sp-row">
           <span className="sp-label">Provider</span>
@@ -1303,6 +1489,16 @@ export default function Settings({
         value: model !== "auto" ? model : PROVIDER_NAME[providerMode] || providerMode,
         tone: "on",
         body: modelsPage,
+      },
+      IS_MOBILE && {
+        id: "skills",
+        title: "Skills",
+        icon: "spark",
+        desc: "Import, review and enable reusable English guidance.",
+        words: "skills import upload markdown json instructions",
+        value: `${skills.filter((skill) => skill.enabled).length} enabled`,
+        tone: skills.some((skill) => skill.enabled) ? "on" : "off",
+        body: skillsPage,
       },
       {
         id: "routing",
@@ -1426,10 +1622,10 @@ export default function Settings({
     [
       {
         id: "diagnostics",
-        title: "System",
+        title: "Ecosystem Health",
         icon: "wrench",
-        desc: "Diagnostics, logs and version.",
-        words: "diagnostics logs version debug",
+        desc: "Connections, permissions, readiness and private diagnostics.",
+        words: "health diagnostics permissions background compatibility version debug",
         value: "",
         tone: null,
         body: diagnosticsPage,
@@ -1441,7 +1637,7 @@ export default function Settings({
   // The desktop's Settings groups, in its order.
   const byId = Object.fromEntries(pages.map((pg) => [pg.id, pg]));
   const sections = [
-    ["Intelligence", ["models", "keys", "routing", "automation"]],
+    ["Intelligence", ["models", "keys", "routing", "automation", "skills"]],
     ["Experience", ["voice", "interface", "files", "location", "calendar"]],
     ["Connections", ["linked"]],
     ["System", ["diagnostics"]],
@@ -1539,14 +1735,15 @@ export default function Settings({
 
         <footer className="sp-foot">
           <span className="sp-foot-note" aria-live="polite">
-            {dirty ? "Unsaved changes" : ""}
+            {saveError || (dirty ? "Unsaved changes" : "")}
           </span>
           <button
             type="button"
             className={`sp-btn ${dirty ? "sp-btn--primary" : ""}`}
             onClick={handleSave}
+            disabled={saving}
           >
-            Save changes
+            {saving ? "Saving…" : "Save changes"}
           </button>
         </footer>
       </div>

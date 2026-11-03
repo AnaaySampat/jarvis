@@ -63,6 +63,12 @@ jobs:
           npm run typecheck
           npm run lint
           npm test
+          npm run test:contracts
+          npm run test:release-gate
+
+      - name: Stable foundation promotion requires live acceptance evidence
+        if: env.PUBLISH == 'true' && !contains(github.ref_name, '-')
+        run: npm run check:foundation-gate
 
       - name: Signing key
         env:
@@ -93,6 +99,10 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: npx tauri android build --apk --target aarch64
 
+      - name: Native regression tests
+        working-directory: jarvis-studio-gui/src-tauri/gen/android
+        run: ./gradlew :tauri-plugin-phone:testReleaseUnitTest
+
       - name: Name it
         run: |
           version=$(node -p "require('./package.json').version")
@@ -112,6 +122,7 @@ jobs:
         with:
           files: ${{ env.APK }}
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Keep the dry run's APK
         if: env.PUBLISH != 'true'

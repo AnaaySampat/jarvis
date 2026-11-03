@@ -43,6 +43,7 @@ const SETTINGS_PAGES = [
   ["keys", "API Keys", "key", "groq gemini openrouter credentials"],
   ["routing", "Routing & Quota", "route", "rate limit benched rank"],
   ["voice", "Voice", "volume", "wake word speech tts"],
+  ...(IS_MOBILE ? [["skills", "Skills", "spark", "import upload instructions markdown"]] : []),
   ["interface", "Interface", "layout", "home screen customize look"],
   ["files", "Files & Location", "folder", "storage folder location city"],
   ["calendar", "Calendar", "calendar", "agenda sync events"],
@@ -1021,6 +1022,10 @@ export default function App() {
           initialPage={settingsPage}
           gestureControls={gestures}
           sysInfo={sysInfo}
+          pcState={pcState}
+          pcVersion={sysInfo.pc_version}
+          tasks={unifiedTasks}
+          onPair={() => { setShowSettings(false); setRemoteOpen(true); }}
           onClose={() => setShowSettings(false)}
           onSave={(cfg) => sendConfig(cfg)}
           onSetLocation={sendManualLocation}
@@ -1063,6 +1068,7 @@ export default function App() {
           onClear={clearAgentTasks}
           onStopTask={stopTask}
           onStopAll={stopAllTasks}
+          onReview={() => { setActivityOpen(false); setChatOpen(true); }}
         />
       )}
 

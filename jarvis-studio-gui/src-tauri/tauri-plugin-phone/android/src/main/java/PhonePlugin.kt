@@ -138,6 +138,11 @@ internal class SystemSettingsArgs {
 }
 
 @InvokeArg
+internal class HealthExportArgs {
+    var diagnosticsJson: String = ""
+}
+
+@InvokeArg
 internal class CloseAppArgs {
     var name: String = ""
 }
@@ -1367,6 +1372,25 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun healthStatus(invoke: Invoke) {
+        try {
+            invoke.resolve(JSObject(EcosystemHealth.status(activity, accessibilityEnabled()).toString()))
+        } catch (_: Exception) {
+            invoke.reject("Health status is unavailable")
+        }
+    }
+
+    @Command
+    fun healthExport(invoke: Invoke) {
+        try {
+            EcosystemHealth.export(activity, invoke.parseArgs(HealthExportArgs::class.java).diagnosticsJson)
+            invoke.resolve(result(true, "Choose where to save or share the diagnostics."))
+        } catch (_: Exception) {
+            invoke.resolve(result(false, "Diagnostics could not be exported."))
+        }
+    }
+
+    @Command
     fun taskBegin(invoke: Invoke) {
         val args = invoke.parseArgs(TaskBeginArgs::class.java)
         val taskId = TaskJournalPayloadPolicy.safeId(args.taskId)
@@ -1880,6 +1904,15 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun setWakeSensitivity(invoke: Invoke) {
+        val args = invoke.parseArgs(VolumeArgs::class.java)
+        val level = WakeSensitivity.normalize(args.level)
+        val saved = WakeWordManager.setSensitivity(activity.applicationContext, level)
+        invoke.resolve(result(saved, if (saved) "Wake word sensitivity set to $level."
+            else "Could not save wake word sensitivity. Please try again."))
+    }
+
+    @Command
     fun readClipboard(invoke: Invoke) {
         val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = cm.primaryClip
@@ -1901,6 +1934,9 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(SystemSettingsArgs::class.java)
         val target = args.target.trim().lowercase()
         val action = when {
+            target == "app_permissions" -> Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+            target == "background" -> Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            target == "notifications" -> Settings.ACTION_APP_NOTIFICATION_SETTINGS
             target.contains("wifi") -> Settings.ACTION_WIFI_SETTINGS
             target.contains("bluetooth") -> Settings.ACTION_BLUETOOTH_SETTINGS
             target.contains("battery") -> Settings.ACTION_BATTERY_SAVER_SETTINGS
@@ -1911,6 +1947,8 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         }
         try {
             val intent = Intent(action).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            if (target == "app_permissions") intent.data = Uri.parse("package:${activity.packageName}")
+            if (target == "notifications") intent.putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
             activity.startActivity(intent)
             invoke.resolve(result(true, "Opened ${target.ifEmpty { "system" }} settings."))
         } catch (_: Exception) {

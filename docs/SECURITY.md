@@ -25,6 +25,15 @@ Severity = impact × ease. Findings are ranked. Each has: where, how I'd exploit
 
 ## PC and WhatsApp requests (2026-10-21)
 
+Foundation diagnostic export (2026-10-31): new `health_status` is read-only.
+`health_export` accepts a closed projection of versions, numeric timings/counts,
+error categories and report-local task IDs, validates it again natively and opens
+Android's chooser with a grant for one generated JSON file. It exports no raw
+logs, prompts, goals, credentials, message bodies, screenshots or document contents.
+No permission is automatically granted and no diagnostic is transmitted without
+the user choosing a destination. Existing PC/WhatsApp action authorization is
+unchanged. Foundation preview defaults off; stable updates remain the default.
+
 - **Requests from your PC and from WhatsApp run without asking on the phone.** The PC is
   your paired, signed device, and on WhatsApp a contact counts only if you listed it —
   by the name WhatsApp shows, so a listed name is trusted as far as your address book

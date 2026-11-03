@@ -4,6 +4,8 @@
 // the Rust mobile layer maps each to its camelCase Kotlin @Command method.
 const COMMANDS: &[&str] = &[
     "is_enabled",
+    "health_status",
+    "health_export",
     "observe",
     "tap",
     "tap_xy",
@@ -19,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "close_app",
     "open_url",
     "set_volume",
+    "set_wake_sensitivity",
     "read_clipboard",
     "open_system_settings",
     "open_accessibility_settings",

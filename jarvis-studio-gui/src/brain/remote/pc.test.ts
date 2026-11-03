@@ -1273,6 +1273,16 @@ describe("RemotePC — Wake-on-LAN", () => {
     expect(onWakeTargets).toHaveBeenCalledWith([ADAPTER]);
   });
 
+  it.each(["0.3.0", "", "credential-shaped arbitrary metadata"])("only exposes a version from signed metadata: %s", async (version) => {
+    FakeWS.readyExtra = { app_version: version };
+    const onPeerInfo = vi.fn();
+    const pc = new RemotePC({ host: "192.168.1.20", ...autoAuthenticatedIdentity(), onPeerInfo, WebSocketImpl: ws });
+    pc.connect();
+    await vi.advanceTimersByTimeAsync(20);
+    await waitForOnline(pc);
+    expect(onPeerInfo).toHaveBeenCalledWith({ appVersion: version === "0.3.0" ? version : "" });
+  });
+
   it("wakes a sleeping PC and only says so once it reconnects", async () => {
     FakeWS.outcome = () => "refuse";
     const pc = new RemotePC({

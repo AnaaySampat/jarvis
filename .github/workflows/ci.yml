@@ -27,8 +27,59 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Shared protocol and release-gate regressions
+        run: |
+          npm run test:contracts
+          npm run test:release-gate
+
       - name: Test
         run: npm run test
 
       - name: Build
         run: npm run build
+
+  android-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: jarvis-studio-gui/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+      - run: npm ci
+      - name: Compile a debug APK without touching release installers
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: npx tauri android build --debug --apk --target x86_64
+      - name: Kotlin regression tests
+        working-directory: jarvis-studio-gui/src-tauri/gen/android
+        run: ./gradlew :tauri-plugin-phone:testDebugUnitTest
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Room persistence, migration and secure-storage instrumentation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          working-directory: jarvis-studio-gui/src-tauri/gen/android
+          script: ./gradlew :tauri-plugin-phone:connectedDebugAndroidTest
+      - name: Retain native test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-native-results
+          path: jarvis-studio-gui/src-tauri/tauri-plugin-phone/android/build/reports/

@@ -53,6 +53,10 @@ impl<R: Runtime> Phone<R> {
             ..Default::default()
         })
     }
+    pub fn health_status(&self) -> crate::Result<HealthStatusResponse> {
+        Ok(HealthStatusResponse::default())
+    }
+    unavailable_command!(health_export(HealthExportRequest));
     pub fn is_enabled(&self) -> crate::Result<IsEnabledResponse> {
         Ok(IsEnabledResponse { enabled: false })
     }
@@ -80,6 +84,7 @@ impl<R: Runtime> Phone<R> {
     unavailable_command!(close_app(CloseAppRequest));
     unavailable_command!(open_url(OpenUrlRequest));
     unavailable_command!(set_volume(VolumeRequest));
+    unavailable_command!(set_wake_sensitivity(VolumeRequest));
     unavailable_command!(read_clipboard());
     unavailable_command!(open_system_settings(SystemSettingsRequest));
     unavailable_command!(open_accessibility_settings());

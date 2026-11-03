@@ -1,0 +1,80 @@
+{
+  "version": "1.0.0",
+  "protocol": 2,
+  "schemas": {
+    "capabilities": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "device_id", "device", "operations", "connections", "permissions", "supported_contracts"],
+      "properties": {
+        "contract_version": { "const": "1.0.0" },
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "device": { "enum": ["phone", "windows"] },
+        "operations": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "connections": { "type": "object", "additionalProperties": { "enum": ["ready", "missing", "expired", "unknown"] } },
+        "permissions": { "type": "object", "additionalProperties": { "enum": ["granted", "denied", "unknown"] } },
+        "supported_contracts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" } }
+      }
+    },
+    "work_request": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "task_id", "idempotency_key", "required_operations", "device_preference", "inputs"],
+      "properties": {
+        "contract_version": { "const": "1.0.0" },
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "required_operations": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "device_preference": { "enum": ["auto", "phone", "windows"] },
+        "project_id": { "type": "string", "minLength": 1 },
+        "occurrence_id": { "type": "string", "minLength": 1 },
+        "inputs": { "type": "object" }
+      }
+    },
+    "task_summary": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "task_id", "status", "executing_device", "completed", "remaining", "updated_at_ms", "recovery"],
+      "properties": {
+        "contract_version": { "const": "1.0.0" },
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["queued", "running", "needs_you", "completed", "partial", "failed", "cancelled"] },
+        "executing_device": { "enum": ["phone", "windows"] },
+        "completed": { "type": "array", "items": { "type": "string" } },
+        "remaining": { "type": "array", "items": { "type": "string" } },
+        "updated_at_ms": { "type": "integer", "minimum": 0 },
+        "recovery": { "enum": ["none", "review", "cancel"] }
+      }
+    },
+    "artifact_manifest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "artifact_id", "filename", "media_type", "size", "sha256", "task_id", "owning_device"],
+      "properties": {
+        "contract_version": { "const": "1.0.0" },
+        "artifact_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+        "filename": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^/\\\\:]+$", "not": { "enum": [".", ".."] } },
+        "media_type": { "type": "string", "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$" },
+        "size": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "owning_device": { "enum": ["phone", "windows"] }
+      }
+    },
+    "workflow_template": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "template_id", "name", "inputs", "sources", "output_format", "schedule_owner"],
+      "properties": {
+        "contract_version": { "const": "1.0.0" },
+        "template_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "inputs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "sources": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "output_format": { "enum": ["text", "markdown", "pdf", "docx", "csv", "xlsx"] },
+        "schedule_owner": { "enum": ["none", "phone", "windows"] }
+      }
+    }
+  }
+}

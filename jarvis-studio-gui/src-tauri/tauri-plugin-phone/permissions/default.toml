@@ -4,6 +4,8 @@
 description = "Allows the JARVIS brain to drive the phone via the AccessibilityService."
 permissions = [
     "allow-is-enabled",
+    "allow-health-status",
+    "allow-health-export",
     "allow-observe",
     "allow-tap",
     "allow-tap-xy",
@@ -19,6 +21,7 @@ permissions = [
     "allow-close-app",
     "allow-open-url",
     "allow-set-volume",
+    "allow-set-wake-sensitivity",
     "allow-read-clipboard",
     "allow-open-system-settings",
     "allow-open-accessibility-settings",

@@ -24,10 +24,25 @@ describe("isNewer", () => {
     expect(isNewer("v2.1.0", "2.1.0")).toBe(false);
     expect(isNewer("v2.0.9", "2.1.0")).toBe(false);
     expect(isNewer("v3", "2.9.9")).toBe(true);
+    expect(isNewer("2.5.0-beta.10", "2.5.0-beta.2")).toBe(true);
+    expect(isNewer("2.5.0", "2.5.0-beta.2")).toBe(true);
+    expect(isNewer("2.5.0-beta.2", "2.5.0")).toBe(false);
   });
 });
 
 describe("checkForUpdate", () => {
+  it("keeps beta opt-in, with a separate check window and correct prerelease ordering", async () => {
+    getJson.mockResolvedValue({ tag_name: "v2.5.0-beta.1", prerelease: true });
+    expect(await checkForUpdate("2.4.0", T0)).toBeNull();
+    getJson.mockResolvedValue([
+      { tag_name: "v2.5.0-beta.2", prerelease: true },
+      { tag_name: "v2.5.0-beta.10", prerelease: true },
+      { tag_name: "v9.0.0", draft: true },
+    ]);
+    expect(await checkForUpdate("2.4.0", T0, "beta")).toMatchObject({ version: "2.5.0-beta.10" });
+    expect(getJson).toHaveBeenCalledTimes(2);
+    expect(await checkForUpdate("2.4.0", T0 + 1000, "beta")).toBeNull();
+  });
   it("reports a newer release with its page", async () => {
     getJson.mockResolvedValue({
       tag_name: "v2.2.0",

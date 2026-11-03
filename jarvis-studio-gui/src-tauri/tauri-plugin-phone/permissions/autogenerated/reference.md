@@ -5,6 +5,8 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 #### This default permission set includes the following:
 
 - `allow-is-enabled`
+- `allow-health-status`
+- `allow-health-export`
 - `allow-observe`
 - `allow-tap`
 - `allow-tap-xy`
@@ -20,6 +22,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 - `allow-close-app`
 - `allow-open-url`
 - `allow-set-volume`
+- `allow-set-wake-sensitivity`
 - `allow-read-clipboard`
 - `allow-open-system-settings`
 - `allow-open-accessibility-settings`
@@ -419,6 +422,58 @@ Enables the get_device_stats command without any pre-configured scope.
 <td>
 
 Denies the get_device_stats command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-health-export`
+
+</td>
+<td>
+
+Enables the health_export command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-health-export`
+
+</td>
+<td>
+
+Denies the health_export command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-health-status`
+
+</td>
+<td>
+
+Enables the health_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-health-status`
+
+</td>
+<td>
+
+Denies the health_status command without any pre-configured scope.
 
 </td>
 </tr>
@@ -1355,6 +1410,32 @@ Enables the set_volume command without any pre-configured scope.
 <td>
 
 Denies the set_volume command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:allow-set-wake-sensitivity`
+
+</td>
+<td>
+
+Enables the set_wake_sensitivity command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-set-wake-sensitivity`
+
+</td>
+<td>
+
+Denies the set_wake_sensitivity command without any pre-configured scope.
 
 </td>
 </tr>

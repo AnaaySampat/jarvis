@@ -36,6 +36,26 @@ const POLL_STUCK_MS = 3000; // a poll unanswered this long is presumed dropped
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export const DEFAULT_WAKE_SENSITIVITY = 60;
+
+export function normalizeWakeSensitivity(level: unknown): number {
+  return typeof level === "number" && Number.isFinite(level)
+    ? Math.max(0, Math.min(100, Math.round(level)))
+    : DEFAULT_WAKE_SENSITIVITY;
+}
+
+/** Native preferences apply to the running listener and survive service/app restarts. */
+export async function setWakeSensitivity(level: number): Promise<void> {
+  if (!inTauri()) return;
+  const response = await invoke<{ ok: boolean; summary: string }>(
+    "plugin:phone|set_wake_sensitivity",
+    { level: normalizeWakeSensitivity(level) },
+  );
+  if (response?.ok !== true) {
+    throw new Error(response?.summary || "Could not save wake word sensitivity.");
+  }
+}
+
 function stripWake(text: string): string {
   return text
     .replace(WAKE, "")

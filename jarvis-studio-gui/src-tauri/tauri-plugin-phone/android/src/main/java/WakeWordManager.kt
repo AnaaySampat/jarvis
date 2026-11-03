@@ -57,7 +57,20 @@ class WakeWordManager(
         // noise sat ≤0.26 in testing, so a slightly lower bar fires a touch sooner and
         // catches softer/faster utterances. Conversation can clear it too; the pre-roll
         // check in wakeword.ts is what rejects those.
-        private const val THRESHOLD = 0.35f
+        private const val PREFS = "jarvis_wake"
+        private const val KEY_SENSITIVITY = "sensitivity"
+
+        fun setSensitivity(context: Context, level: Int): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val normalized = WakeSensitivity.normalize(level)
+            if (prefs.getInt(KEY_SENSITIVITY, WakeSensitivity.DEFAULT_LEVEL) == normalized) return true
+            return prefs.edit().putInt(KEY_SENSITIVITY, normalized).commit()
+        }
+
+        private fun threshold(context: Context): Float = WakeSensitivity.thresholdFor(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_SENSITIVITY, WakeSensitivity.DEFAULT_LEVEL),
+        )
         private const val COOLDOWN_MS = 3_000L
         /** 3 s of history: "Hey Jarvis" plus room for a slow speaker. */
         private const val PRE_ROLL_SAMPLES = SAMPLE_RATE * 3
@@ -145,7 +158,7 @@ class WakeWordManager(
                                 android.util.Log.w(TAG, "inference failed: ${e.message}")
                                 return@collect
                             }
-                            if (score > THRESHOLD && now - lastFire >= COOLDOWN_MS && !capturing) {
+                            if (score > threshold(context) && now - lastFire >= COOLDOWN_MS && !capturing) {
                                 lastFire = now
                                 android.util.Log.i(TAG, "DETECTION score=${"%.3f".format(score)}")
                                 beginCapture()

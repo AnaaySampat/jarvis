@@ -19,7 +19,13 @@ vi.mock("./stt", () => ({
   isNoiseTranscript: (t: string) => /^thank you\.?$/i.test(t),
 }));
 
-import { commandAfterWake, heardWakePhrase, WakeWordListener } from "./wakeword";
+import {
+  commandAfterWake,
+  heardWakePhrase,
+  normalizeWakeSensitivity,
+  setWakeSensitivity,
+  WakeWordListener,
+} from "./wakeword";
 
 /** Drive the listener's private poll loop deterministically. */
 function pollOf(l: WakeWordListener): () => Promise<void> {
@@ -96,6 +102,31 @@ describe("commandAfterWake", () => {
   it("is null when the clip has no wake phrase — a false wake", () => {
     expect(commandAfterWake("you know how it got one task down to 8 seconds")).toBeNull();
     expect(commandAfterWake("my Jarvis app is fast")).toBeNull();
+    expect(commandAfterWake("Jarvis is the app I'm building")).toBeNull();
+    expect(commandAfterWake("Jarvis can send messages")).toBeNull();
+    expect(commandAfterWake("Travis is on the phone")).toBeNull();
+  });
+});
+
+describe("wake sensitivity settings", () => {
+  it.each([[undefined, 60], [NaN, 60], [Infinity, 60], [-5, 0], [110, 100], [42.6, 43]])(
+    "normalizes %s to %s", (input, expected) => {
+      expect(normalizeWakeSensitivity(input)).toBe(expected);
+    },
+  );
+
+  it("waits for the native result and passes a bounded integer", async () => {
+    invokeMock.mockResolvedValue({ ok: true, summary: "Saved" });
+    await setWakeSensitivity(105);
+    expect(invokeMock).toHaveBeenCalledWith("plugin:phone|set_wake_sensitivity", { level: 100 });
+    expect(invokeMock).not.toHaveBeenCalledWith("plugin:phone|start_wake_word");
+  });
+
+  it("reports a native refusal instead of claiming the value was saved", async () => {
+    invokeMock.mockResolvedValue({ ok: false, summary: "Storage unavailable" });
+    await expect(setWakeSensitivity(60)).rejects.toThrow("Storage unavailable");
+    invokeMock.mockRejectedValue(new Error("Bridge unavailable"));
+    await expect(setWakeSensitivity(60)).rejects.toThrow("Bridge unavailable");
   });
 });
 

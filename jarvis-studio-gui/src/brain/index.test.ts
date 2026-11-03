@@ -3,6 +3,7 @@ import type { BrainConfig } from "./config";
 import type { ChatMessage, ToolResult } from "./types";
 import * as httpTools from "./tools/http";
 import { androidPlatform } from "./platform";
+import { parseSkillFile, saveSkills } from "./skillStore";
 
 const runTurn = vi.fn(
   async (
@@ -29,6 +30,33 @@ const { createBrain } = await import("./index");
 const { PersistentStore } = await import("./memory/store");
 
 const cfg: BrainConfig = { tier: "groq", model: "openai/gpt-oss-120b", keys: { groq: ["g1"] } };
+
+describe("skill prompt integration", () => {
+  it("includes enabled local guidance without adding it to incoming PC requests", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const skill = { ...parseSkillFile("writing.txt", "Use the phrase verified local guidance."), enabled: true };
+    saveSkills([skill], storage);
+    vi.stubGlobal("localStorage", storage);
+    try {
+      runTurn.mockClear();
+      const brain = createBrain({ getConfig: () => cfg, memory: new PersistentStore() });
+      await brain.ask("Draft a thank-you note");
+      const prompt = runTurn.mock.calls[0]![0][0]!.content;
+      expect(prompt).toContain("WRITING");
+      expect(prompt).toContain("verified local guidance");
+      runTurn.mockClear();
+      await brain.askFromPc("set an alarm for 7am");
+      expect(runTurn.mock.calls[0]![0][0]!.content).not.toContain("verified local guidance");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("direct notification reads", () => {
   it.each([true, false])(

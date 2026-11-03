@@ -42,6 +42,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("phone")
         .invoke_handler(tauri::generate_handler![
             commands::is_enabled,
+            commands::health_status,
+            commands::health_export,
             commands::observe,
             commands::tap,
             commands::tap_xy,
@@ -57,6 +59,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::close_app,
             commands::open_url,
             commands::set_volume,
+            commands::set_wake_sensitivity,
             commands::read_clipboard,
             commands::open_system_settings,
             commands::open_accessibility_settings,

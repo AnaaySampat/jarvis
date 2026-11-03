@@ -3409,3 +3409,45 @@ html.app-mobile .activity-foot {
   font-size: 12.5px;
   text-align: left;
 }
+
+/* Shared interaction refinements; theme colors, typography and radii stay owned by Customize. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+button { -webkit-tap-highlight-color: transparent; }
+@media (hover: none) {
+  button, [role="button"] { touch-action: manipulation; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.skill-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.skill-entry-info { flex: 1; min-width: 0; }
+.skill-entry details { margin: 10px 0; }
+.skill-entry summary { cursor: pointer; font-size: 13px; }
+.skill-entry pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}

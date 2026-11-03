@@ -6,6 +6,11 @@ JARVIS is a voice assistant for Android that can use apps, carry out tasks on yo
 paired Windows PC, research with sources, and remember what matters to you.
 Say **“Hey Jarvis”**, type a request, or choose a specialist agent.
 
+The [ecosystem foundation preview](docs/ECOSYSTEM-IMPLEMENTATION.md) adds conversation
+task recovery, Health and private diagnostics. Enable it explicitly in Settings →
+Ecosystem Health → Foundation preview. The existing release remains available;
+later ecosystem milestones await the recorded live acceptance gate.
+
 **[Download for Android](https://github.com/AnaaySampat/jarvis/releases/latest)**
 · [Get started](#get-started)
 · [What's new in v2.5.0](https://github.com/AnaaySampat/jarvis/releases/tag/v2.5.0)

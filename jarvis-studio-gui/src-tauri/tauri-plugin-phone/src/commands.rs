@@ -91,6 +91,8 @@ fn default_task_retry_budget() -> i32 {
 }
 
 phone_command!(is_enabled() -> IsEnabledResponse);
+phone_command!(health_status() -> HealthStatusResponse);
+phone_command!(health_export(diagnostics_json: String) -> ActionResponse, HealthExportRequest);
 phone_command!(observe() -> ObserveResponse);
 phone_command!(tap(index: i32, observation_generation: i64, selector: String, expected_app: String, window_id: i32) -> ActionResponse, TapRequest);
 phone_command!(tap_xy(x: i32, y: i32, observation_generation: i64, expected_app: String) -> ActionResponse, TapXyRequest);
@@ -106,6 +108,7 @@ phone_command!(open_app(name: String) -> ActionResponse, OpenAppRequest);
 phone_command!(close_app(name: String) -> ActionResponse, CloseAppRequest);
 phone_command!(open_url(url: String) -> ActionResponse, OpenUrlRequest);
 phone_command!(set_volume(level: i32) -> ActionResponse, VolumeRequest);
+phone_command!(set_wake_sensitivity(level: i32) -> ActionResponse, VolumeRequest);
 phone_command!(read_clipboard() -> ActionResponse);
 phone_command!(open_system_settings(target: String) -> ActionResponse, SystemSettingsRequest);
 phone_command!(open_accessibility_settings() -> ActionResponse);

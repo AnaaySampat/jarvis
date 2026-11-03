@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KV } from "./memory/store";
-import { WorkflowJournal } from "./workflow";
+import { WorkflowJournal, subscribeWorkflows } from "./workflow";
 import { agentResult } from "./results";
 
 function storage(): KV {
@@ -17,6 +17,25 @@ function storage(): KV {
 }
 
 describe("workflow recovery evaluations", () => {
+  it("publishes saved checkpoints and scopes STOP to the accepted workflow", () => {
+    const journal = new WorkflowJournal(storage());
+    let updates = 0;
+    const unsubscribe = subscribeWorkflows(() => { updates++; });
+    const run = journal.begin("First task");
+    expect(journal.requestStop(run.id)).toBe(true);
+    expect(journal.shouldStop(run.id)).toBe(true);
+    // An in-flight caller still holds the old object: a later save cannot erase STOP.
+    journal.save(run);
+    expect(journal.list()[0].cancelRequested).toBe(true);
+    run.state = "suspended";
+    run.outcome = "cancelled";
+    journal.save(run);
+    const next = journal.begin("Next task");
+    expect(journal.shouldStop(next.id)).toBe(false);
+    expect(journal.requestStop(run.id)).toBe(false);
+    expect(updates).toBe(5);
+    unsubscribe();
+  });
   it("does not suspend a live task when React recreates the brain", () => {
     const kv = storage();
     const runtime = new Set<string>();
@@ -64,5 +83,12 @@ describe("workflow recovery evaluations", () => {
     kv.set("jarvis.android.workflows.v1", "damaged checkpoint");
     expect(() => new WorkflowJournal(kv).begin("Retry a message")).toThrow();
     expect(kv.get("jarvis.android.workflows.v1")).toBe("damaged checkpoint");
+  });
+  it("refuses malformed checkpoint shapes without deleting legacy data", () => {
+    const kv = storage();
+    const raw = JSON.stringify([{ version: 1, id: "opaque", state: "running", results: [], pending: { tool: "send_message" } }]);
+    kv.set("jarvis.android.workflows.v1", raw);
+    expect(() => new WorkflowJournal(kv).recover()).toThrow(/invalid/);
+    expect(kv.get("jarvis.android.workflows.v1")).toBe(raw);
   });
 });

@@ -112,6 +112,8 @@ interface WebSocketLike {
 type WebSocketCtor = new (url: string, protocols?: string | string[]) => WebSocketLike;
 
 export interface RemotePCOptions extends RemotePCConfig {
+  /** Sanitized metadata from the authenticated, host-signed handshake only. */
+  onPeerInfo?: (info: { appVersion: string }) => void;
   /** Every backend event, in order — drive the live step feed / status from this. */
   onEvent?: (ev: RemoteEvent) => void;
   /** Connection-state changes, for the pairing UI's status pill. */
@@ -1607,6 +1609,9 @@ export class RemotePC {
       // A successful signed ready consumes the human-present pairing secret.
       delete this.cfg.pin;
       delete this.opts.pin;
+      try {
+        this.opts.onPeerInfo?.({ appVersion: typeof ready.app_version === "string" && /^\d{1,3}(\.\d{1,3}){2}([+-][a-z0-9.]{1,24})?$/.test(ready.app_version) ? ready.app_version : "" });
+      } catch { /* Metadata observers cannot break authentication. */ }
       const wake = sanitizeWakeTargets(ready.wake);
       if (wake.length) {
         try {

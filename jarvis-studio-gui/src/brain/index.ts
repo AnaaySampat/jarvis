@@ -40,6 +40,8 @@ import { WorkflowJournal } from "./workflow";
 import { agentResult, resultId, type ResultStatus } from "./results";
 import type { ActionSpec } from "./types";
 import { reviewCompletion } from "./completion";
+import { taskGuidanceFor } from "./taskGuidance";
+import { skillPromptFor } from "./skillStore";
 
 /** Past turns sent with each chat request (storage keeps more). */
 const SENT_HISTORY_TURNS = 12;
@@ -210,6 +212,7 @@ export function createBrain(opts: BrainOptions = {}): Brain {
       run.results.push(output.result);
       run.pending = null;
       run.state = output.ok ? "succeeded" : "suspended";
+      run.outcome = output.result.status;
       return output;
     } finally {
       if (run.state === "running") run.state = "suspended";
@@ -289,6 +292,8 @@ export function createBrain(opts: BrainOptions = {}): Brain {
         role: "system",
         content:
           buildSystemPrompt(config, facts, deps.remote != null, deps.tv != null, !!scope) +
+          taskGuidanceFor(text) +
+          (scope ? "" : skillPromptFor(text)) +
           (scope
             ? `\n\n${scope.context}\nTASK PACKAGE\n${JSON.stringify({
                 objective: text,

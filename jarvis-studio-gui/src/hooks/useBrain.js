@@ -11,6 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createBrain } from "../brain";
+import { WorkflowJournal, subscribeWorkflows } from "../brain/workflow";
+import { workflowTask } from "./workflowTasks";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
 import { dispatch } from "../brain/tools/dispatch";
@@ -53,7 +55,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { authenticate, checkStatus } from "@tauri-apps/plugin-biometric";
 import { webSpeechTTS } from "../brain/platform/webspeech";
 import { MicRecorder, transcribe } from "../brain/platform/stt";
-import { syncWakeWord } from "../brain/platform/wakeword";
+import {
+  normalizeWakeSensitivity,
+  setWakeSensitivity,
+  syncWakeWord,
+} from "../brain/platform/wakeword";
 import { syncStopOverlay } from "../brain/platform/stopOverlay";
 import { checkForUpdate } from "../brain/platform/update";
 import { getVersion } from "@tauri-apps/api/app";
@@ -321,6 +327,26 @@ export function useBrain() {
   const mutedRef = useRef(false); // read inside async sendMessage (state would be stale)
   const [conversations, setConversations] = useState([]);
   const [agentTasks, setAgentTasks] = useState(loadRecoveredTaskShells);
+  const [workflowTasks, setWorkflowTasks] = useState([]);
+  const [dismissedWorkflows, setDismissedWorkflows] = useState(new Set());
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        setWorkflowTasks(new WorkflowJournal().list().map(workflowTask));
+      } catch {
+        setWorkflowTasks([{
+          id: "workflow-storage-error", source: "workflow", kind: "workflow",
+          goal: "Saved workflow recovery", status: "suspended",
+          summary: "Saved work could not be read. Repair storage before running more actions.",
+        }]);
+      }
+    };
+    const unsubscribe = subscribeWorkflows(refresh);
+    refresh();
+    return unsubscribe;
+  }, []);
+  const visibleWorkflowTasks = stored.ecosystemBeta === true
+    ? workflowTasks.filter((task) => !dismissedWorkflows.has(task.id)) : [];
   const [permissionRequest, setPermissionRequest] = useState(null);
   const [clarifyRequest, setClarifyRequest] = useState(null);
   const [pcPasskeyRequest, setPcPasskeyRequest] = useState(null);
@@ -440,7 +466,7 @@ export function useBrain() {
     if (!inTauri()) return undefined;
     let cancelled = false;
     void getVersion()
-      .then((current) => checkForUpdate(current))
+      .then((current) => checkForUpdate(current, Date.now(), stored.updateChannel === "beta" ? "beta" : "stable"))
       .then((update) => {
         if (cancelled || !update) return;
         pushWarning(`JARVIS ${update.version} is available.`, {
@@ -452,7 +478,7 @@ export function useBrain() {
     return () => {
       cancelled = true;
     };
-  }, [pushWarning]);
+  }, [pushWarning, stored.updateChannel]);
 
   // Credentials are hydrated only into React memory. A first launch after upgrade
   // migrates the already-purged legacy values into Android Keystore; React Strict
@@ -566,7 +592,7 @@ export function useBrain() {
   useEffect(() => {
     if (!phoneTaskActive && phoneApprovalResolveRef.current) resolvePhoneApproval("deny");
   }, [phoneTaskActive, resolvePhoneApproval]);
-  const taskCenterActive = agentTasks.some((task) => ACTIVE_TASK_STATES.has(task.status));
+  const taskCenterActive = [...agentTasks, ...visibleWorkflowTasks].some((task) => ACTIVE_TASK_STATES.has(task.status));
 
   // Intercept the native journal boundary inside the hook so the control panel
   // learns the opaque Room id even though the operator's legacy activity id is
@@ -713,6 +739,7 @@ export function useBrain() {
 
   const [pcConfig, setPcConfig] = useState(loadPcConfig);
   const [pcState, setPcState] = useState("idle");
+  const [pcVersion, setPcVersion] = useState("");
   // WhatsApp on the phone: notification access (null until the native side says).
   const [waAccess, setWaAccess] = useState(null);
   const pcRef = useRef(null);
@@ -848,6 +875,7 @@ export function useBrain() {
       pairingChallengeId: pcConfig.pairingChallengeId,
       pin: pcPinRef.current,
       deviceName: pcConfig.deviceName,
+      onPeerInfo: (info) => setPcVersion(info.appVersion),
       onWakeTargets: (targets) => {
         if (JSON.stringify(targets) === JSON.stringify(pcWakeRef.current)) return;
         pcWakeRef.current = targets;
@@ -858,6 +886,7 @@ export function useBrain() {
         if (s !== "online") {
           memorySyncExchangeRef.current.reset();
           gestureRequestsRef.current.close();
+          setPcVersion("");
           clearControlLease();
           if (wantScreenRef.current && s === "offline") {
             setScreenState("connecting");
@@ -1323,6 +1352,26 @@ export function useBrain() {
 
   const stopTask = useCallback(
     (id) => {
+      if (id.startsWith("workflow:")) {
+        let pendingTool;
+        try {
+          const journal = new WorkflowJournal();
+          const workflowId = id.slice("workflow:".length);
+          pendingTool = journal.list().find((run) => run.id === workflowId)?.pending?.tool;
+          if (!journal.requestStop(workflowId)) return;
+        } catch {
+          pushWarning("Workflow storage could not record STOP. Stopping active executors directly.");
+        }
+        requestPhoneStop();
+        if (pendingTool === "phone_task" || pendingTool === "tv_control") stopPhoneTask();
+        if (pendingTool === "pc_task") {
+          pcRef.current?.cancelTask("user_cancelled");
+          const lease = nextControlLeaseEnvelope();
+          pcRef.current?.signal("stop_control", lease || {});
+          clearControlLease();
+        }
+        return;
+      }
       const task = agentTasksRef.current.find((item) => item.id === id || item.nativeTaskId === id);
       if (!task || TERMINAL_TASK_STATES.has(task.status)) return;
       if (task.kind === "phone" || task.kind === "tv" || task.source === "phone") {
@@ -1346,11 +1395,17 @@ export function useBrain() {
       pcRef.current?.signal("stop_control", lease || {});
       clearControlLease();
     },
-    [journaledPhone, requestPhoneStop, clearControlLease, nextControlLeaseEnvelope, pushWarning],
+    [journaledPhone, requestPhoneStop, stopPhoneTask, clearControlLease, nextControlLeaseEnvelope, pushWarning],
   );
 
   const stopAllTasks = useCallback(() => {
     pcPasskeyGateRef.current.respond(null);
+    const journal = new WorkflowJournal();
+    try {
+      for (const run of journal.list()) journal.requestStop(run.id);
+    } catch {
+      pushWarning("Workflow storage could not record STOP. Stopping active executors directly.");
+    }
     requestPhoneStop();
     const active = agentTasksRef.current.filter((task) => !TERMINAL_TASK_STATES.has(task.status));
     const phoneTasks = active.filter(
@@ -1363,7 +1418,7 @@ export function useBrain() {
     void Promise.all(nativeIds.map((taskId) => journaledPhone.cancelTask?.(taskId)));
     let cancelledPc = pcRef.current?.cancelTask("global_stop") || false;
     const stoppedPcIds = [];
-    for (const task of active.filter((item) => item.source === "pc" || item.kind !== "phone")) {
+    for (const task of active.filter((item) => item.source === "pc")) {
       const sent = pcRef.current?.signal("task.cancel", {
         task_id: task.id,
         reason: "global_stop",
@@ -1495,6 +1550,9 @@ export function useBrain() {
     const cfg = toBrainConfig(stored);
     return {
       needs_setup: secretsReady && !hasKey,
+      ecosystem_beta: stored.ecosystemBeta === true,
+      update_channel: stored.updateChannel === "beta" ? "beta" : "stable",
+      pc_version: pcVersion,
       has_vertex_sa: Boolean(stored.vertexSaJson),
       vertex_project: cfg.vertexProject || "",
       has_groq_key: Boolean(stored.groqKey),
@@ -1509,6 +1567,7 @@ export function useBrain() {
       // raw: a provider whose key was removed reads back as auto.
       provider_mode: cfg.providerScope || "auto",
       wake_word: stored.wakeWord !== false,
+      wake_sensitivity: normalizeWakeSensitivity(stored.wakeSensitivity),
       auto_switch_models: stored.autoSwitchModels !== false,
       tts: "android",
       platform: "android",
@@ -1528,7 +1587,7 @@ export function useBrain() {
       wa_allowed: typeof stored.waAllowed === "string" ? stored.waAllowed : "",
       wa_access: waAccess,
     };
-  }, [hasKey, secretsReady, stored, availableModels, routing, waAccess]);
+  }, [hasKey, secretsReady, stored, availableModels, routing, waAccess, pcVersion]);
 
   // While the Remote Desktop live view is open, every command (typed OR spoken)
   // is meant for the PC on screen — so it goes STRAIGHT to the desktop's own
@@ -1955,6 +2014,19 @@ export function useBrain() {
         }),
       );
 
+      let wakeSensitivity;
+      let sensitivityFailed = false;
+      if (typeof cfg.wake_sensitivity === "number") {
+        try {
+          wakeSensitivity = normalizeWakeSensitivity(cfg.wake_sensitivity);
+          await setWakeSensitivity(wakeSensitivity);
+        } catch (error) {
+          wakeSensitivity = undefined;
+          sensitivityFailed = true;
+          pushWarning(`Wake word: ${error?.message || String(error)}`);
+        }
+      }
+
       setStored((prev) => {
         const next = { ...prev };
         for (const name of CONFIG_SECRET_FIELDS) {
@@ -1971,9 +2043,12 @@ export function useBrain() {
         if (typeof cfg.calendar_sync === "boolean") next.calendarSync = cfg.calendar_sync;
         if (typeof cfg.pc_commands === "boolean") next.pcCommands = cfg.pc_commands;
         if (typeof cfg.agent_mode === "boolean") next.agentMode = cfg.agent_mode;
+        if (typeof cfg.ecosystem_beta === "boolean") next.ecosystemBeta = cfg.ecosystem_beta;
+        if (cfg.update_channel === "stable" || cfg.update_channel === "beta") next.updateChannel = cfg.update_channel;
         if (WA_MODES.has(cfg.wa_mode)) next.waMode = cfg.wa_mode;
         if (typeof cfg.wa_allowed === "string") next.waAllowed = cfg.wa_allowed.slice(0, 1_000);
         if (typeof cfg.wake_word === "boolean") next.wakeWord = cfg.wake_word;
+        if (wakeSensitivity !== undefined) next.wakeSensitivity = wakeSensitivity;
         if (typeof cfg.auto_switch_models === "boolean")
           next.autoSwitchModels = cfg.auto_switch_models;
         saveStored(next);
@@ -1987,7 +2062,7 @@ export function useBrain() {
       if (failedSecrets.length) {
         pushWarning(`Could not update secure credentials for: ${failedSecrets.join(", ")}.`);
       }
-      return failedSecrets.length === 0;
+      return failedSecrets.length === 0 && !sensitivityFailed;
     },
     [pushWarning, secretsReady],
   );
@@ -2638,8 +2713,13 @@ export function useBrain() {
     });
   }, []);
   const clearAgentTasks = useCallback(
-    () => setAgentTasks((prev) => prev.filter((task) => !TERMINAL_TASK_STATES.has(task.status))),
-    [],
+    () => {
+      setAgentTasks((prev) => prev.filter((task) => !TERMINAL_TASK_STATES.has(task.status)));
+      setDismissedWorkflows((prev) => new Set([
+        ...prev, ...workflowTasks.filter((task) => TERMINAL_TASK_STATES.has(task.status)).map((task) => task.id),
+      ]));
+    },
+    [workflowTasks],
   );
 
   // ── Pairing controls (Phase 3) ──────────────────────────────────────────────
@@ -2733,7 +2813,7 @@ export function useBrain() {
     activeApp: null,
     overlay: { enabled: false, mode: "except", apps: [] },
     agentTasks,
-    taskCenterTasks: agentTasks,
+    taskCenterTasks: [...agentTasks, ...visibleWorkflowTasks],
     taskCenterActive,
 
     // A consequential (R2/R3) phone action waiting on the user's decision, and the
