@@ -1,3 +1,4 @@
+import HeaderTools from "./HeaderTools";
 /* HudApp.jsx — the home screen, as on the desktop (its hud/HudApp.jsx): a header
    (logo + quick controls), JARVIS at the centre (time, the orb, what it's doing, its
    last reply and an ask box) and the live cards. A phone stacks it in one scrolling
@@ -12,6 +13,7 @@ import { IS_MOBILE } from "../hooks/useAssistant";
 import "./hud.css";
 import "./home.css";
 import "./ironman.css";
+import "./responsive.css";
 import Orb from "./Orb";
 import Reactor, { Waveform } from "./Reactor";
 import Icon from "../components/Icon";
@@ -148,6 +150,7 @@ const NAV = [
 export function JarvisHUD({
   config,
   screen, // home-screen look & layout (see the header comment)
+  onOpenHandsFree,
   toolbar, // the quick controls (App owns their state)
   // live data
   status = "idle",
@@ -356,6 +359,7 @@ export function JarvisHUD({
       {hudCards && <div className="im-frame" aria-hidden="true" />}
 
       <header className="home-top">
+        <button type="button" className="home-hands-free" onClick={onOpenHandsFree}>Hands-free</button>
         <div className="home-brand">
           <span className="home-logo" aria-hidden />
           <span className="home-name">JARVIS</span>
@@ -391,7 +395,7 @@ export function JarvisHUD({
             ))}
           </nav>
         )}
-        <div className="home-tools">{toolbar}</div>
+        <HeaderTools>{toolbar}</HeaderTools>
       </header>
 
       <main className="home-main" ref={mainRef}>
@@ -514,6 +518,7 @@ export function JarvisHUD({
 
       {/* ── overlays ── */}
       <SkillsOverlay
+        onOpenHandsFree={onOpenHandsFree}
         open={skillsOpen}
         onClose={() => setSkillsOpen(false)}
         recordings={recordings}

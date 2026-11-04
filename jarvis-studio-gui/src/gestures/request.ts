@@ -1,6 +1,7 @@
 export interface GestureReply {
   ok: boolean;
   summary: string;
+  timers?: unknown[];
 }
 /** One-shot requests with correlated acknowledgements. There is no automatic
  * retry: retrying play/pause or mute could undo an already delivered action. */
@@ -18,13 +19,19 @@ export class GestureRequests {
     action: string,
     data: Record<string, unknown> = {},
   ): Promise<GestureReply> {
-    const id = "gesture_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 14);
+    const id =
+      "gesture_" +
+      Date.now().toString(36) +
+      "_" +
+      Math.random().toString(36).slice(2, 14);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => {
           this.pending.delete(id);
           reject(
-            new Error("The PC did not acknowledge the gesture. Check its connection and version."),
+            new Error(
+              "The PC did not acknowledge the gesture. Check its connection and version.",
+            ),
           );
         },
         action === "read_aloud" ? 180000 : 10000,
@@ -34,7 +41,11 @@ export class GestureRequests {
         if (!send({ ...data, action, request_id: id })) {
           clearTimeout(timer);
           this.pending.delete(id);
-          reject(new Error("The PC is not connected or its control session is not armed."));
+          reject(
+            new Error(
+              "The PC is not connected or its control session is not armed.",
+            ),
+          );
         }
       } catch (error) {
         clearTimeout(timer);
@@ -50,7 +61,11 @@ export class GestureRequests {
     if (!pending) return false;
     clearTimeout(pending.timer);
     this.pending.delete(String(r.request_id));
-    pending.resolve({ ok: r.ok === true, summary: String(r.summary || "No result was reported.") });
+    pending.resolve({
+      ok: r.ok === true,
+      summary: String(r.summary || "No result was reported."),
+      ...(Array.isArray(r.timers) ? { timers: r.timers } : {}),
+    });
     return true;
   }
   close() {

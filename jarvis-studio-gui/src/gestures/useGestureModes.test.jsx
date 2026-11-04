@@ -3,7 +3,17 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { useGestureModes } from "./useGestureModes";
 import { documentId } from "./storage";
-let controls, renderer, camera, host, props, store, saved, pose, sequence, publish, lastFrame;
+let controls,
+  renderer,
+  camera,
+  host,
+  props,
+  store,
+  saved,
+  pose,
+  sequence,
+  publish,
+  lastFrame;
 const T = 1_800_000_000_000;
 function App(input) {
   const value = useGestureModes(input);
@@ -17,7 +27,10 @@ beforeEach(async () => {
   vi.setSystemTime(T);
   store = new Map();
   saved = vi.fn((k, v) => store.set(k, v));
-  vi.stubGlobal("localStorage", { getItem: (k) => store.get(k) || null, setItem: saved });
+  vi.stubGlobal("localStorage", {
+    getItem: (k) => store.get(k) || null,
+    setItem: saved,
+  });
   const doc = new EventTarget();
   doc.hidden = false;
   doc.elementFromPoint = () => null;
@@ -32,7 +45,12 @@ beforeEach(async () => {
   sequence = 100;
   publish = true;
   lastFrame = null;
-  const state = { running: false, starting: false, foreground: true, summary: "Off" };
+  const state = {
+    running: false,
+    starting: false,
+    foreground: true,
+    summary: "Off",
+  };
   camera = {
     start: vi.fn(async () => {
       state.running = true;
@@ -46,7 +64,13 @@ beforeEach(async () => {
     }),
     poll: vi.fn(async () => {
       if (state.running && publish)
-        lastFrame = { seq: sequence++, observedAt: Date.now(), pose, score: 1, landmarks: [] };
+        lastFrame = {
+          seq: sequence++,
+          observedAt: Date.now(),
+          pose,
+          score: 1,
+          landmarks: [],
+        };
       return { ...state, frame: lastFrame };
     }),
   };
@@ -167,9 +191,13 @@ describe("gesture hook lifecycle regressions", () => {
     });
     expect(controls.config.holdMs).toBe(900);
     expect(controls.config.mode).toBe("reading");
-    expect(saved.mock.calls.filter(([key]) => key === "jarvis.gestures.v2")).toHaveLength(0);
+    expect(
+      saved.mock.calls.filter(([key]) => key === "jarvis.gestures.v2"),
+    ).toHaveLength(0);
     await advance(500);
-    expect(saved.mock.calls.filter(([key]) => key === "jarvis.gestures.v2")).toHaveLength(1);
+    expect(
+      saved.mock.calls.filter(([key]) => key === "jarvis.gestures.v2"),
+    ).toHaveLength(1);
   });
   it("keeps fist stop active during the calibration countdown", async () => {
     await start();
@@ -179,7 +207,9 @@ describe("gesture hook lifecycle regressions", () => {
     expect(camera.stop).toHaveBeenCalledTimes(1);
   });
   it("queues the latest navigation and interrupts old speech", async () => {
-    await act(async () => controls.changeConfig({ mode: "cooking", steps: "One\nTwo\nThree" }));
+    await act(async () =>
+      controls.changeConfig({ mode: "cooking", steps: "One\nTwo\nThree" }),
+    );
     await start();
     let release;
     host.speak.mockImplementationOnce(
@@ -188,7 +218,9 @@ describe("gesture hook lifecycle regressions", () => {
           release = resolve;
         }),
     );
-    host.stopSpeech.mockImplementation(() => release?.({ ok: true, summary: "Stopped" }));
+    host.stopSpeech.mockImplementation(() =>
+      release?.({ ok: true, summary: "Stopped" }),
+    );
     await act(async () => controls.act("steps.repeat"));
     await act(async () => controls.act("steps.next"));
     expect(host.stopSpeech).toHaveBeenCalled();
@@ -211,12 +243,17 @@ describe("gesture hook lifecycle regressions", () => {
   });
   it("uses bookmark IDs, bounds pages and catches quota failures on removal", async () => {
     const text = "Only one page";
-    await act(async () => controls.changeConfig({ mode: "reading", reader: text }));
+    await act(async () =>
+      controls.changeConfig({ mode: "reading", reader: text }),
+    );
     await start();
     await act(async () => controls.selectPage(999));
     expect(controls.page).toBe(0);
     await act(async () => controls.act("reader.bookmark"));
-    expect(controls.bookmarks[0]).toMatchObject({ documentId: documentId(text), page: 0 });
+    expect(controls.bookmarks[0]).toMatchObject({
+      documentId: documentId(text),
+      page: 0,
+    });
     expect(controls.bookmarks[0]).not.toHaveProperty("document");
     saved.mockImplementation(() => {
       throw new Error("QuotaExceededError");
@@ -225,4 +262,84 @@ describe("gesture hook lifecycle regressions", () => {
     await advance(500);
     expect(controls.message).toContain("storage");
   });
+});
+
+it("uses reading controls and bookmarks without a running camera or camera support", async () => {
+  await act(async () => {
+    renderer.update(<App {...props} enabled={false} />);
+    controls.changeConfig({
+      mode: "reading",
+      reader: "First page.\n\nSecond page.",
+    });
+  });
+  await act(async () => {
+    controls.act("reader.next");
+  });
+  expect(controls.page).toBe(1);
+  await act(async () => {
+    controls.act("reader.bookmark");
+  });
+  expect(controls.bookmarks[0].page).toBe(1);
+  await act(async () => {
+    controls.renameBookmark(controls.bookmarks[0].at, "My place");
+  });
+  await advance(600);
+  expect(JSON.parse(store.get("jarvis.gesture.bookmarks.v2"))[0].name).toBe(
+    "My place",
+  );
+  expect(camera.start).not.toHaveBeenCalled();
+});
+it("practices poses without running activities and preserves fist stop", async () => {
+  await act(async () => {
+    controls.setPractice(true);
+  });
+  await start();
+  await show("PEACE");
+  expect(controls.practicePose).toBe("PEACE");
+  expect(controls.practiceCount).toBeGreaterThan(0);
+  expect(host.pttStart).not.toHaveBeenCalled();
+  expect(host.perform).not.toHaveBeenCalled();
+  expect(host.speak).not.toHaveBeenCalled();
+  await show("FIST");
+  expect(camera.stop).toHaveBeenCalled();
+});
+it("pauses gesture actions while manual activity controls continue to work", async () => {
+  await act(async () => {
+    controls.changeConfig({ mode: "reading", reader: "One.\n\nTwo." });
+  });
+  await start();
+  await act(async () => {
+    controls.setPaused(true);
+  });
+  await show("PEACE");
+  expect(controls.page).toBe(0);
+  await act(async () => {
+    controls.act("reader.next");
+  });
+  expect(controls.page).toBe(1);
+  await show("FIST");
+  expect(camera.stop).toHaveBeenCalled();
+});
+it("keeps the current step status when older speech finishes after manual navigation", async () => {
+  let finish;
+  host.speak.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {
+    controls.changeConfig({ mode: "cooking", steps: "One\nTwo\nThree" });
+  });
+  await act(async () => {
+    controls.act("steps.repeat");
+  });
+  await act(async () => {
+    controls.selectStep(2);
+  });
+  await act(async () => {
+    finish({ ok: true, summary: "Reading finished." });
+  });
+  expect(controls.step).toBe(2);
+  expect(controls.message).toBe("Step 3.");
 });

@@ -6,7 +6,10 @@ is inconvenient. Physical-device accuracy and battery testing are still required
 
 ## Start a session
 
-1. Open **Settings → Voice → Hand gestures**, choose a mode and review its mappings.
+1. Open **Hands-free** on Home (also linked from Skills, Settings → Voice and
+   command search). Choose an activity. Read and Steps work with the camera off.
+   Use **Learn** for practice without activity actions and **Tune** for presets
+   and mappings. Stop the camera before changing activities.
 2. On Windows, select a webcam. On Android, grant camera permission and, when
    requested, display-over-other-apps access, then return and start again.
 3. Start the camera, lower your hand for the release interval, then hold a pose.
@@ -117,3 +120,26 @@ revocation; camera occupied; rapid start/stop; minimize/lock/recents; fist durin
 calibration/photos; notification Stop; expiry; real TV/media/slides; default mic
 state in the selected meeting app; photo saving; touch/voice fallback; thermal and
 battery cost; and Android 16 KB page-size devices.
+
+## Daily activity workspace (2026-11-04)
+
+- **Control** keeps reading/step navigation beside the content. Pause leaves the
+  camera on while buttons remain usable; Stop releases the camera. Fist still
+  stops the camera during pause or practice.
+- **Bookmarks (n)** is beside the page counter. A saved place can be named and
+  restored after reload; opening it focuses the restored page. Bookmarks belong
+  to the exact pasted document and do not duplicate the document text.
+- **Steps timers** show their original step, deadline/countdown and completion
+  independently of navigation and speech feedback. The primary start control
+  prevents duplicate starts; **Start another timer** is explicit. Windows uses
+  the existing persisted reminder scheduler, exact timer IDs and reconciled
+  snapshots. Finished timers also appear in Chat.
+- Android hands timers to the system Clock. The workspace shows an estimate and
+  **Manage in Clock**; it does not claim that a particular system timer stopped.
+- Key-free exploration is an explicit local choice that survives reload. It
+  does not supply credentials or grant permissions. AI and unavailable speech
+  or device services continue to report their actual availability.
+
+The usability changes have browser/unit validation. New native UI/device
+acceptance is still needed; previous recognition/device evidence remains valid
+for the engine it exercised. See [implementation and validation](USABILITY-IMPLEMENTATION.md).

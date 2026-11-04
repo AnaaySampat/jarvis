@@ -1,50 +1,64 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import "./setup-progress.css";
 
-// Shown from app launch until the GUI first connects to the backend WebSocket.
-// The frozen backend takes a moment to start (heavy imports) and, on first launch,
-// downloads its components — so without this the window looks dead/"can't connect".
-// Purely client-side: it needs no backend connection to render (that's the point).
-export default function BootOverlay({ connected }) {
+export default function BootOverlay({
+  connected,
+  onContinue,
+  localAssistant = false,
+}) {
   const [secs, setSecs] = useState(0);
-  const startRef = useRef(null);
-
   useEffect(() => {
-    if (connected) return; // connected → unmount; nothing to time
-    if (startRef.current == null) startRef.current = Date.now();
-    const t = setInterval(() => {
-      setSecs(Math.floor((Date.now() - startRef.current) / 1000));
-    }, 1000);
-    return () => clearInterval(t);
+    if (connected) return;
+    const start = Date.now();
+    const timer = setInterval(
+      () => setSecs(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
   }, [connected]);
-
   if (connected) return null;
-
-  const msg =
-    secs < 12
-      ? "Starting up, sir…"
-      : secs < 40
-        ? "Setting things up — the first launch downloads a few components."
-        : "Still starting. If this doesn't clear, the backend may have failed to start.";
-
+  const native = Boolean(window.__TAURI_INTERNALS__);
   return (
     <div className="setup-overlay">
-      <div className="setup-card" role="status" aria-label="Starting JARVIS">
-        <div className="setup-ring" aria-hidden="true">
-          <span className="setup-ring-core" />
+      <div
+        className="setup-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="boot-title"
+      >
+        <div className="setup-kicker">
+          {secs < 40 ? "Starting" : "Connection needs attention"}
         </div>
-        <div className="setup-kicker">BOOTING</div>
-        <div className="setup-title">J.A.R.V.I.S</div>
-        <div className="setup-sub">{msg}</div>
-        <div className="setup-bar">
-          <div className="setup-bar-fill setup-bar-fill--indet" />
-        </div>
-        {secs >= 40 && (
-          <div className="setup-foot">
-            Diagnostics: open <code>backend.log</code> in the JARVIS install folder (
-            <code>resources\jarvis-backend</code>).
-          </div>
-        )}
+        <h1 id="boot-title" className="setup-title">
+          JARVIS
+        </h1>
+        <p className="setup-sub" role="status">
+          {secs < 40
+            ? "Connecting to the assistant…"
+            : localAssistant
+              ? "The local assistant could not finish startup. Retry or use reading and steps."
+              : "The desktop backend has not connected. You can retry or use local activities."}
+        </p>
+        <button type="button" className="setup-retry" onClick={onContinue}>
+          Continue with local features
+        </button>
+        <button
+          type="button"
+          className="setup-retry"
+          onClick={() => window.location.reload()}
+        >
+          Retry startup
+        </button>
+        <details className="setup-foot">
+          <summary>Connection help</summary>
+          <p>
+            {localAssistant
+              ? "The assistant runs in this app. Retry startup if local configuration could not load; you can still use reading and steps."
+              : native
+                ? "Restart JARVIS if the backend is unavailable. Backend diagnostics are in the app's backend.log."
+                : "This desktop preview needs its backend running on this computer. Reading and steps work without it. The Android preview runs its assistant in the browser."}
+          </p>
+        </details>
       </div>
     </div>
   );

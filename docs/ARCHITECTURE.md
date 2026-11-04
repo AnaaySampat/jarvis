@@ -30,9 +30,10 @@ On Windows the brain is a Python process the app talks to over a WebSocket. On A
 that whole brain is ported to `jarvis-studio-gui/src/brain/` and called **directly from
 React**.
 
-The seam is `src/hooks/useAssistant.js`: it picks `useBrain` (in-app brain) on a phone or
-`useWebSocket` (Python backend) on desktop, **once at module load**, and returns one
-stable hook. `useBrain.js` deliberately mirrors `useWebSocket`'s shape, so `App.jsx` and
+The seam is `src/hooks/useAssistant.js`: it picks `useBrain` (in-app brain) on native Android and in this fork’s browser
+preview, or `useWebSocket` (Python backend) in a native desktop build, **once at module load**, and returns one
+stable hook. `utils/assistantRuntime.js` selects from runtime identity, never window
+width or touch hardware; `isMobileViewport.js` is only a layout helper. `useBrain.js` deliberately mirrors `useWebSocket`'s shape, so `App.jsx` and
 the HUD never learn which transport is behind them.
 
 `reference/python-backend-spec/` (local-only, gitignored — not in the public repo) is a

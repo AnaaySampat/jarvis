@@ -1,4 +1,4 @@
-/** Single source of truth for phone / touch layout (used by ViewportScale, IS_MOBILE, main.jsx). */
+/** Phone / touch layout only. Assistant runtime selection lives in assistantRuntime.js. */
 export const MOBILE_MAX_SHORT_SIDE = 640;
 
 export function isMobileViewport() {

@@ -1,3 +1,5 @@
+import LocalFeatures from "./components/LocalFeatures";
+import { useLocalExploration } from "./hooks/useLocalExploration";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import { JarvisHUD } from "./hud/HudApp";
@@ -89,6 +91,7 @@ function ClarifyPrompt({ request, onRespond }) {
 }
 
 export default function App() {
+  const [exploring, exploreLocal] = useLocalExploration();
   const {
     status,
     messages,
@@ -205,12 +208,16 @@ export default function App() {
   // App owns the overlay state so JARVIS can drive them via ui_action too.
   const [chatOpen, setChatOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [handsFreeOpen, setHandsFreeOpen] = useState(false);
+  const closeHandsFree = useCallback(() => setHandsFreeOpen(false), []);
   const [settingsPage, setSettingsPage] = useState(null); // a page to open Settings on
   const openSettings = useCallback((page = null) => {
+    setHandsFreeOpen(false);
     setSettingsPage(page);
     setShowSettings(true);
   }, []);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const openHandsFree = useCallback(() => { setChatOpen(false); setSkillsOpen(false); setShowSettings(false); setHandsFreeOpen(true); }, []);
   const [capsOpen, setCapsOpen] = useState(false);
   const [powerOpen, setPowerOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -619,6 +626,7 @@ export default function App() {
             "theme preset colour color accent font glow corners background picture image layout cards iron man",
         },
       ),
+      cmd("hands-free", "Panels", "Hands-free activities", "skills", openHandsFree, { keywords: "read reader reading steps recipe instructions music gestures practice" }),
       cmd("settings", "Menus", "Settings", "settings", () => openSettings()),
       cmd(
         "agent-mode",
@@ -738,6 +746,7 @@ export default function App() {
     sendMessage,
     newConversation,
     openSettings,
+    openHandsFree,
   ]);
 
   // Quick controls, in the home screen's header (the desktop's three groups).
@@ -872,66 +881,72 @@ export default function App() {
 
   return (
     <>
-      <GestureWorkspace controls={gestures} />
-      <JarvisHUD
-        config={hudConfig}
-        toolbar={toolbar}
-        screen={screen}
-        status={status}
-        activeTask={unifiedTasks.find((t) => ACTIVE_TASK_STATES.has(t.status))}
-        telemetry={telemetry}
-        weather={weather}
-        netInfo={netInfo}
-        schedule={schedule}
-        messages={messages}
-        commands={commands}
-        onClearCommands={clearCommands}
-        recordings={recordings}
-        allowedDirs={sysInfo.allowed_dirs || []}
-        panels={panels}
-        onTogglePanel={togglePanel}
-        chatOpen={chatOpen}
-        setChatOpen={setChatOpen}
-        skillsOpen={skillsOpen}
-        setSkillsOpen={setSkillsOpen}
-        capsOpen={capsOpen}
-        setCapsOpen={setCapsOpen}
-        powerOpen={powerOpen}
-        setPowerOpen={setPowerOpen}
-        memoryOpen={memoryOpen}
-        setMemoryOpen={setMemoryOpen}
-        memory={memory}
-        onRemember={rememberFact}
-        onForget={forgetMemory}
-        onSend={sendMessage}
-        onStop={stopSpeech}
-        onReset={resetConversation}
-        onUpload={sendUpload}
-        onNotify={notify}
-        runAction={runAction}
-        onSaveDirs={saveDirs}
-        conversations={conversations}
-        onNewChat={newConversation}
-        onOpenConversation={openConversation}
-        onDeleteConversation={deleteConversation}
-        onRefreshConversations={listConversations}
-        onClearConversations={clearConversations}
-        sysInfo={sysInfo}
-        appControlOn={appControlOn}
-        pcConfig={pcConfig}
-        pcState={pcState}
-        tvConfig={tvConfig}
-        onOpenSettings={openSettings}
-        onOpenRemote={openRemote}
-        onListen={triggerListen}
-        conversationMode={conversationMode}
-        onConversationMode={setConversationModeOn}
-        activeAgent={activeAgent}
-        onPickAgent={pickAgent}
-        onToggleAgents={toggleAgents}
-      />
+      <GestureWorkspace controls={gestures} open={handsFreeOpen} onClose={closeHandsFree} onOpen={openHandsFree}
+        routines={IS_MOBILE ? listRoutines() : Array.isArray(memory?.routines) ? memory.routines : []} />
+      <div className="app-shell">
+        {exploring && (!isConnected || sysInfo.needs_setup) &&
+          <LocalFeatures connected={isConnected} onConnect={() => openSettings("keys")} />}
+        <JarvisHUD
+          config={hudConfig}
+          toolbar={toolbar}
+          onOpenHandsFree={openHandsFree}
+          screen={screen}
+          status={status}
+          activeTask={unifiedTasks.find((t) => ACTIVE_TASK_STATES.has(t.status))}
+          telemetry={telemetry}
+          weather={weather}
+          netInfo={netInfo}
+          schedule={schedule}
+          messages={messages}
+          commands={commands}
+          onClearCommands={clearCommands}
+          recordings={recordings}
+          allowedDirs={sysInfo.allowed_dirs || []}
+          panels={panels}
+          onTogglePanel={togglePanel}
+          chatOpen={chatOpen}
+          setChatOpen={setChatOpen}
+          skillsOpen={skillsOpen}
+          setSkillsOpen={setSkillsOpen}
+          capsOpen={capsOpen}
+          setCapsOpen={setCapsOpen}
+          powerOpen={powerOpen}
+          setPowerOpen={setPowerOpen}
+          memoryOpen={memoryOpen}
+          setMemoryOpen={setMemoryOpen}
+          memory={memory}
+          onRemember={rememberFact}
+          onForget={forgetMemory}
+          onSend={sendMessage}
+          onStop={stopSpeech}
+          onReset={resetConversation}
+          onUpload={sendUpload}
+          onNotify={notify}
+          runAction={runAction}
+          onSaveDirs={saveDirs}
+          conversations={conversations}
+          onNewChat={newConversation}
+          onOpenConversation={openConversation}
+          onDeleteConversation={deleteConversation}
+          onRefreshConversations={listConversations}
+          onClearConversations={clearConversations}
+          sysInfo={sysInfo}
+          appControlOn={appControlOn}
+          pcConfig={pcConfig}
+          pcState={pcState}
+          tvConfig={tvConfig}
+          onOpenSettings={openSettings}
+          onOpenRemote={openRemote}
+          onListen={triggerListen}
+          conversationMode={conversationMode}
+          onConversationMode={setConversationModeOn}
+          activeAgent={activeAgent}
+          onPickAgent={pickAgent}
+          onToggleAgents={toggleAgents}
+        />
+      </div>
 
-      {(browserState.open || controlState.armed || !isConnected) && !IS_MOBILE && (
+      {(browserState.open || controlState.armed || (!isConnected && !exploring)) && !IS_MOBILE && (
         <div className="hud-top-stack" role="status">
           {controlState.armed && (
             <div className="hud-armed-banner hud-armed-banner--control">
@@ -953,7 +968,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {!isConnected && (
+          {!isConnected && !exploring && (
             <div className="hud-offline">
               ⚠ CORE OFFLINE — start <code>python main.py</code> in{" "}
               <code>jarvis-studio-backend/</code>
@@ -1020,7 +1035,7 @@ export default function App() {
       {showSettings && (
         <Settings
           initialPage={settingsPage}
-          gestureControls={gestures}
+          gestureControls={gestures} onOpenHandsFree={openHandsFree}
           sysInfo={sysInfo}
           pcState={pcState}
           pcVersion={sysInfo.pc_version}
@@ -1122,16 +1137,16 @@ export default function App() {
       {/* Booting: shown until the backend WebSocket connects (frozen backend start
           + first-run download). Client-side only, so it shows even if the backend
           is slow or failed to start. */}
-      <BootOverlay connected={isConnected} />
+      <BootOverlay localAssistant={IS_MOBILE} connected={(isConnected && typeof sysInfo.needs_setup === "boolean") || exploring} onContinue={exploreLocal} />
 
       {/* First-run setup: API keys. On a phone there's no Windows storage folder to
           pick, so use the slim mobile key-entry; on desktop, the full Onboarding. */}
       {isConnected &&
-        sysInfo.needs_setup &&
+        sysInfo.needs_setup && !exploring &&
         (IS_MOBILE ? (
-          <MobileOnboarding onSave={sendConfig} />
+          <MobileOnboarding onExplore={exploreLocal} onSave={sendConfig} />
         ) : (
-          <Onboarding sysInfo={sysInfo} onSave={(cfg) => sendConfig(cfg)} />
+          <Onboarding onExplore={exploreLocal} sysInfo={sysInfo} onSave={(cfg) => sendConfig(cfg)} />
         ))}
 
       {/* First-run asset download (Chromium / Whisper / Piper) — desktop only;

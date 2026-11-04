@@ -1,0 +1,179 @@
+/* Viewport constraints shared by the desktop shell and Android preview. */
+.home,
+.home-main,
+.home-hero,
+.home-col {
+  min-width: 0;
+}
+.home {
+  grid-template-columns: minmax(0, 1fr);
+}
+.home-tools {
+  position: relative;
+}
+.home-tools-toggle {
+  display: none;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--h-line-2);
+  background: var(--h-card);
+  color: var(--h-t1);
+  cursor: pointer;
+}
+.home-tools-toggle:focus-visible {
+  outline: 3px solid var(--ac);
+  outline-offset: 2px;
+}
+.chatov-panel {
+  width: min(442px, 100%);
+  max-width: 100%;
+  min-width: 0;
+}
+.chatov-body {
+  min-height: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chatov-input,
+.chatov-form {
+  min-width: 0;
+}
+.chatov-panel :is(img, video, canvas) {
+  max-width: 100%;
+}
+@media (max-width: 1120px) {
+  .home-top {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+  .home-tools-toggle {
+    display: inline-block;
+  }
+  .home-tools-content {
+    display: none;
+  }
+  .home-tools-content.is-open {
+    display: block;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 90;
+    width: min(320px, calc(100vw - 24px));
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    background: var(--h-card);
+    border: 1px solid var(--h-line-2);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px #0008;
+    padding: 8px;
+  }
+  .home-tools-content .tb,
+  .home-tools-content .tb-group {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
+    padding: 4px;
+    border: 0;
+  }
+  .home .home-tools-content .hud-fixed-btn {
+    width: 100%;
+    height: auto;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 9px;
+  }
+  .home-tools-content .hud-fixed-btn::after {
+    content: attr(aria-label);
+    font: 13px var(--body);
+    text-align: left;
+  }
+}
+@media (max-width: 640px) {
+  .home-top {
+    height: auto;
+    min-height: 56px;
+  }
+  .home-brand {
+    gap: 5px;
+  }
+  .home-nav {
+    margin-left: 0;
+    gap: 0;
+  }
+  .home-nav-btn {
+    padding-inline: 8px;
+  }
+  .home-main {
+    padding: 12px;
+  }
+  .home-hero > * {
+    max-width: 100%;
+  }
+  .hero-time {
+    font-size: clamp(36px, 12vw, 62px);
+  }
+  .chatov-panel {
+    width: 100%;
+    border: 0;
+  }
+  .chatov-hd,
+  .chatov-body {
+    padding: 14px 12px;
+  }
+  .chatov-input {
+    padding: 12px 8px;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .chatov-tier {
+    flex-basis: 78px;
+  }
+  .chatov-input input {
+    flex-basis: 100px;
+    padding-inline: 10px;
+  }
+  .cmsg {
+    max-width: 100%;
+  }
+  .memx-panel {
+    inset: 8px;
+  }
+}
+
+.home-hands-free {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  min-height: 40px;
+  color: var(--h-t1);
+  background: var(--h-card);
+  border: 1px solid var(--h-line-2);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.home-hands-free:focus-visible {
+  outline: 3px solid var(--ac);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .home-top {
+    flex-wrap: wrap;
+    padding-block: 6px;
+  }
+  .home-hands-free {
+    font-size: 13px;
+    padding-inline: 8px;
+  }
+  .home-brand {
+    display: none;
+  }
+  .home-nav {
+    flex: 1;
+    justify-content: center;
+  }
+}

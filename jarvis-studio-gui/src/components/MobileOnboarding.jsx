@@ -169,7 +169,7 @@ function Privacy() {
   );
 }
 
-export default function MobileOnboarding({ onSave }) {
+export default function MobileOnboarding({ onSave, onExplore }) {
   const [path, setPath] = useState(null); // null = choose | "keys" | "vertex"
   const [groq, setGroq] = useState("");
   const [gemini, setGemini] = useState("");
@@ -266,6 +266,8 @@ export default function MobileOnboarding({ onSave }) {
             </button>
           </div>
 
+          <button type="button" className="ob-choice" onClick={onExplore}>Explore without an AI key</button>
+          <p className="ob-lede">Read text and follow steps now. Connect an AI provider later in Settings.</p>
           <Privacy />
         </div>
       </div>

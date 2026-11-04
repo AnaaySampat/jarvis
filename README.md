@@ -61,7 +61,10 @@ a **photo or screenshot** and ask JARVIS about it.
 
 ### Hand gestures (preview)
 
-Open **Settings → Voice → Hand gestures**, choose a mode and start the camera.
+Open **Hands-free** on Home to read, follow steps or control music. Reading and
+step buttons work with the camera off. Choose **Learn** for action-free practice
+or **Tune** for presets and mappings, then start the camera when ready.
+Settings → Voice links to the same workspace.
 Controls include music/TV, PC slides, push-to-talk, instructions and timers,
 reading/bookmarks, saved routines, microphone mute, countdown photos, HUD pinch/drag
 and calibrated personal poses. Remap gestures and adjust hold/release timing.
@@ -150,7 +153,7 @@ verification codes are redacted from notification text.
 
 1. **[Download the latest APK](https://github.com/AnaaySampat/jarvis/releases/latest)**
    and install it on your phone.
-2. **Connect an AI provider** during setup. Add a key from
+2. **Explore without an AI key**, or **connect an AI provider** during setup. Add a key from
    [Google AI Studio](https://aistudio.google.com/) or [Groq](https://console.groq.com/),
    or use a Vertex AI service-account JSON file for Google Cloud.
 3. **Enable the features you want.** App control needs Android Accessibility access.

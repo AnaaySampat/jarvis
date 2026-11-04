@@ -301,6 +301,7 @@ export default function Settings({
   onRepairSetup,
   onOpenCustomize,
   gestureControls,
+  onOpenHandsFree,
   pcState,
   pcVersion,
   tasks,
@@ -1007,7 +1008,7 @@ export default function Settings({
           <span className="sp-value sp-mono">{sysInfo.wakeWord || "hey_jarvis"}</span>
         </div>
       </Group>
-      {IS_MOBILE && <GestureControls controls={gestureControls} />}
+      {IS_MOBILE && <GestureControls controls={gestureControls} onOpen={onOpenHandsFree} />}
     </>
   );
 

@@ -1,119 +1,315 @@
-import { useEffect, useRef } from "react";
-import { MODES, readerPages } from "./engine";
+import { useEffect, useRef, useState } from "react";
+import { MODES } from "./engine";
+import ActivityView from "./ActivityView";
+import GesturePanel from "./GesturePanel";
+import PoseGuide from "./PoseGuide";
+import { practicePoses, poseName } from "./poseGuides";
 import "./gestures.css";
 
-export default function GestureWorkspace({ controls }) {
-  const video = useRef(null);
-  const { config, status, step, page, cursor } = controls;
+export default function GestureWorkspace({
+  controls,
+  open = false,
+  onClose,
+  onOpen,
+  routines = [],
+}) {
+  const video = useRef(null),
+    dialog = useRef(null);
+  const [tab, setTab] = useState("control");
+  const [target, setTarget] = useState(practicePoses[0]);
+  const [baseline, setBaseline] = useState(0);
+  const { config, status, cursor } = controls;
   const active = status.running || status.starting;
+  const activeTimers =
+    controls.timers?.timers.filter(
+      (t) => t.state === "running" && t.deadline > controls.timers.now,
+    ).length || 0;
   useEffect(() => {
-    if (status.running && video.current) controls.camera.preview?.(video.current);
-  }, [status.running, controls.camera]);
-  const pages = readerPages(config.reader);
-  const steps = config.steps
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    if (status.running && video.current)
+      controls.camera.preview?.(video.current);
+  }, [status.running, controls.camera, open, tab]);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    dialog.current?.querySelector("button")?.focus();
+    const key = (event) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose?.();
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [
+        ...(dialog.current?.querySelectorAll(
+          "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, summary, [tabindex='0']",
+        ) || []),
+      ].filter((node) => node.getClientRects().length);
+      const first = focusable[0],
+        last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    const node = dialog.current;
+    node?.addEventListener("keydown", key);
+    return () => {
+      node?.removeEventListener("keydown", key);
+      previous?.focus?.();
+    };
+  }, [open, onClose]);
+  const selectTab = (next) => {
+    setTab(next);
+    controls.setPractice(next === "learn");
+    setBaseline(controls.practiceCount || 0);
+  };
+  if (!open && !active) return null;
+  const passed =
+    controls.practicePose === target &&
+    (controls.practiceCount || 0) > baseline;
   return (
     <>
-      {cursor && active && config.mode === "hud" && (
-        <div
-          aria-hidden="true"
-          className={"gesture-cursor" + (cursor.down ? " is-down" : "")}
-          style={{ left: cursor.x, top: cursor.y }}
-        />
-      )}
-      {active && (
-        <aside className="gesture-workspace" aria-label="Active gesture session">
-          <div className="gesture-settings__row">
-            <b>{MODES[config.mode]}</b>
-            <button type="button" onClick={controls.stop}>
-              Stop camera
+      {cursor &&
+        active &&
+        config.mode === "hud" &&
+        !controls.practice &&
+        !controls.paused && (
+          <div
+            aria-hidden="true"
+            className={`gesture-cursor${cursor.down ? " is-down" : ""}`}
+            style={{ left: cursor.x, top: cursor.y }}
+          />
+        )}
+      {open && <div className="hands-free-scrim" />}
+      <section
+        ref={dialog}
+        className={open ? "hands-free" : "gesture-workspace"}
+        role={open ? "dialog" : "region"}
+        aria-modal={open || undefined}
+        aria-label={open ? "Hands-free" : "Active gesture session"}
+      >
+        <header className="activity-bar hands-free-header">
+          <h2>{open ? "Hands-free" : MODES[config.mode]}</h2>
+          {activeTimers > 0 && (
+            <span>
+              {activeTimers} timer{activeTimers === 1 ? "" : "s"}
+            </span>
+          )}
+          {open ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close Hands-free"
+            >
+              Close
             </button>
-          </div>
-          {controls.camera.preview && (
-            <video ref={video} autoPlay muted playsInline className="gesture-workspace__video" />
+          ) : (
+            <button type="button" onClick={onOpen}>
+              Open Hands-free
+            </button>
           )}
-          {config.mode === "reading" && (
-            <>
-              <div className="gesture-workspace__text" tabIndex={0}>
-                {pages[page] || "Add text in gesture settings."}
-              </div>
-              <div className="gesture-settings__row">
+        </header>
+        {open && (
+          <>
+            <p>
+              Read, follow steps or control music. Buttons work with the camera
+              off.
+            </p>
+            <label>
+              Activity
+              <select
+                aria-label="Activity"
+                value={config.mode}
+                disabled={active}
+                onChange={(e) =>
+                  controls.changeConfig({ mode: e.target.value })
+                }
+              >
+                {Object.entries(MODES).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {key === "reading"
+                      ? "Read"
+                      : key === "cooking"
+                        ? "Steps"
+                        : label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {active && <small>Stop the camera to change activity.</small>}
+            <div
+              className="activity-bar"
+              role="group"
+              aria-label="Hands-free views"
+            >
+              {[
+                ["control", "Control"],
+                ["learn", "Learn"],
+                ["tune", "Tune"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={tab === value}
+                  onClick={() => selectTab(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="hands-free-body">
+          {
+            <section className="activity-camera" aria-label="Camera controls">
+              <div className="activity-bar">
                 <button
                   type="button"
-                  data-gesture-safe="true"
-                  onClick={() => controls.selectPage(Math.max(0, page - 1))}
+                  disabled={controls.busy || (!active && !controls.supported)}
+                  onClick={active ? controls.stop : controls.start}
                 >
-                  Previous
+                  {controls.busy
+                    ? "Please wait…"
+                    : active
+                      ? "Stop camera"
+                      : controls.practice
+                        ? "Start practice camera"
+                        : "Start gestures"}
                 </button>
-                <span>{pages.length ? `${page + 1} / ${pages.length}` : "No pages"}</span>
-                <button
-                  type="button"
-                  data-gesture-safe="true"
-                  onClick={() => controls.selectPage(Math.min(pages.length - 1, page + 1))}
-                >
-                  Next
-                </button>
+                {status.running && !controls.practice && (
+                  <button
+                    type="button"
+                    onClick={() => controls.setPaused(!controls.paused)}
+                  >
+                    {controls.paused ? "Resume gestures" : "Pause gestures"}
+                  </button>
+                )}
+                <span>
+                  {status.starting
+                    ? "Starting camera…"
+                    : status.running
+                      ? controls.paused
+                        ? "Camera on · gestures paused"
+                        : controls.practice
+                          ? "Camera on · practice only"
+                          : "Camera on"
+                      : "Camera off"}
+                </span>
               </div>
+              {controls.camera.preview && active && (
+                <video
+                  ref={video}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="gesture-workspace__video"
+                />
+              )}
+              {open && controls.camera.devices && (
+                <label>
+                  Webcam
+                  <select
+                    aria-label="Webcam"
+                    value={config.cameraId}
+                    disabled={active}
+                    onChange={(e) =>
+                      controls.changeConfig({ cameraId: e.target.value })
+                    }
+                  >
+                    <option value="">Default camera</option>
+                    {controls.camera.devices.map((device, i) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `Camera ${i + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {controls.paused && <p>Camera stays on. Buttons still work.</p>}
+              {!controls.supported && (
+                <p>
+                  Reading and steps are available. Camera gestures need the
+                  native Android app or Windows webcam preview.
+                </p>
+              )}
+            </section>
+          }
+          {(tab === "control" || !open) &&
+            !controls.practice &&
+            controls.timers && (
+              <ActivityView controls={controls} compact={!open} />
+            )}
+          {tab === "learn" && open && (
+            <section aria-label="Gesture practice">
+              <h3>Practice without running actions</h3>
+              <p>
+                Show one whole hand, face the camera, light your hand from the
+                front and lower it between attempts. A closed fist stops the
+                camera.
+              </p>
+              <label>
+                Practice pose
+                <select
+                  aria-label="Practice pose"
+                  value={target}
+                  onChange={(e) => {
+                    setTarget(e.target.value);
+                    setBaseline(controls.practiceCount || 0);
+                  }}
+                >
+                  {practicePoses.map((pose) => (
+                    <option key={pose} value={pose}>
+                      {poseName(pose)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <PoseGuide pose={target} />
+              <p role="status">
+                {passed
+                  ? "Recognized. Lower your hand before the next pose."
+                  : `Hold the ${poseName(target).toLowerCase()} briefly.`}
+              </p>
               <button
                 type="button"
-                data-gesture-safe="true"
-                onClick={() => controls.act("reader.speak")}
+                disabled={!passed}
+                onClick={() => {
+                  setTarget(
+                    practicePoses[
+                      (practicePoses.indexOf(target) + 1) % practicePoses.length
+                    ],
+                  );
+                  setBaseline(controls.practiceCount || 0);
+                }}
               >
-                Read aloud
+                Next gesture
               </button>
-              <button
-                type="button"
-                data-gesture-safe="true"
-                onClick={() => controls.act("reader.bookmark")}
-              >
-                Bookmark
-              </button>
-            </>
+            </section>
           )}
-          {config.mode === "cooking" && (
-            <>
-              <div className="gesture-workspace__text">
-                {steps[step] || "Add instructions in gesture settings."}
-              </div>
-              <div className="gesture-settings__row">
-                <button
-                  type="button"
-                  data-gesture-safe="true"
-                  onClick={() => controls.selectStep(Math.max(0, step - 1))}
-                >
-                  Previous
-                </button>
-                <span>{steps.length ? `${step + 1} / ${steps.length}` : "No instructions"}</span>
-                <button
-                  type="button"
-                  data-gesture-safe="true"
-                  onClick={() => controls.selectStep(Math.min(steps.length - 1, step + 1))}
-                >
-                  Next
-                </button>
-              </div>
-              <button
-                type="button"
-                data-gesture-safe="true"
-                onClick={() => controls.act("steps.repeat")}
-              >
-                Read step
-              </button>
-              <button
-                type="button"
-                data-gesture-safe="true"
-                onClick={() => controls.act("timer.start")}
-              >
-                Start {config.timerSeconds}s timer
-              </button>
-            </>
+          {tab === "tune" && open && (
+            <GesturePanel controls={controls} routines={routines} />
           )}
-          <p role="status">{controls.message || status.summary}</p>
-          <small>Closed fist stops the camera. Lower your hand before repeating a pose.</small>
-        </aside>
-      )}
+          {tab === "control" && open && (
+            <details className="activity-mappings">
+              <summary>Gesture actions for this activity</summary>
+              {Object.entries(config.bindings[config.mode])
+                .filter(([, action]) => action !== "none")
+                .map(([pose, action]) => (
+                  <PoseGuide key={pose} pose={pose} action={action} />
+                ))}
+            </details>
+          )}
+        </div>
+        <p role="status">{controls.message || status.summary}</p>
+        <small>
+          Recognition stays on this device. Sessions last up to five minutes.
+          Gestures cannot approve requests. Read-aloud uses your configured
+          speech provider.
+        </small>
+      </section>
     </>
   );
 }

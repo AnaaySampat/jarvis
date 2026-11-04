@@ -136,3 +136,228 @@
     max-width: 300px;
   }
 }
+
+/* Daily activities share one engine with Settings; only this view owns focus. */
+.hands-free-scrim {
+  position: fixed;
+  inset: 0;
+  background: #02060bcc;
+  z-index: 119;
+}
+.hands-free {
+  position: fixed;
+  z-index: 120;
+  inset: 16px;
+  margin: auto;
+  width: min(920px, calc(100% - 32px));
+  height: min(880px, calc(100dvh - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--bg-surface, #111820);
+  color: var(--text-pri, #eef5fb);
+  border: 1px solid var(--border, #647687);
+  border-radius: 16px;
+  box-shadow: 0 20px 80px #0008;
+  font-size: 15px;
+  line-height: 1.55;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.hands-free > p {
+  margin: 0;
+}
+.hands-free h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.hands-free-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+}
+.hands-free-header {
+  justify-content: space-between;
+}
+.hands-free :is(button, input, textarea, select),
+.gesture-workspace button {
+  border: 1px solid #647687;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: var(--bg-base, #14212d);
+  color: inherit;
+  font: inherit;
+  max-width: 100%;
+}
+.hands-free button {
+  cursor: pointer;
+  min-height: 42px;
+}
+.hands-free button[aria-pressed="true"] {
+  border-color: var(--accent, #77efff);
+  background: color-mix(in srgb, var(--accent, #77efff) 15%, #111820);
+}
+.hands-free button:disabled,
+.gesture-workspace button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.hands-free
+  :is(button, input, textarea, select, summary, [tabindex]):focus-visible,
+.gesture-workspace :is(button, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent, #77efff);
+  outline-offset: 3px;
+}
+.hands-free label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  min-width: 0;
+}
+.hands-free :is(textarea, select) {
+  width: 100%;
+  box-sizing: border-box;
+}
+.hands-free small,
+.gesture-workspace small {
+  color: #bbc7d1;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.activity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-block: 8px;
+  min-width: 0;
+}
+.activity-bar > label {
+  flex: 1 1 180px;
+}
+.activity-content {
+  margin-top: 16px;
+}
+.activity-content details {
+  padding-block: 10px;
+}
+.hands-free summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 5px;
+}
+.activity-page {
+  min-height: 100px;
+  max-height: 35vh;
+  border-block: 1px solid #536779;
+  margin-block: 12px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.activity-camera {
+  padding: 10px;
+  border: 1px solid #536779;
+  border-radius: 10px;
+}
+.activity-camera video {
+  max-height: 160px;
+}
+.activity-timers:empty {
+  display: none;
+}
+.activity-timer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  margin-block: 10px;
+  border: 1px solid #647687;
+  border-radius: 8px;
+}
+.activity-timer > span {
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
+}
+.activity-timer strong {
+  font-variant-numeric: tabular-nums;
+}
+.activity-timer.is-finished {
+  border-color: var(--accent, #77efff);
+}
+.activity-announcement:empty {
+  display: none;
+}
+.activity-bookmarks {
+  border: 1px solid #647687;
+  border-radius: 10px;
+  padding: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.activity-bookmark {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+.activity-bookmark button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.activity-mappings {
+  margin-top: 18px;
+}
+.pose-guide {
+  display: flex;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #536779;
+}
+.pose-guide p {
+  margin: 5px 0;
+}
+.pose-drawing {
+  flex: 0 0 72px;
+  width: 72px;
+  height: 90px;
+  color: var(--accent, #77efff);
+}
+.pose-drawing.is-down {
+  transform: rotate(180deg);
+}
+.pose-action {
+  color: var(--accent, #77efff);
+}
+.gesture-help {
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.gesture-settings p {
+  opacity: 1;
+  font-size: 14px;
+}
+.gesture-workspace {
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
+}
+@media (max-width: 600px) {
+  .hands-free {
+    inset: 6px;
+    width: calc(100% - 12px);
+    height: calc(100dvh - 12px);
+    padding: 12px;
+    gap: 8px;
+  }
+  .hands-free :is(input, textarea, select) {
+    font-size: 16px;
+  }
+  .activity-page {
+    font-size: 17px;
+  }
+}
