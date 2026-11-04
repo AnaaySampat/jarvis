@@ -23,6 +23,28 @@ interface HostOptions {
 export function androidGestureHost(options: HostOptions) {
   return {
     ...options,
+    async startTimer({ seconds, label, token }: { seconds: number; label: string; token: string }) {
+      const result = await androidPlatform.clock.setTimer(seconds, label);
+      return {
+        ...result,
+        external: true,
+        ...(result.ok
+          ? {
+              timers: [
+                {
+                  id: token,
+                  deadline: Date.now() + seconds * 1000,
+                  seconds,
+                  label,
+                  state: "running",
+                  external: true,
+                },
+              ],
+            }
+          : {}),
+      };
+    },
+    manageTimers: () => androidPlatform.clock.showTimers(),
     async speak(text: string) {
       await webSpeechTTS.speak(text);
       return { ok: true, summary: "Read aloud." };

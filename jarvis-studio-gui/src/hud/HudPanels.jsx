@@ -14,6 +14,7 @@ import { agentById, agentsFor } from "../brain/agents";
 
 /* ───────── Skills — quick tools, with their results shown in place ───────── */
 export function SkillsOverlay({
+  onOpenHandsFree,
   open,
   onClose,
   recordings = {},
@@ -55,6 +56,7 @@ export function SkillsOverlay({
       onClose={onClose}
     >
       <div className="sp-sheet">
+        <Group title="Hands-free"><ActionRow icon="skills" title="Read, Steps and Music" desc="Activities and gesture practice." onClick={() => { onClose(); onOpenHandsFree?.(); }} /></Group>
         <Group title="QR code">
           <Field hint="Anyone who scans it gets this link or text.">
             <div className="sp-inline">

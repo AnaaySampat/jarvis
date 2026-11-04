@@ -1,3 +1,4 @@
+import { useActivityTimers } from "./timers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ACTIONS,
@@ -63,6 +64,12 @@ export function useGestureModes({
   const passedRef = useRef([]);
   const [history, setHistory] = useState([]);
   const historySeq = useRef(0);
+  const timers = useActivityTimers(host);
+  const timersRef = useRef(timers);
+  useEffect(() => {
+    timersRef.current = timers;
+  }, [timers]);
+  const navigationRevision = useRef(0);
   const pages = useMemo(() => readerPages(config.reader), [config.reader]);
   const steps = useMemo(
     () =>
@@ -135,6 +142,16 @@ export function useGestureModes({
         ...current,
         ...(typeof patch === "function" ? patch(current) : patch),
       });
+      if (next.reader !== current.reader) {
+        setPage(0);
+        context.current.page = 0;
+        navigationRevision.current++;
+      }
+      if (next.steps !== current.steps) {
+        setStep(0);
+        context.current.step = 0;
+        navigationRevision.current++;
+      }
       configRef.current = next;
       if (policyKey(current) !== policyKey(next)) resetInteraction(next);
       if (current.mode !== next.mode) {
@@ -169,7 +186,6 @@ export function useGestureModes({
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
     alive.current = true;
     let disposed = false,
       timer;
@@ -317,6 +333,8 @@ export function useGestureModes({
       }
       actionBusy.current = true;
       currentAction.current = action;
+      if (navigation(action)) navigationRevision.current++;
+      const selectionRevision = navigationRevision.current;
       const commandId = ++historySeq.current;
       const epoch = session.current;
       setHistory((items) =>
@@ -351,7 +369,13 @@ export function useGestureModes({
           );
           setStep(next);
           context.current.step = next;
-          result = await h.speak(instructionList[next]);
+          const spoken = await h.speak(instructionList[next]);
+          result = spoken?.ok
+            ? {
+                ok: true,
+                summary: `Finished reading step ${next + 1} of ${instructionList.length}.`,
+              }
+            : spoken;
         } else if (action === "reader.next" || action === "reader.previous") {
           if (!readingPages.length) throw new Error("Add reading text first.");
           const next = clampIndex(
@@ -372,6 +396,9 @@ export function useGestureModes({
             page: pageAt,
             excerpt: readingPages[pageAt].slice(0, 120),
             at: Date.now(),
+            name:
+              bookmarksRef.current.find((b) => b.documentId === id && b.page === pageAt)?.name ||
+              "",
           };
           const next = [
             bookmark,
@@ -392,6 +419,13 @@ export function useGestureModes({
             behavior: "smooth",
           });
           result = { ok: true, summary: "Scrolled the reading area." };
+        } else if (action === "timer.start") {
+          const at = clampIndex(context.current.step, instructionList.length);
+          const label =
+            cfg.mode === "cooking" && instructionList.length
+              ? `Step ${at + 1}: ${instructionList[at].slice(0, 120)}`
+              : MODES[cfg.mode];
+          result = await timersRef.current.start(cfg.timerSeconds, label);
         } else result = await h.perform(action, cfg, cameraRef.current);
         if (alive.current) {
           const summary = result?.summary || "Command sent; no result was provided.";
@@ -407,7 +441,11 @@ export function useGestureModes({
                 : item,
             ),
           );
-          if (epoch === session.current) setMessage(summary);
+          if (
+            epoch === session.current &&
+            (!navigation(action) || selectionRevision === navigationRevision.current)
+          )
+            setMessage(summary);
         }
       } catch (error) {
         if (alive.current) {
@@ -417,7 +455,11 @@ export function useGestureModes({
               item.id === commandId ? { ...item, state: "failed", summary } : item,
             ),
           );
-          if (epoch === session.current) setMessage(summary);
+          if (
+            epoch === session.current &&
+            (!navigation(action) || selectionRevision === navigationRevision.current)
+          )
+            setMessage(summary);
         }
       } finally {
         actionBusy.current = false;
@@ -617,7 +659,7 @@ export function useGestureModes({
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("beforeunload", flush);
     window.addEventListener("jarvis:gesture-manual", manual);
-    void poll();
+    if (enabled) void poll();
     return () => {
       disposed = true;
       alive.current = false;
@@ -633,6 +675,10 @@ export function useGestureModes({
   }, [enabled, changeConfig, cancelPendingControl]);
 
   const control = async (start) => {
+    if (start && !enabled) {
+      setMessage("Camera gestures require the native Android app or Windows webcam preview.");
+      return;
+    }
     if (start && controlBusy.current) return;
     const token = ++controlToken.current;
     controlBusy.current = true;
@@ -687,6 +733,7 @@ export function useGestureModes({
     config,
     status,
     busy,
+    timers,
     message,
     step,
     page,
@@ -734,17 +781,25 @@ export function useGestureModes({
     act: (action) =>
       window.dispatchEvent(new CustomEvent("jarvis:gesture-manual", { detail: { action } })),
     selectPage: (n) => {
+      navigationRevision.current++;
+      queuedNavigation.current = null;
+      if (actionBusy.current && currentAction.current.startsWith("reader.")) host.stopSpeech?.();
       const value = clampIndex(n, readerPages(configRef.current.reader).length);
       context.current.page = value;
       setPage(value);
+      setMessage(`Page ${value + 1}.`);
     },
     selectStep: (n) => {
+      navigationRevision.current++;
+      queuedNavigation.current = null;
+      if (actionBusy.current && currentAction.current.startsWith("steps.")) host.stopSpeech?.();
       const value = clampIndex(
         n,
         configRef.current.steps.split("\n").filter((s) => s.trim()).length,
       );
       context.current.step = value;
       setStep(value);
+      setMessage(`Step ${value + 1}.`);
     },
     calibrate: (name) => {
       const clean = String(name || "")
@@ -777,6 +832,10 @@ export function useGestureModes({
     },
     removePose: (id) =>
       changeConfig((current) => ({ customPoses: current.customPoses.filter((p) => p.id !== id) })),
+    renameBookmark: (at, name) =>
+      changeBookmarks((previous) =>
+        previous.map((b) => (b.at === at ? { ...b, name: name.slice(0, 80) } : b)),
+      ),
     removeBookmark: (at) => changeBookmarks((previous) => previous.filter((b) => b.at !== at)),
   };
 }

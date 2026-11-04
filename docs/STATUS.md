@@ -1,5 +1,13 @@
 # Status
 
+Usability follow-up, **2026-11-04**: Hands-free is a direct Home/Skills/Settings
+entry with camera-independent reading/steps, nearby named bookmarks, safe Learn
+practice, Tune presets and activity-specific status. Browser preview startup now
+uses the in-app brain regardless of viewport size. Browser/unit checks are
+recorded in [the implementation report](USABILITY-IMPLEMENTATION.md). These UI
+changes have not been installed or verified on a physical Android device in this
+session; the earlier camera/gesture device evidence below is unchanged.
+
 **2026-11-04 — v2.5.2 build-source integration:** combined the gesture controls
 redesign with the latest upstream camera/runtime and ecosystem fixes. Android keeps
 the 15 fps frame pipeline, upright landmark conversion, MPImage lifetime and R8/JNI

@@ -301,6 +301,7 @@ export default function Settings({
   onRepairSetup,
   onOpenCustomize,
   gestureControls,
+  onOpenHandsFree,
   pcState,
   pcVersion,
   tasks,
@@ -1583,7 +1584,7 @@ export default function Settings({
         words: "hand gesture camera practice motion hands free recognition poses",
         value: gestureControls.status.running ? "Camera on" : "Camera off",
         tone: gestureControls.status.running ? "on" : "off",
-        body: <GestureControls controls={gestureControls} />,
+        body: <GestureControls controls={gestureControls} onOpen={onOpenHandsFree} />,
       },
       onOpenCustomize && {
         id: "interface",

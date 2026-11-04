@@ -491,3 +491,81 @@ it("does not claim the camera is off when a Stop request fails", async () => {
   expect(controls.status.summary).toContain("Could not confirm");
   expect(controls.message).toBe("Bridge unavailable");
 });
+
+it("uses reading controls and bookmarks without a running camera or camera support", async () => {
+  await act(async () => {
+    renderer.update(<App {...props} enabled={false} />);
+    controls.changeConfig({
+      mode: "reading",
+      reader: "First page.\n\nSecond page.",
+    });
+  });
+  await act(async () => {
+    controls.act("reader.next");
+  });
+  expect(controls.page).toBe(1);
+  await act(async () => {
+    controls.act("reader.bookmark");
+  });
+  expect(controls.bookmarks[0].page).toBe(1);
+  await act(async () => {
+    controls.renameBookmark(controls.bookmarks[0].at, "My place");
+  });
+  await advance(600);
+  expect(JSON.parse(store.get("jarvis.gesture.bookmarks.v2"))[0].name).toBe("My place");
+  expect(camera.start).not.toHaveBeenCalled();
+});
+it("practices poses without running activities and preserves fist stop", async () => {
+  await act(async () => {
+    controls.setPractice(true);
+    controls.setPracticeTarget("PEACE");
+  });
+  await start();
+  await show("PEACE");
+  expect(controls.practicePassed).toContain("PEACE");
+  expect(host.pttStart).not.toHaveBeenCalled();
+  expect(host.perform).not.toHaveBeenCalled();
+  expect(host.speak).not.toHaveBeenCalled();
+  await show("FIST");
+  expect(camera.stop).toHaveBeenCalled();
+});
+it("pauses gesture actions while manual activity controls continue to work", async () => {
+  await act(async () => {
+    controls.changeConfig({ mode: "reading", reader: "One.\n\nTwo." });
+  });
+  await start();
+  await act(async () => {
+    controls.setPaused(true);
+  });
+  await show("PEACE");
+  expect(controls.page).toBe(0);
+  await act(async () => {
+    controls.act("reader.next");
+  });
+  expect(controls.page).toBe(1);
+  await show("FIST");
+  expect(camera.stop).toHaveBeenCalled();
+});
+it("keeps the current step status when older speech finishes after manual navigation", async () => {
+  let finish;
+  host.speak.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {
+    controls.changeConfig({ mode: "cooking", steps: "One\nTwo\nThree" });
+  });
+  await act(async () => {
+    controls.act("steps.repeat");
+  });
+  await act(async () => {
+    controls.selectStep(2);
+  });
+  await act(async () => {
+    finish({ ok: true, summary: "Reading finished." });
+  });
+  expect(controls.step).toBe(2);
+  expect(controls.message).toBe("Step 3.");
+});

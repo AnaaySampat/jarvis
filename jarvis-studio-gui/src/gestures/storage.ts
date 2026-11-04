@@ -3,6 +3,7 @@ export interface Bookmark {
   page: number;
   excerpt: string;
   at: number;
+  name?: string;
 }
 export function safeStorage(): Storage | undefined {
   try {
@@ -21,17 +22,28 @@ export function documentId(text: string): string {
     a = Math.imul(a ^ n, 0x01000193);
     b = Math.imul(b ^ n, 0x85ebca6b);
   }
-  return text.length.toString(36) + "-" + (a >>> 0).toString(16) + "-" + (b >>> 0).toString(16);
+  return (
+    text.length.toString(36) +
+    "-" +
+    (a >>> 0).toString(16) +
+    "-" +
+    (b >>> 0).toString(16)
+  );
 }
 export function clampIndex(index: number, length: number): number {
   return Math.max(
     0,
-    Math.min(Math.max(0, length - 1), Number.isFinite(index) ? Math.trunc(index) : 0),
+    Math.min(
+      Math.max(0, length - 1),
+      Number.isFinite(index) ? Math.trunc(index) : 0,
+    ),
   );
 }
 export function loadBookmarks(storage?: Pick<Storage, "getItem">): Bookmark[] {
   try {
-    const raw = JSON.parse(storage?.getItem("jarvis.gesture.bookmarks.v2") || "[]");
+    const raw = JSON.parse(
+      storage?.getItem("jarvis.gesture.bookmarks.v2") || "[]",
+    );
     if (!Array.isArray(raw)) return [];
     return raw
       .filter(
@@ -51,6 +63,7 @@ export function loadBookmarks(storage?: Pick<Storage, "getItem">): Bookmark[] {
         page: b.page,
         excerpt: b.excerpt.slice(0, 120),
         at: b.at,
+        ...(typeof b.name === "string" ? { name: b.name.slice(0, 80) } : {}),
       }));
   } catch {
     return [];
@@ -63,5 +76,10 @@ export function poseId(): string {
   } catch {
     /* Older/insecure WebViews still get a non-security identifier. */
   }
-  return "custom_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 14);
+  return (
+    "custom_" +
+    Date.now().toString(36) +
+    "_" +
+    Math.random().toString(36).slice(2, 14)
+  );
 }

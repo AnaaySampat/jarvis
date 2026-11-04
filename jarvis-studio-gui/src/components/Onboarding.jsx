@@ -5,7 +5,7 @@ import { useState } from "react";
    storage folder, then hands them to the backend via the same set_config path
    the Settings panel uses. Keys are stored in app data — never in committed
    source. */
-export default function Onboarding({ sysInfo, onSave }) {
+export default function Onboarding({ sysInfo, onSave, onExplore }) {
   const defaultStorage = sysInfo.storage_dir || "";
   const [groqKey, setGroqKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
@@ -33,7 +33,7 @@ export default function Onboarding({ sysInfo, onSave }) {
           <span className="onboard-kicker">FIRST-RUN SETUP</span>
           <h2>Welcome to J.A.R.V.I.S</h2>
           <p className="onboard-sub">
-            Add at least one AI provider key and choose where JARVIS should keep the files it
+            Connect an AI provider and choose where JARVIS should keep the files it
             creates. You can change all of this later in Settings.
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function Onboarding({ sysInfo, onSave }) {
         </div>
 
         <div className="onboard-sec">
-          <label>Storage folder</label>
+          <label htmlFor="onboard-storage">Storage folder</label>
           <input
             type="text"
             value={storageDir}
@@ -89,6 +89,8 @@ export default function Onboarding({ sysInfo, onSave }) {
           </div>
         )}
 
+        <button type="button" className="onboard-go" onClick={onExplore}>Explore without an AI key</button>
+        <p className="onboard-hint">Read text, follow steps and practice gestures now. Connect AI later in Settings.</p>
         <button className="onboard-go" disabled={!canFinish} onClick={finish}>
           Start JARVIS →
         </button>

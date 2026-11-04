@@ -106,6 +106,9 @@ export default function SetupProgress({ progress, onRepair }) {
             : `${done} of ${total} ready`}
         </div>
 
+        {progress.complete && anyError && (
+          <button type="button" className="setup-retry" onClick={() => setDismissed(true)}>Continue with available features</button>
+        )}
         {showRetry && (
           <button className="setup-retry" onClick={handleRetry} disabled={retried}>
             {retried ? "Retrying…" : "Retry setup"}

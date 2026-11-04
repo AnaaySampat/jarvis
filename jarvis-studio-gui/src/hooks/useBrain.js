@@ -1549,7 +1549,7 @@ export function useBrain() {
   const sysInfo = useMemo(() => {
     const cfg = toBrainConfig(stored);
     return {
-      needs_setup: secretsReady && !hasKey,
+      needs_setup: secretsReady ? !hasKey : undefined,
       ecosystem_beta: stored.ecosystemBeta === true,
       update_channel: stored.updateChannel === "beta" ? "beta" : "stable",
       pc_version: pcVersion,
