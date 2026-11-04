@@ -1,5 +1,52 @@
 # Status
 
+**2026-11-04 — v2.5.2 build-source integration:** combined the gesture controls
+redesign with the latest upstream camera/runtime and ecosystem fixes. Android keeps
+the 15 fps frame pipeline, upright landmark conversion, MPImage lifetime and R8/JNI
+protections; recognition retains dense evidence, a true hand release and stronger
+fist-stop. Native bridge polls are serialized and refreshed immediately by Start
+and Stop; a delayed poll or PTT admission cannot reuse interrupted evidence.
+
+Validation on this combined source: 703 JavaScript tests passed (9 existing skips),
+typecheck, lint, web build, 10 contract fixtures, release-gate tests and 15 standalone
+Kotlin/JUnit checks (recognition/rotation and wake sensitivity). Full APK compilation,
+new native overlay behavior and real-hand acceptance remain to be checked on the
+native build runner and a physical device.
+
+**2026-11-04 — Gesture frontend redesigned around use:** Control/Learn/Tune replace
+the configuration form. Activities have illustrated pose cards, useful touch
+controls (also with camera off), inline action editing/search, response presets,
+connection setup links, real result history and a focused reader/step view. Guided
+practice targets one pose, confirms fresh recognition and supports explicit next
+steps. Pause preserves camera and touch control; activity changes keep inference
+running and reset old holds. Stop also cancels pending startup. Android's native
+preview is now compact, draggable and collapsible with a persistent Stop button.
+
+628 Android JS tests and 99 Windows JS tests pass (9 existing Android skips), with
+typechecks and web builds. UI workflows were exercised in Chromium at phone and
+desktop widths. The full Windows UI also started the bundled recognizer using
+Chromium’s synthetic camera and Stop released its tracks; the backend was isolated
+for this UI check. Native overlay compilation/device behavior and real-hand accuracy
+still require native packaging and physical-device validation. See
+[gesture controls](GESTURE-CONTROLS.md).
+
+**2026-11-03 — Gesture recognition and menu overhaul:** both apps now have a
+dedicated Settings → Gestures page, command-palette shortcut, contextual mode
+setup, one-at-a-time remapping, live hold/confidence/hints and action-free practice.
+The shared engine requires dense capture evidence and a real hand release between
+commands, tolerates brief uncertainty without counting it, rejects cropped/multiple
+hands and ambiguous scores, and stabilizes swipes/pinch. Native Android fist-stop
+uses the same evidence requirements and stronger stop confidence/hold. Custom
+calibration accepts tracked unknown shapes and rejects template collisions.
+
+Automated JS suites pass (603 Android / 74 Windows, with 9 existing Android skips),
+as do typechecks, web builds and lint (Windows retains existing warnings). Eight
+Android pure Kotlin recognition tests pass; new classifier options compile against pinned
+MediaPipe artifacts. Chromium checked phone/desktop UI and the real Windows WASM
+worker on a blank frame. Full Android/Windows native packaging, real-hand accuracy,
+latency and battery acceptance are **not** verified in this environment; no physical
+phone/webcam was used. See [gesture controls](GESTURE-CONTROLS.md).
+
 **2026-11-02 — Hand-gesture camera crash:** the connected SM-E156B's installed
 2.5.2 release repeatedly crashed with `ExceptionInInitializerError` while loading
 MediaPipe Graph. The cause was Flogger's `no caller found on the stack`: R8
@@ -17,6 +64,15 @@ camera reached Camera on with actual recognition frames; three start/stop cycles
 kept the same app process alive and produced no camera/runtime errors. The
 closed-fist stop gesture also fired successfully. Camera left off; APK saved to
 `Download/JARVIS-2.5.3-camera-fix.apk` on the phone. No release was published.
+
+**2026-11-01 — Hand-gesture camera release fix:** reproduced startup failure in an
+optimized Android 16 test app with CAMERA and overlay access granted. MediaPipe
+initialization threw `RuntimeException: Field platform_ ... not found` because R8
+removed protobuf-lite fields. The phone plugin now exports consumer rules for the
+protobuf messages and JNI callbacks, and logs the actual startup failure. The
+[release regression](../scripts/gesture-camera-smoke/README.md) checks frame delivery,
+stop and restart with the bundled model. Post-fix release/device verification is
+pending; the pre-fix failure is confirmed. No physical phone is connected.
 
 Ecosystem foundation preview, **2026-10-31**: conversation task cards, scoped STOP,
 Ecosystem Health, private diagnostics, pinned Windows/Android contracts and release

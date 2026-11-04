@@ -710,6 +710,8 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                 put("observedAt", state.observedAt)
                 put("pose", state.pose)
                 put("score", state.score)
+                put("runnerUpScore", state.runnerUpScore)
+                put("handCount", state.handCount)
                 put("landmarks", JSArray().apply {
                     state.landmarks.forEach { point ->
                         put(JSArray().apply { point.forEach { put(it) } })

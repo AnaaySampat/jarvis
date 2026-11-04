@@ -3,7 +3,19 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { useGestureModes } from "./useGestureModes";
 import { documentId } from "./storage";
-let controls, renderer, camera, host, props, store, saved, pose, sequence, publish, lastFrame;
+import { poseFeatures } from "./engine";
+let controls,
+  renderer,
+  camera,
+  host,
+  props,
+  store,
+  saved,
+  pose,
+  sequence,
+  publish,
+  lastFrame,
+  frameExtra;
 const T = 1_800_000_000_000;
 function App(input) {
   const value = useGestureModes(input);
@@ -32,6 +44,7 @@ beforeEach(async () => {
   sequence = 100;
   publish = true;
   lastFrame = null;
+  frameExtra = {};
   const state = { running: false, starting: false, foreground: true, summary: "Off" };
   camera = {
     start: vi.fn(async () => {
@@ -46,7 +59,14 @@ beforeEach(async () => {
     }),
     poll: vi.fn(async () => {
       if (state.running && publish)
-        lastFrame = { seq: sequence++, observedAt: Date.now(), pose, score: 1, landmarks: [] };
+        lastFrame = {
+          seq: sequence++,
+          observedAt: Date.now(),
+          pose,
+          score: 1,
+          landmarks: [],
+          ...frameExtra,
+        };
       return { ...state, frame: lastFrame };
     }),
   };
@@ -87,6 +107,68 @@ async function show(next, ms = 900) {
   await advance(ms);
 }
 describe("gesture hook lifecycle regressions", () => {
+  it("calibrates a tracked custom shape even when the canned classifier is uncertain", async () => {
+    await start();
+    const points = Array.from({ length: 21 }, (_, i) => [
+      0.3 + (i % 4) * 0.035,
+      0.2 + Math.floor(i / 4) * 0.06,
+      0,
+    ]);
+    frameExtra = { landmarks: points, handCount: 1, score: 0.3 };
+    await act(async () => controls.calibrate("My shape"));
+    await advance(4000);
+    expect(controls.config.customPoses).toHaveLength(1);
+    expect(controls.config.customPoses[0].name).toBe("My shape");
+    expect(host.perform).not.toHaveBeenCalled();
+  });
+  it("rejects newly calibrated poses that would collide with an existing template", async () => {
+    const points = Array.from({ length: 21 }, (_, i) => [
+      0.3 + (i % 4) * 0.035,
+      0.2 + Math.floor(i / 4) * 0.06,
+      0,
+    ]);
+    await act(async () =>
+      controls.changeConfig({
+        customPoses: [{ id: "custom_old", name: "Existing", features: poseFeatures(points) }],
+      }),
+    );
+    await start();
+    frameExtra = { landmarks: points, handCount: 1 };
+    await act(async () => controls.calibrate("Duplicate shape"));
+    await advance(4000);
+    expect(controls.config.customPoses).toHaveLength(1);
+    expect(controls.message).toContain("too similar to Existing");
+    expect(controls.calibrating).toBe(false);
+  });
+  it("shows recognition in practice without executing gestures or manual commands", async () => {
+    await act(async () => controls.setPractice(true));
+    await start();
+    await show("OPEN_PALM");
+    expect(controls.recognition.phase).toBe("recognized");
+    expect(host.stopSpeech).not.toHaveBeenCalled();
+    await show("UNKNOWN", 500);
+    await show("PEACE");
+    expect(host.pttStart).not.toHaveBeenCalled();
+    await act(async () => controls.act("media.up"));
+    expect(host.perform).not.toHaveBeenCalled();
+    await show("FIST", 1100);
+    expect(camera.stop).toHaveBeenCalledTimes(1);
+  });
+  it("requires neutral after leaving practice and cancels owned capture when entering", async () => {
+    await start();
+    await show("PEACE");
+    expect(host.pttStart).toHaveBeenCalledTimes(1);
+    await act(async () => controls.setPractice(true));
+    expect(host.cancelListen).toHaveBeenCalledTimes(1);
+    await show("UNKNOWN", 500);
+    await show("OPEN_PALM");
+    await act(async () => controls.setPractice(false));
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).not.toHaveBeenCalled();
+    await show("UNKNOWN", 500);
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).toHaveBeenCalledTimes(1);
+  });
   it("starts recognizing immediately without waiting for the idle poll", async () => {
     await act(async () => {
       await controls.start();
@@ -225,4 +307,187 @@ describe("gesture hook lifecycle regressions", () => {
     await advance(500);
     expect(controls.message).toContain("storage");
   });
+});
+
+describe("gesture session usability", () => {
+  it("pauses pose actions and cancels PTT while leaving touch controls usable", async () => {
+    await start();
+    await show("PEACE");
+    expect(host.pttStart).toHaveBeenCalledOnce();
+    await act(async () => controls.setPaused(true));
+    expect(host.cancelListen).toHaveBeenCalledOnce();
+    expect(controls.paused).toBe(true);
+    await show("UNKNOWN", 500);
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).not.toHaveBeenCalled();
+    await act(async () => controls.act("media.toggle"));
+    expect(host.perform).toHaveBeenCalledWith("media.toggle", controls.config, camera);
+    await act(async () => controls.setPaused(false));
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).not.toHaveBeenCalled();
+    await show("UNKNOWN", 500);
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).toHaveBeenCalledOnce();
+    expect(camera.stop).not.toHaveBeenCalled();
+  });
+
+  it("switches activities without restarting the camera or replaying a held pose", async () => {
+    await start();
+    await show("OPEN_PALM");
+    expect(host.stopSpeech).toHaveBeenCalledOnce();
+    await act(async () => controls.switchMode("media"));
+    expect(controls.config.mode).toBe("media");
+    expect(camera.start).toHaveBeenCalledOnce();
+    expect(camera.stop).not.toHaveBeenCalled();
+    await show("OPEN_PALM");
+    expect(host.perform).not.toHaveBeenCalled();
+    await show("UNKNOWN", 500);
+    await show("OPEN_PALM");
+    expect(host.perform).toHaveBeenCalledWith("media.toggle", controls.config, camera);
+  });
+
+  it("passes only the selected practice target and requires fresh evidence when retesting", async () => {
+    await act(async () => {
+      controls.setPractice(true);
+      controls.setPracticeTarget("PEACE");
+    });
+    await start();
+    await show("OPEN_PALM");
+    expect(controls.practicePassed).toEqual([]);
+    await show("UNKNOWN", 500);
+    await show("PEACE");
+    expect(controls.practicePassed).toEqual(["PEACE"]);
+    await advance(1000);
+    expect(controls.practicePassed).toEqual(["PEACE"]);
+    await act(async () => controls.setPracticeTarget("PEACE"));
+    expect(controls.practicePassed).toEqual([]);
+    await show("PEACE");
+    expect(controls.practicePassed).toEqual([]);
+    await show("UNKNOWN", 500);
+    await show("PEACE");
+    expect(controls.practicePassed).toEqual(["PEACE"]);
+    expect(host.pttStart).not.toHaveBeenCalled();
+    expect(host.stopSpeech).not.toHaveBeenCalled();
+  });
+
+  it("records pending and actual failed or successful command results", async () => {
+    await start();
+    let complete;
+    host.perform.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    await act(async () => controls.act("media.toggle"));
+    expect(controls.history[0]).toMatchObject({
+      action: "media.toggle",
+      pose: "manual",
+      state: "pending",
+    });
+    await act(async () => complete({ ok: false, summary: "No music player is available." }));
+    expect(controls.history[0]).toMatchObject({
+      state: "failed",
+      summary: "No music player is available.",
+    });
+    host.perform.mockResolvedValueOnce({ ok: true, summary: "Media command sent." });
+    await act(async () => controls.act("media.next"));
+    expect(controls.history[0]).toMatchObject({
+      action: "media.next",
+      state: "done",
+      summary: "Media command sent.",
+    });
+    expect(controls.history[1].state).toBe("failed");
+    expect(controls.history[0].id).not.toBe(controls.history[1].id);
+  });
+
+  it("does not label an unconfirmed host request as completed", async () => {
+    await start();
+    host.perform.mockResolvedValueOnce(undefined);
+    await act(async () => controls.act("media.next"));
+    expect(controls.history[0]).toMatchObject({ action: "media.next", state: "requested" });
+  });
+
+  it("scrolls the inline reader before a hidden floating reading area", async () => {
+    const panel = { clientHeight: 300, scrollBy: vi.fn() };
+    const floating = { clientHeight: 100, scrollBy: vi.fn() };
+    document.querySelector = vi.fn((selector) =>
+      selector === "[data-gesture-reader='panel']" ? panel : floating,
+    );
+    await act(async () => controls.switchMode("reading"));
+    await start();
+    await act(async () => controls.act("reader.scrollDown"));
+    expect(panel.scrollBy).toHaveBeenCalledWith({ top: 195, behavior: "smooth" });
+    expect(floating.scrollBy).not.toHaveBeenCalled();
+  });
+});
+
+it("executes explicit touch actions with the camera off", async () => {
+  expect(controls.status.running).toBe(false);
+  await act(async () => controls.act("media.toggle"));
+  expect(host.perform).toHaveBeenCalledWith("media.toggle", controls.config, camera);
+  expect(controls.history[0]).toMatchObject({
+    action: "media.toggle",
+    pose: "manual",
+    state: "done",
+  });
+  expect(camera.start).not.toHaveBeenCalled();
+  expect(camera.stop).not.toHaveBeenCalled();
+});
+
+it("finishes existing listening from a manual button even when starting another capture is disallowed", async () => {
+  props = { ...props, listening: true, canListen: false };
+  await act(async () => renderer.update(<App {...props} />));
+  await act(async () => controls.act("voice.listen"));
+  expect(host.finishListen).toHaveBeenCalledOnce();
+  expect(host.listen).not.toHaveBeenCalled();
+  expect(host.pttStart).not.toHaveBeenCalled();
+  expect(host.cancelListen).not.toHaveBeenCalled();
+  expect(camera.start).not.toHaveBeenCalled();
+});
+
+it("stops an unresolved camera startup and ignores its later response", async () => {
+  let completeStart;
+  camera.start.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        completeStart = resolve;
+      }),
+  );
+  camera.poll.mockResolvedValue({
+    running: false,
+    starting: false,
+    foreground: true,
+    summary: "Stopped",
+  });
+  let pendingStart;
+  await act(async () => {
+    pendingStart = controls.start();
+  });
+  expect(controls.status.starting).toBe(true);
+  expect(controls.busy).toBe(true);
+  await act(async () => {
+    await controls.stop();
+  });
+  expect(camera.stop).toHaveBeenCalledOnce();
+  expect(controls.status).toMatchObject({ running: false, starting: false, summary: "Stopped" });
+  expect(controls.busy).toBe(false);
+  await act(async () => {
+    completeStart({ ok: false, summary: "Late startup failure" });
+    await pendingStart;
+  });
+  expect(controls.status).toMatchObject({ running: false, starting: false, summary: "Stopped" });
+  expect(controls.message).not.toContain("Late startup failure");
+  expect(controls.busy).toBe(false);
+});
+
+it("does not claim the camera is off when a Stop request fails", async () => {
+  await start();
+  camera.stop.mockRejectedValueOnce(new Error("Bridge unavailable"));
+  await act(async () => {
+    await controls.stop();
+  });
+  expect(controls.status.running).toBe(true);
+  expect(controls.status.summary).toContain("Could not confirm");
+  expect(controls.message).toBe("Bridge unavailable");
 });

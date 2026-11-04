@@ -953,23 +953,23 @@ export default function Settings({
               onChange={setWakeWordOn}
               hint="Listens on the phone itself. Nothing is sent until it hears the wake word."
             />
-          <Field label={`Wake word sensitivity: ${wakeSensitivity}`}>
-            <input
-              aria-label="Wake word sensitivity"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              value={wakeSensitivity}
-              onChange={(event) => setWakeSensitivity(Number(event.target.value))}
-              disabled={!wakeWordOn}
-              style={{ width: "100%" }}
-            />
-            <p className="sp-desc">
-              Higher catches quieter speech but can trigger more often. Lower is stricter. Default:
-              60. Applies when you save changes.
-            </p>
-          </Field>
+            <Field label={`Wake word sensitivity: ${wakeSensitivity}`}>
+              <input
+                aria-label="Wake word sensitivity"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={wakeSensitivity}
+                onChange={(event) => setWakeSensitivity(Number(event.target.value))}
+                disabled={!wakeWordOn}
+                style={{ width: "100%" }}
+              />
+              <p className="sp-desc">
+                Higher catches quieter speech but can trigger more often. Lower is stricter.
+                Default: 60. Applies when you save changes.
+              </p>
+            </Field>
             <div className="sp-field">
               <More>
                 Needs microphone permission. Speech-to-text uses Cloud Speech-to-Text on Vertex, or
@@ -1007,7 +1007,16 @@ export default function Settings({
           <span className="sp-value sp-mono">{sysInfo.wakeWord || "hey_jarvis"}</span>
         </div>
       </Group>
-      {IS_MOBILE && <GestureControls controls={gestureControls} />}
+      {gestureControls && (
+        <Group>
+          <ActionRow
+            icon="camera"
+            title="Open gesture controls"
+            desc="Camera, practice and hands-free actions have their own page in Settings."
+            onClick={() => setPage("gestures")}
+          />
+        </Group>
+      )}
     </>
   );
 
@@ -1412,13 +1421,37 @@ export default function Settings({
 
   const diagnosticsPage = (
     <>
-      {IS_MOBILE && <Group title="Ecosystem beta">
-        <Toggle label="Foundation preview" checked={sysInfo.ecosystem_beta === true} onChange={(value) => void onSave({ ecosystem_beta: value })} hint="Enables conversation task cards, Ecosystem Health and private diagnostics. Device acceptance is pending; later milestones remain unavailable." />
-      </Group>}
-      {IS_MOBILE && <Group title="Updates">
-        <Toggle label="Include beta updates" checked={sysInfo.update_channel === "beta"} onChange={(value) => void onSave({ update_channel: value ? "beta" : "stable" })} hint="Stable is the default. Beta also checks prereleases; installing remains your choice. Existing installers and app data are retained." />
-      </Group>}
-      {IS_MOBILE && sysInfo.ecosystem_beta === true && <EcosystemHealth sysInfo={sysInfo} pcState={pcState || "idle"} pcVersion={pcVersion} tasks={tasks} onNavigate={setPage} onPair={onPair} onTest={onRepairSetup} />}
+      {IS_MOBILE && (
+        <Group title="Ecosystem beta">
+          <Toggle
+            label="Foundation preview"
+            checked={sysInfo.ecosystem_beta === true}
+            onChange={(value) => void onSave({ ecosystem_beta: value })}
+            hint="Enables conversation task cards, Ecosystem Health and private diagnostics. Device acceptance is pending; later milestones remain unavailable."
+          />
+        </Group>
+      )}
+      {IS_MOBILE && (
+        <Group title="Updates">
+          <Toggle
+            label="Include beta updates"
+            checked={sysInfo.update_channel === "beta"}
+            onChange={(value) => void onSave({ update_channel: value ? "beta" : "stable" })}
+            hint="Stable is the default. Beta also checks prereleases; installing remains your choice. Existing installers and app data are retained."
+          />
+        </Group>
+      )}
+      {IS_MOBILE && sysInfo.ecosystem_beta === true && (
+        <EcosystemHealth
+          sysInfo={sysInfo}
+          pcState={pcState || "idle"}
+          pcVersion={pcVersion}
+          tasks={tasks}
+          onNavigate={setPage}
+          onPair={onPair}
+          onTest={onRepairSetup}
+        />
+      )}
       <Group title="Now">
         <div className="sp-field sp-row">
           <span className="sp-label">Provider</span>
@@ -1533,7 +1566,7 @@ export default function Settings({
         title: "Voice",
         icon: "volume",
         desc: "How JARVIS sounds, wakes up and speaks up on its own.",
-        words: "wake word speech tts hey jarvis hand gesture camera",
+        words: "wake word speech tts hey jarvis",
         value: IS_MOBILE
           ? wakeWordOn
             ? "Wake word on"
@@ -1541,6 +1574,16 @@ export default function Settings({
           : TTS_OPTS.find((o) => o.value === tts)?.short || tts,
         tone: (IS_MOBILE ? wakeWordOn : tts !== "off") ? "on" : "off",
         body: voicePage,
+      },
+      gestureControls && {
+        id: "gestures",
+        title: "Gestures",
+        icon: "camera",
+        desc: "Control JARVIS with your hands. Try a pose, practice and choose its action.",
+        words: "hand gesture camera practice motion hands free recognition poses",
+        value: gestureControls.status.running ? "Camera on" : "Camera off",
+        tone: gestureControls.status.running ? "on" : "off",
+        body: <GestureControls controls={gestureControls} />,
       },
       onOpenCustomize && {
         id: "interface",
@@ -1638,7 +1681,7 @@ export default function Settings({
   const byId = Object.fromEntries(pages.map((pg) => [pg.id, pg]));
   const sections = [
     ["Intelligence", ["models", "keys", "routing", "automation", "skills"]],
-    ["Experience", ["voice", "interface", "files", "location", "calendar"]],
+    ["Experience", ["voice", "gestures", "interface", "files", "location", "calendar"]],
     ["Connections", ["linked"]],
     ["System", ["diagnostics"]],
   ]
@@ -1726,8 +1769,10 @@ export default function Settings({
           )}
           {current && (
             <div className="sp-page" key={current.id}>
-              <h2 className="sp-page-title">{current.title}</h2>
-              {current.desc && <p className="sp-page-desc">{current.desc}</p>}
+              {current.id !== "gestures" && <h2 className="sp-page-title">{current.title}</h2>}
+              {current.id !== "gestures" && current.desc && (
+                <p className="sp-page-desc">{current.desc}</p>
+              )}
               {current.body}
             </div>
           )}

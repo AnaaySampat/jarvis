@@ -61,10 +61,13 @@ a **photo or screenshot** and ask JARVIS about it.
 
 ### Hand gestures (preview)
 
-Open **Settings → Voice → Hand gestures**, choose a mode and start the camera.
+Open **Settings → Gestures**, choose a mode and start the camera.
 Controls include music/TV, PC slides, push-to-talk, instructions and timers,
 reading/bookmarks, saved routines, microphone mute, countdown photos, HUD pinch/drag
 and calibrated personal poses. Remap gestures and adjust hold/release timing.
+Control has useful touch buttons; Learn teaches one illustrated gesture at a time.
+Pause hand actions, switch activities without restarting, and edit actions on their cards.
+Tune offers response presets. Touch controls work with the camera off (except photos).
 Recognition stays on-device with visible Stop controls and five-minute sessions.
 See [gesture controls](docs/GESTURE-CONTROLS.md) for setup, defaults and limitations.
 

@@ -4,27 +4,54 @@ Gesture controls are optional, off at launch, and available on Android and Windo
 They help when a phone or webcam is on a desk or kitchen stand and touch or speech
 is inconvenient. Physical-device accuracy and battery testing are still required.
 
-## Start a session
+## Start using controls
 
-1. Open **Settings → Voice → Hand gestures**, choose a mode and review its mappings.
-2. On Windows, select a webcam. On Android, grant camera permission and, when
-   requested, display-over-other-apps access, then return and start again.
-3. Start the camera, lower your hand for the release interval, then hold a pose.
-   Defaults are 600 ms hold, 400 ms release and 80% classifier confidence.
-4. Lower your hand before repeating. **Closed fist always means Stop**, including
-   during calibration. Settings and the session panel also have Stop controls;
-   Android adds a native preview and notification Stop.
+1. Open **Settings → Gestures**, or find **Settings: Gestures** in the command
+   palette. Choose Voice, Music, Slides, Read, Photo or Steps. Other activities are
+   under **More activities**. Voice settings also link to this page.
+2. **Control** has illustrated gesture cards and real touch buttons for the current
+   activity. Buttons work with the camera off, except photo capture. Read lets you
+   paste text and turn pages; Steps keeps the current instruction and timer at hand.
+   Actual command results appear below the preview and in **Recent actions**.
+3. Open **Learn**, or tap **Learn** on a gesture card. Practice targets one pose at a
+   time, shows finger placement and hold progress, and confirms only the target
+   actually recognized. Start practice explicitly to turn on the camera. Commands
+   stay off; closed fist still stops the camera. **Next gesture** moves on and
+   **Use gestures** returns to normal control. Lower your hand between attempts.
+4. Press **Start gestures** to enable recognition. On Windows, choose a camera in
+   Tune if needed. Android requests camera/overlay permission. The phone's compact
+   native preview can be dragged by its handle and expanded/collapsed. Its Stop
+   button remains visible. Windows shows an inline live preview.
+5. **Pause gestures** keeps the camera on for framing while blocking hand-triggered
+   commands. Touch buttons keep working. **Resume gestures** requires a fresh hand
+   release. Change activity directly without stopping/reloading the camera.
+6. **Stop camera** closes the session, including while startup is still pending.
+   **Closed fist** always stops it too: hold at least 800 ms at 85% confidence (or
+   higher configured values). Starting, stopping, switching activities or leaving
+   practice cannot replay an old held pose.
 
 Sessions last at most five minutes. Android stops on screen lock or removal from
 recents and never restarts after process death or reboot. Its preview stays visible
-when switching apps, but commands run only while JARVIS is visible and focused.
-Windows stops on minimize, navigation, permission loss or camera disconnect.
-Both platforms block commands while approval or clarification is pending.
+when switching apps, but gestures run only while JARVIS is visible and focused.
+Windows stops its camera on minimize, navigation, permission loss or disconnect.
+Both platforms block commands while approval or clarification is pending. TV and
+PC activities show connection/setup instructions; setup does not bypass approvals.
 
 ## Modes and defaults
 
-Poses and swipes can be remapped to the fixed action menu. Fist cannot be remapped.
-Stop the camera before changing mode, timing, confidence or bindings.
+Tap **Change** on a gesture card to edit its action in place. Actions relevant to
+that activity appear first; **More actions** adds search across the fixed action
+vocabulary. Editing pauses active gestures; Save or Cancel restores the prior
+unpaused state and requires neutral. Closed fist is reserved. **See all gestures**
+reveals additional poses. In My gestures, new captures appear immediately with an
+action to assign, even before they have a binding.
+
+**Tune** offers Deliberate, Balanced and Quick response presets, camera selection,
+mirroring and optional detailed sliders. Stop the camera before changing timing or
+camera settings. Defaults are 600 ms hold, 400 ms release and 80% confidence.
+Restore default actions affects only the selected activity. The floating session
+panel includes Pause/Resume, Stop, touch controls and gesture reminders, and can be
+minimized. The duplicate panel hides while gesture settings are open.
 
 | Mode                  | Default controls / setup                                                                                                                                                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,11 +65,20 @@ Stop the camera before changing mode, timing, confidence or bindings.
 | Photos                | Peace requests a photo with a visible three-second countdown. Android saves JPEG to Pictures/JARVIS (app pictures on older Android); Windows requests a JPEG save/download. Uses the analysis camera, not full camera-app resolution. |
 | Calls / meetings      | Palm mutes and peace unmutes the default system microphone where supported. An error appears if the API cannot confirm it. A meeting app may use a different input.                                                                   |
 | HUD                   | Index fingertip moves the cursor. Pinch thumb/index to select safe navigation or a HUD card; hold the pinch, move onto another card, and release to reorder. Approval buttons are excluded.                                           |
-| Custom poses          | Name a pose, start calibration, prepare during the three-second countdown and hold still for eight usable frames. Stop the camera and assign its action. Stores up to 12 geometry templates.                                          |
+| Custom poses          | Name a pose, start calibration, prepare during the three-second countdown and hold still for eight usable frames. Choose its action on the new gesture card. Stores up to 12 geometry templates.                                          |
 
-Swipes use a pointing index finger, displacement threshold and cooldown. Mirror
-changes pointer/swipe direction. Calibration skips fists, low classifier scores and
-invalid landmarks; use distinct shapes. Ambiguous custom matches trigger no action.
+To swipe, point your index finger and move your whole hand smoothly. A swipe
+requires at least three samples and palm translation; finger flexing or a two-frame
+jump cannot trigger it. Moving a pointing hand suppresses its stationary pose
+action. Lower your hand after a swipe to rearm. Mirror changes pointer/swipe
+direction. HUD cursor motion is smoothed and pinch must persist for 120 ms before
+selection; releasing a lost hand never clicks.
+
+Calibration skips fists, invalid landmarks and multiple hands, but accepts clearly
+tracked custom shapes even if the canned classifier is uncertain. Similar saved
+templates are rejected with an explanation; ambiguous custom matches trigger no
+action. In Custom poses mode, templates can override a built-in label. Other modes
+prefer confident built-in labels.
 
 Reader text is limited to 30,000 characters; instructions to 15,000. Up to 50
 bookmarks store a compact document identity, page and short excerpt. Paste matching
@@ -54,8 +90,8 @@ in the UI.
 Android uses CameraX, a bundled MediaPipe model and a sequential worker targeting
 about fifteen analysis frames per second, with latest-frame backpressure on slower
 devices. MediaPipe handles rotation during preprocessing; an extra rotated bitmap
-is made only for an explicit photo. Raw landmarks, epoch timestamps and monotonic
-sequences pass through Kotlin → Rust → Tauri. Native fist and Stop controls remain
+is made only for an explicit photo. Raw landmarks, hand count, top-two classifier
+scores, epoch timestamps and monotonic sequences pass through Kotlin → Rust → Tauri. Native fist and Stop controls remain
 independent of JavaScript polling. Images are saved only for explicit photo actions.
 Model provenance and license are in the native assets/GESTURE-MODEL.md file.
 
@@ -74,15 +110,25 @@ change. They use signed pairing, the existing live-view/biometric control lease,
 an allowlist and correlated acknowledgements. Old companions time out visibly.
 The gesture camera cannot grant computer-control access.
 
-A hold emits once. Brief unknown/low-confidence dropouts of up to 180 ms pause the
-hold without discarding it; uncertain time does not count toward the hold. A
-different recognized pose or longer dropout starts a new hold. Hold and swipe
-timing use capture timestamps rather than bridge delivery time. Active polling
-targets a 67 ms period including bridge time, with no overlapping requests; Start
-and Stop refresh immediately instead of waiting for the idle poll.
-Every poll ticks the engine even without new frames, so tracking
-loss releases push-to-talk and cursor state. New sessions accept restarted frame
-counters. Host identity changes and text edits do not discard holds. Reading and
+Both model hosts look for up to two hands so multiple-hand input can be rejected.
+Current hosts require one complete, sufficiently large hand, a finite confidence
+score and at least a 12-point lead over the runner-up. Holds require at least three
+observations and continuous captured evidence. Brief uncertain frames of up to
+180 ms pause rather than contribute to the hold; capture gaps over 350 ms require a new neutral release.
+Frames older than 600 ms and duplicate capture timestamps cannot accumulate holds.
+
+A hold emits once until the hand leaves view for the release interval. Low
+confidence while a hand is still visible cannot rearm a command. Every poll ticks
+the engine even without new frames, so tracking loss releases push-to-talk and
+cursor state. Practice suppresses all gesture/manual actions and pointer events,
+retains fist-stop, cancels owned speech capture, and requires neutral when toggled.
+Pause blocks hand actions while preserving touch actions. Explicit touch commands
+use the same host adapters and approvals, even with the camera off. Changing
+activities resets evidence synchronously without restarting the camera.
+Active polling targets a 67 ms period including bridge time, with one serialized
+request loop. Start and Stop request an immediate refresh. New sessions accept
+restarted frame counters. Host identity changes and text edits do not discard holds.
+Reading and
 instruction commands interrupt current speech and queue the latest navigation.
 
 ## Privacy and approvals
@@ -102,8 +148,23 @@ Automated tests cover hold/release, restart counters, stale frames and clock typ
 silent gaps, admitted/rejected push-to-talk, unstable host identity, batched config
 updates, debounced saves, calibration fist-stop, queued navigation, manual-event
 allowlisting, compact bookmarks, storage failure, pinch/dropout, swipes, request
-timeouts and webcam cleanup. Android JUnit compiles the service; Windows backend
-tests cover action allowlists, control leases, replay, timers and speech interruption.
+timeouts and webcam cleanup. Recognition regressions additionally cover sparse and
+duplicate captures, confidence flicker, real release between different poses,
+multiple/cropped hands, invalid and ambiguous scores, stronger fist-stop evidence,
+custom-template collisions and practice isolation. UI/navigation tests cover the
+dedicated Settings page/search, illustrated activity cards, target-specific guided
+practice and re-testing, inline mapping/search and resume, camera-off touch
+controls, pending/failed/confirmed results, reader editing, photo prerequisites,
+startup cancellation and minimized Pause/Stop. Android pure Kotlin policy tests pass; new classifier options were
+compiled against the pinned MediaPipe AARs. These checks do not compile the full
+Android service or APK. Windows backend tests cover action allowlists, control
+leases, replay, timers and speech interruption.
+
+The updated Windows worker/model loads with the two-hand/top-two-score options
+and processes a blank frame in headless Chromium. UI browser checks cover phone
+and desktop widths, target completion, practice isolation, touch while paused,
+activity changes, inline mapping and text editors that stay open while typing. This checks the actual bundled WASM path and UI, not camera permission
+or hand accuracy. Full native packaging and real-camera acceptance remain pending.
 
 The Windows browser regression starts the bundled worker/model with a synthetic
 camera, checks sustained frame delivery, then stops, restarts and verifies resource

@@ -14,6 +14,10 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -23,8 +27,13 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.camera.core.CameraSelector
@@ -42,10 +51,13 @@ import androidx.lifecycle.LifecycleService
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.components.processors.ClassifierOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import java.util.concurrent.Executors
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 /** Explicit, five-minute sessions. No recording, network access, boot restart, or
  * Activity reference. The Stop button and screen-lock shutdown work without JS. */
@@ -61,6 +73,8 @@ class GestureCameraService : LifecycleService() {
         val observedAt: Long = 0,
         val pose: String = "UNKNOWN",
         val score: Float = 0f,
+        val runnerUpScore: Float = 0f,
+        val handCount: Int = 0,
         val landmarks: List<List<Float>> = emptyList(),
     )
 
@@ -154,7 +168,9 @@ class GestureCameraService : LifecycleService() {
                             .setBaseOptions(BaseOptions.builder()
                                 .setModelAssetPath("gesture_recognizer.task").build())
                             .setRunningMode(RunningMode.VIDEO)
-                            .setNumHands(1)
+                            .setNumHands(2)
+                            .setCannedGesturesClassifierOptions(ClassifierOptions.builder()
+                                .setMaxResults(2).setScoreThreshold(0f).build())
                             .setMinHandDetectionConfidence(0.65f)
                             .setMinHandPresenceConfidence(0.65f)
                             .setMinTrackingConfidence(0.65f)
@@ -200,39 +216,215 @@ class GestureCameraService : LifecycleService() {
             if (Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
     }
 
+    @Suppress("DEPRECATION") // Display metrics before API 30; overlay coordinates use display pixels.
     private fun showOverlay() {
         val density = resources.displayMetrics.density
         fun dp(n: Int) = (n * density).toInt()
+        val windows = getSystemService(WindowManager::class.java)
+        val displays = getSystemService(DisplayManager::class.java)
+        fun safeBounds(): Rect {
+            if (Build.VERSION.SDK_INT >= 30) {
+                try {
+                    val metrics = windows.currentWindowMetrics
+                    val bars = metrics.windowInsets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                    return Rect(bars.left + dp(8), bars.top + dp(8),
+                        maxOf(bars.left + dp(8) + 1, metrics.bounds.width() - bars.right - dp(8)),
+                        maxOf(bars.top + dp(8) + 1, metrics.bounds.height() - bars.bottom - dp(8)))
+                } catch (_: Exception) {
+                    // Some vendors do not expose window metrics to service contexts.
+                }
+            }
+            val display = android.util.DisplayMetrics()
+            windows.defaultDisplay.getRealMetrics(display)
+            fun barHeight(name: String): Int {
+                val id = resources.getIdentifier(name, "dimen", "android")
+                return if (id == 0) 0 else resources.getDimensionPixelSize(id)
+            }
+            return Rect(dp(8), barHeight("status_bar_height") + dp(8),
+                maxOf(dp(8) + 1, display.widthPixels - dp(8)),
+                maxOf(barHeight("status_bar_height") + dp(8) + 1,
+                    display.heightPixels - barHeight("navigation_bar_height") - dp(8)))
+        }
+        fun surface(color: Int, radius: Int = 10) = GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+        }
+        fun button(label: String) = Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 11f
+            minWidth = 0
+            minimumWidth = 0
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(dp(5), 0, dp(5), 0)
+            setTextColor(Color.WHITE)
+            background = surface(Color.rgb(44, 53, 66))
+        }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            contentDescription = "Front camera preview"
+        }
+        // Keep PreviewView attached, measured and in the draw path while collapsed.
+        // A one-pixel viewport keeps its TextureView surface alive for CameraX.
+        val previewHolder = FrameLayout(this).apply {
+            clipChildren = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            addView(previewView, FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(112)))
+        }
+        val handle = TextView(this).apply {
+            text = "⠿  Gesture camera"
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.rgb(216, 225, 235))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(3), 0, dp(3), 0)
         }
         statusText = TextView(this).apply {
-            text = "Starting gesture camera..."
-            setTextColor(Color.WHITE)
-            setPadding(dp(8), dp(6), dp(8), dp(6))
-            textSize = 12f
+            text = "Starting camera…"
+            setTextColor(Color.rgb(183, 195, 209))
+            setPadding(dp(3), dp(3), dp(3), dp(5))
+            textSize = 11f
+            minLines = 2
+            maxLines = 2
         }
-        val stop = Button(this).apply {
-            text = "Stop camera"
+        val toggle = button("Show preview")
+        val stop = button("Stop camera").apply {
+            background = surface(Color.rgb(111, 41, 45))
             setOnClickListener { finish("Camera stopped.") }
+        }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(toggle, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(6) })
+            addView(stop, LinearLayout.LayoutParams(0, dp(48), 1f))
         }
         val view = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(20, 25, 35))
-            addView(previewView, LinearLayout.LayoutParams(dp(180), dp(135)))
-            addView(statusText)
-            addView(stop)
+            setPadding(dp(8), dp(4), dp(8), dp(8))
+            background = surface(Color.rgb(21, 27, 36), 14).apply {
+                setStroke(dp(1).coerceAtLeast(1), Color.rgb(65, 77, 93))
+            }
+            elevation = dp(8).toFloat()
+            clipToOutline = true
+            addView(handle, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(28)))
+            addView(previewHolder, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
+            addView(statusText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(actions, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)))
         }
-        getSystemService(WindowManager::class.java).addView(view, WindowManager.LayoutParams(
-            dp(180), WindowManager.LayoutParams.WRAP_CONTENT,
+        val initialBounds = safeBounds()
+        val layout = WindowManager.LayoutParams(
+            minOf(dp(172), initialBounds.width()), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
-                gravity = Gravity.TOP or Gravity.END
-                x = dp(8)
-                y = dp(100)
-            })
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = initialBounds.right - width
+            y = maxOf(initialBounds.top, initialBounds.bottom - dp(116))
+        }
+        var expanded = false
+        fun resizePreview(show: Boolean) {
+            expanded = show
+            previewHolder.layoutParams = previewHolder.layoutParams.apply { height = if (show) dp(112) else 1 }
+            previewHolder.importantForAccessibility = if (show) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            toggle.text = if (show) "Hide preview" else "Show preview"
+            handle.contentDescription = "Drag gesture camera. Tap to ${if (show) "hide" else "show"} preview."
+        }
+        fun clampToDisplay() {
+            if (closing || !view.isAttachedToWindow) return
+            val bounds = safeBounds()
+            if (expanded && view.height > bounds.height()) resizePreview(false)
+            val width = minOf(dp(172), bounds.width())
+            val x = layout.x.coerceIn(bounds.left, maxOf(bounds.left, bounds.right - width))
+            val y = layout.y.coerceIn(bounds.top, maxOf(bounds.top, bounds.bottom - view.height))
+            if (layout.width != width || layout.x != x || layout.y != y) {
+                layout.width = width
+                layout.x = x
+                layout.y = y
+                windows.updateViewLayout(view, layout)
+            }
+        }
+        fun togglePreview() {
+            resizePreview(!expanded)
+            view.post { clampToDisplay() }
+        }
+        resizePreview(false)
+        toggle.setOnClickListener { togglePreview() }
+        handle.setOnClickListener { togglePreview() }
+        val threshold = ViewConfiguration.get(this).scaledTouchSlop
+        var touchX = 0f
+        var touchY = 0f
+        var startX = 0
+        var startY = 0
+        var dragging = false
+        // Only the handle owns drag events. Stop and preview buttons remain normal clicks.
+        handle.setOnTouchListener { target, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchX = event.rawX
+                    touchY = event.rawY
+                    startX = layout.x
+                    startY = layout.y
+                    dragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - touchX
+                    val dy = event.rawY - touchY
+                    if (hypot(dx.toDouble(), dy.toDouble()) > threshold) dragging = true
+                    if (dragging && !closing) {
+                        layout.x = startX + dx.roundToInt()
+                        layout.y = startY + dy.roundToInt()
+                        val bounds = safeBounds()
+                        layout.x = layout.x.coerceIn(bounds.left, maxOf(bounds.left, bounds.right - view.width))
+                        layout.y = layout.y.coerceIn(bounds.top, maxOf(bounds.top, bounds.bottom - view.height))
+                        windows.updateViewLayout(view, layout)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!dragging) target.performClick()
+                    dragging = false
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> { dragging = false; true }
+                else -> false
+            }
+        }
+        val displayListener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                if (view.display?.displayId == displayId) view.post { clampToDisplay() }
+            }
+        }
+        view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(attached: View) {
+                displays.registerDisplayListener(displayListener, main)
+            }
+            override fun onViewDetachedFromWindow(detached: View) {
+                displays.unregisterDisplayListener(displayListener)
+            }
+        })
+        view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> clampToDisplay() }
+        windows.addView(view, layout)
         overlay = view
+        view.post { clampToDisplay() }
+    }
+
+    private fun gestureLabel(gesture: GestureRecognition.Gesture): String = when (gesture) {
+        GestureRecognition.Gesture.OPEN_PALM -> "Open palm"
+        GestureRecognition.Gesture.PEACE -> "Peace sign"
+        GestureRecognition.Gesture.THUMBS_UP -> "Thumbs up"
+        GestureRecognition.Gesture.THUMBS_DOWN -> "Thumbs down"
+        GestureRecognition.Gesture.POINT_UP -> "Point up"
+        GestureRecognition.Gesture.LOVE -> "Thumb, index and little finger"
+        GestureRecognition.Gesture.FIST -> "Closed fist · hold to stop"
+        GestureRecognition.Gesture.UNKNOWN -> "Show one whole hand"
     }
 
     private fun bindCamera() {
@@ -285,13 +477,21 @@ class GestureCameraService : LifecycleService() {
             val options = ImageProcessingOptions.builder()
                 .setRotationDegrees(image.imageInfo.rotationDegrees).build()
             val result = recognizer?.recognizeForVideo(input, options, now)
-            val category = result?.gestures()?.firstOrNull()?.firstOrNull()
-            val gesture = GestureRecognition.recognize(category?.categoryName() ?: "",
-                category?.score() ?: 0f, confidence)
+            val categories = result?.gestures()?.firstOrNull()?.sortedByDescending { it.score() }
+            val category = categories?.firstOrNull()
+            val runnerUp = categories?.getOrNull(1)?.score() ?: 0f
             val points = result?.landmarks()?.firstOrNull()?.map {
                 GestureRecognition.uprightLandmark(it.x(), it.y(), it.z(),
                     image.imageInfo.rotationDegrees, bitmap.width, bitmap.height)
             } ?: emptyList()
+            val handCount = result?.landmarks()?.size ?: 0
+            val rawPose = GestureRecognition.recognize(category?.categoryName() ?: "",
+                category?.score() ?: 0f, 0f)
+            val minimum = if (rawPose == GestureRecognition.Gesture.FIST) maxOf(0.85f, confidence) else confidence
+            val gesture = if (handCount == 1 && GestureRecognition.usableHand(points))
+                GestureRecognition.recognize(category?.categoryName() ?: "",
+                    category?.score() ?: 0f, minimum, runnerUp)
+                else GestureRecognition.Gesture.UNKNOWN
             if (photoAt > 0 && now >= photoAt && gesture != GestureRecognition.Gesture.FIST) {
                 photoAt = 0
                 val token = photoToken
@@ -308,7 +508,7 @@ class GestureCameraService : LifecycleService() {
                 }
             }
             failures = 0
-            val event = latch.update(gesture, now)
+            val event = latch.update(gesture, now, neutral = handCount == 0)
             main.post {
                 if (closing) return@post
                 main.removeCallbacks(startupTimeout)
@@ -316,11 +516,16 @@ class GestureCameraService : LifecycleService() {
                     state = state.copy(running = true, starting = false, summary = "Hold a gesture for a moment.")
                 }
                 state = state.copy(frameSeq = state.frameSeq + 1, observedAt = capturedAt,
-                    pose = gesture.name, score = category?.score() ?: 0f, landmarks = points)
+                    pose = rawPose.name, score = category?.score() ?: 0f, landmarks = points,
+                    handCount = handCount, runnerUpScore = runnerUp)
                 if (photoDone == null) {
                     val label = when (gesture) {
-                        GestureRecognition.Gesture.UNKNOWN -> "Hold your hand in view"
-                        else -> gesture.name.replace('_', ' ')
+                        GestureRecognition.Gesture.UNKNOWN -> when {
+                            handCount > 1 -> "Show only one hand"
+                            handCount == 0 -> "Ready. Raise one hand"
+                            else -> "Pose unclear. Show your whole hand"
+                        }
+                        else -> gestureLabel(gesture)
                     }
                     if (statusText.text.toString() != label) statusText.text = label
                 }
