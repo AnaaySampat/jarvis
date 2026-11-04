@@ -15,14 +15,32 @@ const T = 1_800_000_000_000;
 function stream(config = defaults()) {
   const engine = new GestureEngine(config);
   let seq = 0;
-  const feed = (pose: string, offset: number, score = 1, landmarks: Point[] = []) =>
+  const feed = (
+    pose: string,
+    offset: number,
+    score = 1,
+    landmarks: Point[] = [],
+    extra: Partial<Frame> = {},
+  ) =>
     engine.feed(
-      { seq: ++seq, observedAt: T + offset, pose, score, landmarks },
+      { seq: ++seq, observedAt: T + offset, pose, score, landmarks, ...extra },
       { visible: true, blocked: false, now: T + offset },
     );
-  feed("UNKNOWN", 0);
-  feed("UNKNOWN", 400);
-  return { engine, feed };
+  const hold = (
+    pose: string,
+    from: number,
+    to: number,
+    score = 1,
+    landmarks: Point[] = [],
+    extra: Partial<Frame> = {},
+  ) => {
+    const events = [];
+    for (let at = from; at <= to; at += 100)
+      events.push(...feed(pose, at, score, landmarks, extra));
+    return events;
+  };
+  hold("UNKNOWN", 0, 400);
+  return { engine, feed, hold };
 }
 function hand(): Point[] {
   return Array.from({ length: 21 }, (_, i) => [
@@ -33,48 +51,48 @@ function hand(): Point[] {
 }
 describe("gesture session policy", () => {
   it("requires a hold, emits once, and can rearm after release", () => {
-    const { feed } = stream();
+    const { feed, hold } = stream();
     expect(feed("OPEN_PALM", 500)).toEqual([]);
-    expect(feed("OPEN_PALM", 1100)).toEqual([
+    expect(hold("OPEN_PALM", 600, 1100)).toEqual([
       { kind: "action", action: "voice.stop", pose: "OPEN_PALM" },
     ]);
     expect(feed("OPEN_PALM", 1200)).toEqual([]);
     feed("UNKNOWN", 1300);
-    feed("UNKNOWN", 1700);
+    hold("UNKNOWN", 1400, 1700);
     feed("OPEN_PALM", 1800);
-    expect(feed("OPEN_PALM", 2400)).toHaveLength(1);
+    expect(hold("OPEN_PALM", 1900, 2400)).toHaveLength(1);
   });
   it("pauses a hold across a brief low-confidence frame without counting the gap", () => {
-    const { feed } = stream();
-    feed("OPEN_PALM", 500);
-    feed("OPEN_PALM", 750);
-    expect(feed("OPEN_PALM", 800, 0.5)).toEqual([]);
-    expect(feed("OPEN_PALM", 900)).toEqual([]);
-    expect(feed("OPEN_PALM", 1100)).toEqual([]);
-    expect(feed("OPEN_PALM", 1200)).toEqual([
+    const { feed, hold } = stream();
+    hold("OPEN_PALM", 500, 800);
+    expect(feed("OPEN_PALM", 900, 0.5)).toEqual([]);
+    expect(feed("OPEN_PALM", 1000)).toEqual([]);
+    expect(hold("OPEN_PALM", 1100, 1200)).toEqual([]);
+    expect(feed("OPEN_PALM", 1300)).toEqual([
       { kind: "action", action: "voice.stop", pose: "OPEN_PALM" },
     ]);
-    feed("UNKNOWN", 1250);
-    feed("OPEN_PALM", 1350);
+    feed("UNKNOWN", 1350);
+    feed("OPEN_PALM", 1450);
     expect(feed("OPEN_PALM", 2000)).toEqual([]);
   });
   it("restarts the hold after sustained tracking loss or another recognized pose", () => {
-    const { feed } = stream();
-    feed("OPEN_PALM", 500);
+    const { feed, hold } = stream();
+    hold("OPEN_PALM", 500, 700);
     feed("UNKNOWN", 800);
     feed("UNKNOWN", 1000);
-    expect(feed("OPEN_PALM", 1100)).toEqual([]);
-    expect(feed("OPEN_PALM", 1500)).toEqual([]);
-    feed("THUMBS_UP", 1600);
-    expect(feed("OPEN_PALM", 1700)).toEqual([]);
-    expect(feed("OPEN_PALM", 2200)).toEqual([]);
-    expect(feed("OPEN_PALM", 2300)[0]).toMatchObject({ action: "voice.stop" });
+    expect(hold("OPEN_PALM", 1100, 1600)).toEqual([]);
+    feed("THUMBS_UP", 1700);
+    expect(hold("OPEN_PALM", 1800, 2300)).toEqual([]);
+    expect(feed("OPEN_PALM", 2400)[0]).toMatchObject({ action: "voice.stop" });
   });
   it("does not admit a delayed push-to-talk start during a tracking dropout", () => {
-    const { engine, feed } = stream();
-    feed("PEACE", 500);
-    feed("PEACE", 1100);
-    feed("UNKNOWN", 1200);
+    const { engine, feed, hold } = stream();
+    expect(hold("PEACE", 500, 1100)).toContainEqual({
+      kind: "action",
+      action: "voice.ptt",
+      pose: "PEACE",
+    });
+    feed("PEACE", 1200, 0.5);
     expect(engine.confirmPttStart()).toBe(false);
   });
   it("does not count bridge delays as time holding a gesture", () => {
@@ -85,13 +103,13 @@ describe("gesture session policy", () => {
         { seq, observedAt: T + capture, pose: "OPEN_PALM", score: 1, landmarks: [] },
         { visible: true, blocked: false, now: T + delivered },
       );
-    expect(delayed(4, 800, 1300)).toEqual([]);
-    expect(delayed(5, 1100, 1400)[0]).toMatchObject({ action: "voice.stop" });
+    expect(delayed(7, 800, 1300)).toEqual([]);
+    expect(delayed(8, 1100, 1400)[0]).toMatchObject({ action: "voice.stop" });
   });
   it("finishes only admitted PTT when a camera stops producing frames", () => {
-    const { engine, feed } = stream();
+    const { engine, feed, hold } = stream();
     feed("PEACE", 500);
-    expect(feed("PEACE", 1100)[0]).toMatchObject({ action: "voice.ptt" });
+    expect(hold("PEACE", 600, 1100)[0]).toMatchObject({ action: "voice.ptt" });
     expect(engine.confirmPttStart()).toBe(true);
     expect(engine.tick(T + 1801)).toContainEqual({
       kind: "action",
@@ -101,18 +119,18 @@ describe("gesture session policy", () => {
     expect(engine.tick(T + 3000)).toEqual([]);
   });
   it("does not finish a PTT request that the host rejected", () => {
-    const { engine, feed } = stream();
+    const { engine, feed, hold } = stream();
     feed("PEACE", 500);
-    feed("PEACE", 1100);
+    hold("PEACE", 600, 1100);
     expect(engine.tick(T + 1801)).toEqual([]);
     feed("UNKNOWN", 1900);
-    feed("UNKNOWN", 2400);
+    hold("UNKNOWN", 2000, 2400);
     expect(engine.confirmPttStart()).toBe(false);
   });
   it("cancels owned capture on blocked or hidden state without submitting it", () => {
-    const { engine, feed } = stream();
+    const { engine, feed, hold } = stream();
     feed("PEACE", 500);
-    feed("PEACE", 1100);
+    hold("PEACE", 600, 1100);
     engine.confirmPttStart();
     expect(engine.tick(T + 1200, false)).toContainEqual({
       kind: "action",
@@ -130,8 +148,9 @@ describe("gesture session policy", () => {
       score: 1,
       landmarks: [],
     });
-    engine.feed(f(1), { visible: true, blocked: false, now: T + 100 });
-    expect(engine.feed(f(7), { visible: true, blocked: false, now: T + 700 })).toContainEqual({
+    for (let n = 1; n < 9; n++)
+      engine.feed(f(n), { visible: true, blocked: false, now: T + n * 100 });
+    expect(engine.feed(f(9), { visible: true, blocked: false, now: T + 900 })).toContainEqual({
       kind: "stop",
     });
   });
@@ -147,10 +166,10 @@ describe("gesture session policy", () => {
   it("accepts a restarted counter in a fresh session", () => {
     const old = stream();
     old.feed("OPEN_PALM", 500);
-    old.feed("OPEN_PALM", 1100);
+    old.hold("OPEN_PALM", 600, 1100);
     const fresh = stream();
     fresh.feed("OPEN_PALM", 500);
-    expect(fresh.feed("OPEN_PALM", 1100)[0]).toMatchObject({ action: "voice.stop" });
+    expect(fresh.hold("OPEN_PALM", 600, 1100)[0]).toMatchObject({ action: "voice.stop" });
   });
   it("rejects unsafe stored commands and clamps accessibility timing", () => {
     const config = sanitizeConfig({
@@ -171,27 +190,31 @@ describe("gesture session policy", () => {
       points = hand();
     points[8] = [0.4, 0.5, 0];
     points[4] = [0.401, 0.5, 0];
-    expect(feed("UNKNOWN", 500, 1, points)).toContainEqual({
+    expect(
+      feed("UNKNOWN", 500, 1, points).some((e) => e.kind === "pointer" && e.phase === "down"),
+    ).toBe(false);
+    feed("UNKNOWN", 600, 1, points);
+    expect(feed("UNKNOWN", 700, 1, points)).toContainEqual({
       kind: "pointer",
       phase: "down",
       x: 0.6,
       y: 0.5,
     });
     expect(
-      feed("UNKNOWN", 600, 1, points).some((e) => e.kind === "pointer" && e.phase === "down"),
+      feed("UNKNOWN", 800, 1, points).some((e) => e.kind === "pointer" && e.phase === "down"),
     ).toBe(false);
-    expect(engine.tick(T + 1400)).toContainEqual({ kind: "pointer", phase: "up", x: -1, y: -1 });
+    expect(engine.tick(T + 1600)).toContainEqual({ kind: "pointer", phase: "up", x: -1, y: -1 });
   });
-  it("turns a pointing swipe into one page action with a cooldown", () => {
+  it("turns a palm translation into one page action until released", () => {
     const cfg = defaults();
     cfg.mode = "reading";
     cfg.mirror = false;
     const { feed } = stream(cfg),
       start = hand(),
-      end = hand();
-    start[8] = [0.2, 0.5, 0];
-    end[8] = [0.5, 0.5, 0];
+      middle = hand().map(([x, y, z]) => [x + 0.15, y, z] as Point),
+      end = hand().map(([x, y, z]) => [x + 0.3, y, z] as Point);
     expect(feed("POINT_UP", 500, 1, start)).toEqual([]);
+    expect(feed("POINT_UP", 600, 1, middle)).toEqual([]);
     expect(feed("POINT_UP", 700, 1, end)).toContainEqual({
       kind: "action",
       action: "reader.next",
@@ -200,7 +223,102 @@ describe("gesture session policy", () => {
     expect(feed("POINT_UP", 800, 1, start)).toEqual([]);
   });
 });
+describe("recognition reliability", () => {
+  it("rejects two sparse detections and requires neutral after tracking gaps", () => {
+    const { feed, hold } = stream();
+    feed("OPEN_PALM", 500);
+    expect(feed("OPEN_PALM", 1100)).toEqual([]);
+    expect(hold("OPEN_PALM", 1200, 2000)).toEqual([]);
+    hold("UNKNOWN", 2100, 2500);
+    expect(hold("OPEN_PALM", 2600, 3200)).toHaveLength(1);
+  });
+  it("pauses a hold for brief confidence flicker without counting the missing evidence", () => {
+    const { feed, hold } = stream();
+    hold("OPEN_PALM", 500, 800);
+    feed("OPEN_PALM", 900, 0.5);
+    expect(hold("OPEN_PALM", 1000, 1200)).toEqual([]);
+    expect(feed("OPEN_PALM", 1300)).toHaveLength(1);
+  });
+  it("requires a real release between different poses", () => {
+    const { hold } = stream();
+    expect(hold("OPEN_PALM", 500, 1100)).toHaveLength(1);
+    expect(hold("PEACE", 1200, 2000)).toEqual([]);
+    hold("UNKNOWN", 2100, 2500);
+    expect(hold("PEACE", 2600, 3200)[0]).toMatchObject({ action: "voice.ptt" });
+  });
+  it("does not rearm on an uncertain hand or a partial/cropped hand", () => {
+    const { hold } = stream();
+    const points = hand();
+    expect(hold("OPEN_PALM", 500, 1100, 1, points, { handCount: 1 })).toHaveLength(1);
+    hold("UNKNOWN", 1200, 1700, 1, points, { handCount: 1 });
+    expect(hold("OPEN_PALM", 1800, 2500, 1, points, { handCount: 1 })).toEqual([]);
+    const partial = points.map(([x, y, z]) => [x - 0.4, y, z] as Point);
+    expect(hold("OPEN_PALM", 2600, 3300, 1, partial, { handCount: 1 })).toEqual([]);
+  });
+  it("rejects multiple hands, ambiguous classifiers and invalid scores", () => {
+    for (const extra of [
+      { handCount: 2 },
+      { handCount: 0 },
+      { runnerUpScore: 0.88 },
+      { runnerUpScore: NaN },
+    ]) {
+      const { hold } = stream();
+      expect(hold("OPEN_PALM", 500, 1400, 0.95, hand(), extra)).toEqual([]);
+    }
+    for (const score of [NaN, Infinity, 1.1, -0.1]) {
+      expect(stream().hold("OPEN_PALM", 500, 1400, score)).toEqual([]);
+    }
+  });
+  it("uses capture timestamps and ignores duplicate capture times", () => {
+    const { engine, feed, hold } = stream();
+    hold("OPEN_PALM", 500, 800);
+    expect(feed("OPEN_PALM", 1000, 1, [], { observedAt: T + 800 })).toEqual([]);
+    expect(feed("OPEN_PALM", 1100, 1, [], { observedAt: T + 900 })).toEqual([]);
+    expect(feed("OPEN_PALM", 1200, 1, [], { observedAt: T + 1000 })).toEqual([]);
+    expect(feed("OPEN_PALM", 1300, 1, [], { observedAt: T + 1100 })).toHaveLength(1);
+    expect(engine.recognition.phase).toBe("recognized");
+  });
+  it("requires stronger and longer fist evidence even with responsive settings", () => {
+    const cfg = defaults();
+    cfg.holdMs = 200;
+    cfg.confidence = 0.65;
+    const { feed, hold } = stream(cfg);
+    expect(hold("FIST", 500, 1400, 0.8)).toEqual([]);
+    expect(hold("FIST", 1500, 2200, 0.95)).toEqual([]);
+    expect(feed("FIST", 2300, 0.95)).toContainEqual({ kind: "stop" });
+  });
+  it("does not turn finger flexing or a two-frame jump into a swipe", () => {
+    const cfg = defaults();
+    cfg.mode = "reading";
+    const { feed } = stream(cfg);
+    const a = hand(),
+      b = hand();
+    b[8][0] += 0.3;
+    feed("POINT_UP", 500, 1, a);
+    expect(feed("POINT_UP", 600, 1, b)).toEqual([]);
+    expect(feed("POINT_UP", 700, 1, a)).toEqual([]);
+  });
+  it("reports hold progress and never admits PTT after reset", () => {
+    const { engine, hold } = stream();
+    hold("PEACE", 500, 800);
+    expect(engine.recognition.progress).toBe(0.5);
+    engine.reset();
+    expect(engine.confirmPttStart()).toBe(false);
+  });
+});
 describe("personal poses and storage", () => {
+  it("rejects ambiguous custom matches without falling through to a built-in action", () => {
+    const cfg = defaults();
+    cfg.mode = "custom";
+    const features = poseFeatures(hand())!;
+    cfg.customPoses = [
+      { id: "custom_one", name: "One", features },
+      { id: "custom_two", name: "Two", features },
+    ];
+    cfg.bindings.custom = { PEACE: "voice.stop", custom_one: "voice.listen" };
+    const { hold } = stream(cfg);
+    expect(hold("PEACE", 500, 1400, 1, hand(), { handCount: 1 })).toEqual([]);
+  });
   it("normalizes translation, scale, rotation and mirroring", () => {
     const a = hand(),
       b = a.map(([x, y, z]) => [0.8 - y * 0.7, 0.1 + x * 0.7, -z * 0.7] as Point);

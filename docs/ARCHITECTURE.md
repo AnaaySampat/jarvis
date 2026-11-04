@@ -735,6 +735,37 @@ device on the JVM: `OperatorCoreTest.kt` drives
 `OperatorLoop` with a fake device, a scripted model and a fake journal
 (`./gradlew :tauri-plugin-phone:testDebugUnitTest` from `src-tauri/gen/android`).
 
+### Explicit hand-gesture sessions
+
+`GestureCameraService.kt` owns CameraX and the bundled MediaPipe recognizer. It
+publishes epoch capture time, a monotonic sequence, landmarks, hand count and the
+top-two classifier scores through `poll_gesture_recognition` on the existing
+Kotlin → Rust → JS bridge. The native latch independently enforces deliberate
+fist-stop (at least 800 ms, three samples, 85% confidence) so Stop survives JS
+stalls. Screen lock, explicit Stop and five-minute expiry still close the camera.
+
+The Android and Windows `gestures/engine.ts` copies share the action policy:
+continuous capture evidence, quality/margin checks, a neutral hand release between
+commands, motion-qualified swipes, smoothed HUD pointing and pinch dwell. Preserve
+the copies together. `useGestureModes` ticks stalled frames and owns capture and
+practice state. Practice filters all action/pointer execution except fist-stop,
+cancels owned push-to-talk and resets to neutral on either transition. Existing
+host adapters and approval gates remain the only action paths. UI feedback is a
+readout of this same engine, not a second recognizer. Settings → Gestures and the
+command palette open the dedicated Control/Learn/Tune views; Voice keeps a link.
+Activity and binding changes synchronously reset the engine and capture ownership
+without restarting camera inference. Pause suppresses hand commands but keeps
+explicit touch controls available through the same execution path. Manual buttons
+also work with the camera off (photo still requires a live camera); they retain
+approval gates. Guided practice records a target as learned only after fresh engine
+evidence matches it, never from a previous held result. Camera control uses an
+operation token so Stop cancels pending startup and late replies cannot reopen UI.
+Recent actions retain actual host results, including failures and unconfirmed
+requests. Native Android preview has a movable handle and a persistent Stop;
+collapsing it preserves its attached CameraX preview surface.
+
+See [gesture controls](GESTURE-CONTROLS.md) for behavior and physical acceptance.
+
 ### STT and TTS use the WebView, not a Kotlin plugin
 
 This was deliberate. `platform/webspeech.ts` uses `window.speechSynthesis` for replies and

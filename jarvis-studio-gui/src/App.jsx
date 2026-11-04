@@ -45,6 +45,7 @@ const SETTINGS_PAGES = [
   ["keys", "API Keys", "key", "groq gemini openrouter credentials"],
   ["routing", "Routing & Quota", "route", "rate limit benched rank"],
   ["voice", "Voice", "volume", "wake word speech tts"],
+  ["gestures", "Gestures", "camera", "hand gesture camera practice motion hands free"],
   ...(IS_MOBILE ? [["skills", "Skills", "spark", "import upload instructions markdown"]] : []),
   ["interface", "Interface", "layout", "home screen customize look"],
   ["files", "Files & Location", "folder", "storage folder location city"],
@@ -188,22 +189,6 @@ export default function App() {
   const unifiedTasks = taskCenterTasks || agentTasks || [];
   const anyTaskActive =
     taskCenterActive ?? unifiedTasks.some((task) => ACTIVE_TASK_STATES.has(task.status));
-  const gestureHost = useMemo(() => androidGestureHost({
-    listen:triggerListen, pttStart, finishListen, cancelListen, stopSpeech, runAction,
-    pcAction:gesturePcAction, sendMessage,
-    isReady:()=>status==="idle" && !anyTaskActive,
-    order:screen?.order || {left:["system","power","agenda"],right:["weather","network","terminal"]},
-    sendScreen,
-  }),[triggerListen,pttStart,finishListen,cancelListen,stopSpeech,runAction,
-    gesturePcAction,sendMessage,status,anyTaskActive,screen,sendScreen]);
-  const gestures = useGestureModes({
-    camera:nativeGestureCamera,
-    enabled: IS_MOBILE && inTauri(),
-    host:gestureHost,
-    canListen: status === "idle" && !anyTaskActive,
-    blocked: Boolean(permissionRequest || phoneApproval || clarifyRequest),
-    latestReply:[...messages].reverse().find((m)=>m.role==="jarvis")?.text || "",
-  });
 
   // App owns the overlay state so JARVIS can drive them via ui_action too.
   const [chatOpen, setChatOpen] = useState(false);
@@ -226,6 +211,77 @@ export default function App() {
   const [remoteOpen, setRemoteOpen] = useState(false); // Remote-PC pairing (mobile)
   const openRemote = useCallback(() => setRemoteOpen(true), []);
   const [screenOpen, setScreenOpen] = useState(false); // Remote-desktop live view (mobile)
+  const gestureHost = useMemo(
+    () =>
+      androidGestureHost({
+        listen: triggerListen,
+        pttStart,
+        finishListen,
+        cancelListen,
+        stopSpeech,
+        runAction,
+        pcAction: gesturePcAction,
+        sendMessage,
+        isReady: () => status === "idle" && !anyTaskActive,
+        order: screen?.order || {
+          left: ["system", "power", "agenda"],
+          right: ["weather", "network", "terminal"],
+        },
+        sendScreen,
+        availability: {
+          pc: {
+            ready: controlArmed,
+            detail: controlArmed
+              ? "PC control is armed for this session."
+              : "Open your PC live view and arm control before using slide gestures.",
+            setupLabel: "Open PC live view",
+            setup: () => {
+              setShowSettings(false);
+              setScreenOpen(true);
+              void startScreen();
+            },
+          },
+          tv: {
+            ready: Boolean(tvConfig?.host),
+            detail: tvConfig?.host
+              ? "Uses your paired TV. Keep JARVIS visible."
+              : "Pair your TV before using playback gestures.",
+            setupLabel: "Connect a TV",
+            setup: () => {
+              setShowSettings(false);
+              setRemoteOpen(true);
+            },
+          },
+        },
+      }),
+    [
+      triggerListen,
+      pttStart,
+      finishListen,
+      cancelListen,
+      stopSpeech,
+      runAction,
+      gesturePcAction,
+      sendMessage,
+      status,
+      anyTaskActive,
+      screen,
+      sendScreen,
+      controlArmed,
+      tvConfig,
+      startScreen,
+    ],
+  );
+  const gestures = useGestureModes({
+    camera: nativeGestureCamera,
+    enabled: IS_MOBILE && inTauri(),
+    host: gestureHost,
+    canListen: status === "idle" && !anyTaskActive,
+    listening: status === "listening",
+    blocked: Boolean(permissionRequest || phoneApproval || clarifyRequest),
+    latestReply: [...messages].reverse().find((m) => m.role === "jarvis")?.text || "",
+  });
+
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null); // {text, id}: a brief confirmation pill
   const notify = useCallback((text) => setToast({ text, id: Date.now() }), []);
@@ -1040,7 +1096,10 @@ export default function App() {
           pcState={pcState}
           pcVersion={sysInfo.pc_version}
           tasks={unifiedTasks}
-          onPair={() => { setShowSettings(false); setRemoteOpen(true); }}
+          onPair={() => {
+            setShowSettings(false);
+            setRemoteOpen(true);
+          }}
           onClose={() => setShowSettings(false)}
           onSave={(cfg) => sendConfig(cfg)}
           onSetLocation={sendManualLocation}
@@ -1083,7 +1142,10 @@ export default function App() {
           onClear={clearAgentTasks}
           onStopTask={stopTask}
           onStopAll={stopAllTasks}
-          onReview={() => { setActivityOpen(false); setChatOpen(true); }}
+          onReview={() => {
+            setActivityOpen(false);
+            setChatOpen(true);
+          }}
         />
       )}
 

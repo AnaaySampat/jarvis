@@ -1,8 +1,9 @@
 # Hands-free usability implementation
 
 Scope: the simulated-user REVIEW.md, checked against the Windows and Android source.
-The reviewed build's newer gesture UI is not present in these checkouts. Build on
-the existing engine and keep matching gesture modules aligned across repositories.
+The daily activity workspace shares the current gesture controller with Settings
+and the compact session overlay. Gesture recognition and native camera upgrades
+from main are retained; matching modules stay aligned across repositories.
 
 ## Delivery order
 
@@ -28,9 +29,9 @@ the existing engine and keep matching gesture modules aligned across repositorie
 - Missing AI credentials or optional assets do not block local reading/practice.
 - Keyboard focus, labels, readable help and activity-specific status are checked.
 
-Physical hand accuracy, sustained comfort/battery, native Windows packaging and
-Android permissions/device camera acceptance require real devices. Browser and
-synthetic-camera checks do not establish those outcomes.
+Physical hand accuracy, sustained comfort/battery and Android permissions/device
+camera acceptance require real devices. Browser and synthetic-camera checks do
+not establish those outcomes. Native packaging is checked by GitHub Actions.
 
 ## Delivered
 
@@ -58,7 +59,7 @@ synthetic-camera checks do not establish those outcomes.
 
 - Both frontend builds and TypeScript checks pass. Android lint is clean; Windows
   lint completes with zero errors and 26 warnings in the existing codebase.
-- Windows frontend: **98 tests pass**. Android frontend: **667 pass, 9 skip**.
+- Windows frontend: **150 tests pass**. Android frontend: **717 pass, 9 skip**.
   Test discovery now includes the new JavaScript and component startup tests.
 - Windows backend: **719 tests run; 715 pass, 3 skip, 1 fails**. The failure is the
   unchanged `test_files.FilesTests.test_a_pattern_moves_every_match_or_nothing`,
@@ -84,6 +85,8 @@ Playwright and Chromium; Vite must be running). Set `CHROMIUM_PATH` when needed.
 Use `--url http://127.0.0.1:1422` for the Android preview. Add `--timers` only with
 Windows's real backend and a fresh disposable `JARVIS_CONFIG_DIR`.
 
-No native installer/APK was built, installed or published for this UI change.
-New native UI, actual hand comfort/recognition, permissions and sustained-device
-acceptance remain separate from these browser results and earlier device evidence.
+Native build targets are Android ARM64 2.5.4 and Windows x64 0.3.2. Artifact-only
+GitHub Actions builds check native packaging and the Windows backend suite on
+Windows; no release publication or physical-device installation is implied.
+Actual hand comfort/recognition, permissions and sustained-device acceptance
+remain separate from these browser results and earlier device evidence.

@@ -15,6 +15,10 @@ interface HostOptions {
   isReady: () => boolean;
   order: Record<string, string[]>;
   sendScreen: (patch: unknown) => unknown;
+  availability?: Record<
+    string,
+    { ready?: boolean; detail: string; setup?: () => unknown; setupLabel?: string }
+  >;
 }
 export function androidGestureHost(options: HostOptions) {
   return {
