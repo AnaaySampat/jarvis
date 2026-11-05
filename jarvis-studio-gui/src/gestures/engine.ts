@@ -12,6 +12,11 @@ export const ACTIONS = {
   "media.previous": "Music: previous track",
   "media.up": "Music: volume up",
   "media.down": "Music: volume down",
+  "phone.flashlightOn": "Phone: flashlight on",
+  "phone.flashlightOff": "Phone: flashlight off",
+  "phone.bright": "Phone: brightness 80%",
+  "phone.dim": "Phone: brightness 30%",
+  "phone.autoBrightness": "Phone: automatic brightness",
   "tv.toggle": "TV: play / pause",
   "tv.mute": "TV: mute / unmute",
   "tv.next": "TV: next",
@@ -55,6 +60,7 @@ export const POSES = [
   "SWIPE_DOWN",
 ] as const;
 export const MODES = {
+  phone: "Phone controls",
   voice: "Voice",
   media: "Music",
   tv: "TV",
@@ -119,6 +125,16 @@ export function defaults(): GestureConfig {
     releaseMs: 400,
     confidence: 0.8,
     bindings: {
+      phone: {
+        OPEN_PALM: "media.toggle",
+        PEACE: "phone.flashlightOn",
+        POINT_UP: "phone.flashlightOff",
+        THUMBS_UP: "media.up",
+        THUMBS_DOWN: "media.down",
+        LOVE: "phone.autoBrightness",
+        SWIPE_UP: "phone.bright",
+        SWIPE_DOWN: "phone.dim",
+      },
       voice: { ...voice },
       media: media("media"),
       tv: media("tv"),

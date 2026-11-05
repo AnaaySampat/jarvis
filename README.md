@@ -61,6 +61,11 @@ a **photo or screenshot** and ask JARVIS about it.
 
 ### Hand gestures (preview)
 
+On your phone, tap **Gestures** in the top action row for setup and calibration.
+**Guide** explains placement, practice and assigning actions. **Phone** adds playback,
+volume, flashlight and brightness controls without a PC. Custom-pose capture now
+chooses an action first and shows countdown/progress, then offers a safe practice test.
+
 Open **Hands-free** on Home to read, follow steps or control music. Reading and
 step buttons work with the camera off. Choose **Learn** for action-free practice
 or **Tune** for presets and mappings, then start the camera when ready.

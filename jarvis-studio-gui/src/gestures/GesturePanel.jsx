@@ -6,6 +6,7 @@ import { documentId } from "./storage";
 import {
   ACTIVITIES,
   MAIN_ACTIVITIES,
+  PHONE_ACTIVITIES,
   POSE_HELP,
   RESPONSE_PRESETS,
   actionLabel,
@@ -13,6 +14,7 @@ import {
   relevantActions,
 } from "./presentation";
 import GestureGlyph from "./GestureGlyph";
+import GestureGuide from "./GestureGuide";
 import { ActivityContent, CameraView, SessionFeedback } from "./GestureSessionViews";
 import "./gestures.css";
 
@@ -137,12 +139,14 @@ function ActionEditor({ pose, controls, onClose, resume }) {
 export default function GesturePanel({ controls, routines = [] }) {
   const cfg = controls.config;
   const active = controls.status.running || controls.status.starting;
+  const primaryActivities = controls.platform === "android" ? PHONE_ACTIVITIES : MAIN_ACTIVITIES;
   const [tab, setTab] = useState(controls.practice ? "learn" : "control");
-  const [moreActivities, setMoreActivities] = useState(!MAIN_ACTIVITIES.includes(cfg.mode));
+  const [moreActivities, setMoreActivities] = useState(!primaryActivities.includes(cfg.mode));
   const [moreGestures, setMoreGestures] = useState(false);
   const [focusActivities, setFocusActivities] = useState(false);
   const [editing, setEditing] = useState(null);
   const [poseName, setPoseName] = useState("");
+  const [poseAction, setPoseAction] = useState("media.toggle");
   const [refreshing, setRefreshing] = useState(false);
   const tuneResume = useRef(false);
   const names = [...POSES, ...cfg.customPoses.map((p) => p.id)];
@@ -171,7 +175,7 @@ export default function GesturePanel({ controls, routines = [] }) {
     setEditing(null);
   };
   const changeTab = (next) => {
-    if (next === "tune" && tab !== "tune")
+    if (["tune", "guide"].includes(next) && !["tune", "guide"].includes(tab))
       tuneResume.current = Boolean(active && (!controls.paused || editing?.resume));
     dismissEditor();
     setTab(next);
@@ -180,7 +184,7 @@ export default function GesturePanel({ controls, routines = [] }) {
       if (!controls.practiceTarget) controls.setPracticeTarget(target);
     } else if (next === "control") {
       if (controls.practice) controls.setPractice(false);
-      else if (tab === "tune" && tuneResume.current) controls.setPaused(false);
+      else if (["tune", "guide"].includes(tab) && tuneResume.current) controls.setPaused(false);
     } else if (active) controls.setPaused(true);
   };
   const learn = (pose) => {
@@ -189,9 +193,9 @@ export default function GesturePanel({ controls, routines = [] }) {
     controls.setPractice(true);
     controls.setPracticeTarget(pose);
   };
-  const edit = (pose) => {
-    const resume = Boolean(active && !controls.paused && !controls.practice);
-    if (resume) controls.setPaused(true);
+  const edit = (pose, shouldResume) => {
+    const resume = shouldResume ?? Boolean(active && !controls.paused && !controls.practice);
+    if (active && (!controls.paused || controls.practice)) controls.setPaused(true);
     setEditing({ pose, resume, mode: cfg.mode });
   };
   const chooseActivity = (mode) => {
@@ -230,11 +234,13 @@ export default function GesturePanel({ controls, routines = [] }) {
         <div>
           <span className="gesture-kicker">HAND GESTURES</span>
           <h3>
-            {tab === "learn"
-              ? "Learn a gesture."
-              : tab === "tune"
-                ? "Make it comfortable."
-                : "Hands-free controls."}
+            {tab === "guide"
+              ? "Get started with gestures."
+              : tab === "learn"
+                ? "Learn a gesture."
+                : tab === "tune"
+                  ? "Make it comfortable."
+                  : "Hands-free controls."}
           </h3>
           {tab === "control" && (
             <p>Choose an activity and start. Learn any gesture safely before using it.</p>
@@ -247,7 +253,7 @@ export default function GesturePanel({ controls, routines = [] }) {
 
       {(tab === "control" || focusActivities) && (
         <div className="gesture-activities" role="group" aria-label="Choose activity">
-          {(moreActivities || tab !== "control" ? Object.keys(ACTIVITIES) : MAIN_ACTIVITIES).map(
+          {(moreActivities || tab !== "control" ? Object.keys(ACTIVITIES) : primaryActivities).map(
             (mode) => (
               <button
                 type="button"
@@ -269,7 +275,7 @@ export default function GesturePanel({ controls, routines = [] }) {
         <span>
           {tab === "control" || focusActivities
             ? activity.description
-            : `${activity.name} · ${tab === "learn" ? "Practice without commands" : "Recognition preferences"}`}
+            : `${activity.name} · ${tab === "learn" ? "Practice without commands" : tab === "guide" ? "Setup, actions & calibration" : "Recognition preferences"}`}
         </span>
         <button
           type="button"
@@ -303,18 +309,19 @@ export default function GesturePanel({ controls, routines = [] }) {
             if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || controls.calibrating)
               return;
             e.preventDefault();
-            const tabs = ["control", "learn", "tune"];
+            const tabs = ["control", "guide", "learn", "tune"];
             const next =
               e.key === "Home"
                 ? 0
                 : e.key === "End"
-                  ? 2
-                  : (tabs.indexOf(tab) + (e.key === "ArrowRight" ? 1 : 2)) % 3;
+                  ? tabs.length - 1
+                  : (tabs.indexOf(tab) + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) %
+                    tabs.length;
             changeTab(tabs[next]);
             e.currentTarget.querySelectorAll("[role='tab']")[next]?.focus();
           }}
         >
-          {["control", "learn", "tune"].map((name) => (
+          {["control", "guide", "learn", "tune"].map((name) => (
             <button
               key={name}
               type="button"
@@ -327,7 +334,15 @@ export default function GesturePanel({ controls, routines = [] }) {
               onClick={() => changeTab(name)}
             >
               <Icon
-                name={name === "control" ? "play" : name === "learn" ? "skills" : "settings"}
+                name={
+                  name === "control"
+                    ? "play"
+                    : name === "guide"
+                      ? "help"
+                      : name === "learn"
+                        ? "skills"
+                        : "settings"
+                }
                 size={15}
               />
               {name[0].toUpperCase() + name.slice(1)}
@@ -337,7 +352,7 @@ export default function GesturePanel({ controls, routines = [] }) {
         <div className="gesture-session-buttons">
           {active ? (
             <>
-              {tab !== "learn" && (
+              {tab === "control" && (
                 <button
                   type="button"
                   className="gesture-pause"
@@ -353,7 +368,7 @@ export default function GesturePanel({ controls, routines = [] }) {
                 Stop camera
               </button>
             </>
-          ) : (
+          ) : tab !== "guide" && tab !== "tune" ? (
             <button
               type="button"
               className="gesture-primary"
@@ -372,7 +387,7 @@ export default function GesturePanel({ controls, routines = [] }) {
               <Icon name="camera" size={17} />
               {controls.busy ? "Opening…" : tab === "learn" ? "Start practice" : "Start gestures"}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
       {!controls.supported && (
@@ -393,12 +408,41 @@ export default function GesturePanel({ controls, routines = [] }) {
       )}
 
       <div role="tabpanel" id={`gesture-view-${tab}`} aria-labelledby={`gesture-tab-${tab}`}>
+        {tab === "guide" && (
+          <GestureGuide
+            controls={controls}
+            target={target}
+            onPractice={() => learn(target)}
+            onMap={() => {
+              if (controls.practice) controls.setPractice(false);
+              setTab("control");
+              edit(target, Boolean(active && tuneResume.current));
+            }}
+            onTeach={() => {
+              chooseActivity("custom");
+              changeTab("control");
+              controls.setPractice(true);
+            }}
+            onTune={() => changeTab("tune")}
+          />
+        )}
         {tab === "control" && (
           <>
+            <button
+              type="button"
+              className="gesture-guide-entry"
+              onClick={() => changeTab("guide")}
+            >
+              <Icon name="help" size={21} />
+              <span>
+                <strong>Set up, learn & calibrate</strong>
+                <small>Phone placement · gestures → actions · your own poses</small>
+              </span>
+              <Icon name="arrowRight" size={17} />
+            </button>
             <div className="gesture-control-layout">
               <div className="gesture-control-camera">
                 <CameraView controls={controls} />
-                <SessionFeedback controls={controls} />
               </div>
               <div className="gesture-control-content">
                 <div className="gesture-section-title">
@@ -416,24 +460,58 @@ export default function GesturePanel({ controls, routines = [] }) {
                   routines={routines}
                   location="panel"
                 />
+                <SessionFeedback controls={controls} />
               </div>
             </div>
             {cfg.mode === "custom" && (
               <section className="gesture-teach">
                 <div>
-                  <h4>Make a gesture that feels natural</h4>
-                  <p>Name it, show it to the camera, then choose its action.</p>
+                  <h4>Teach a gesture that feels natural</h4>
+                  <p>
+                    Name your pose and choose its action. Capture it, then test before enabling
+                    actions.
+                  </p>
                 </div>
                 <label>
                   Pose name
                   <input
                     aria-label="Pose name"
+                    disabled={controls.calibrating}
                     value={poseName}
                     maxLength={40}
                     placeholder="e.g. My comfortable pose"
                     onChange={(e) => setPoseName(e.target.value)}
                   />
                 </label>
+                <label>
+                  What should it do?
+                  <select
+                    aria-label="Custom pose action"
+                    value={poseAction}
+                    disabled={controls.calibrating}
+                    onChange={(e) => setPoseAction(e.target.value)}
+                  >
+                    {Object.keys(ACTIONS)
+                      .filter((action) => !["none", "feedback"].includes(action))
+                      .map((action) => (
+                        <option key={action} value={action}>
+                          {ACTIONS[action]}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {!active && (
+                  <button
+                    type="button"
+                    disabled={controls.busy || !controls.supported}
+                    onClick={() => {
+                      controls.setPractice(true);
+                      void controls.start();
+                    }}
+                  >
+                    <Icon name="camera" size={16} /> Start camera for setup
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={
@@ -444,16 +522,50 @@ export default function GesturePanel({ controls, routines = [] }) {
                   }
                   onClick={() => {
                     controls.setPractice(true);
-                    controls.calibrate(poseName);
+                    controls.calibrate(poseName, poseAction);
                   }}
                 >
                   {controls.calibrating ? "Hold your pose…" : "Capture my pose"}
                   <Icon name="camera" size={16} />
                 </button>
                 <small>
-                  Three seconds to get ready. Keep your hand still until capture finishes.
+                  Face the front camera with one whole hand. After the three-second countdown, hold
+                  your pose still for eight clear frames. A closed fist stops the camera.
                 </small>
-                {controls.practice && (
+                {controls.calibration && (
+                  <div className="gesture-calibration" role="status">
+                    <strong>
+                      {controls.calibration.phase === "prepare"
+                        ? `Get ready · ${controls.calibration.remaining}s`
+                        : controls.calibration.phase === "capture"
+                          ? `Hold still · ${controls.calibration.samples} of 8 frames`
+                          : controls.calibration.phase === "saved"
+                            ? `${controls.calibration.name} saved · ${actionLabel(controls.calibration.action)}`
+                            : controls.calibration.message}
+                    </strong>
+                    {controls.calibrating && (
+                      <progress
+                        aria-label="Pose capture progress"
+                        max={8}
+                        value={controls.calibration.samples || 0}
+                      />
+                    )}
+                    {controls.calibrating && controls.calibration.hint && (
+                      <small>{controls.calibration.hint}</small>
+                    )}
+                    {controls.calibrating && (
+                      <button type="button" onClick={controls.cancelCalibration}>
+                        Cancel capture
+                      </button>
+                    )}
+                    {controls.calibration.phase === "saved" && (
+                      <button type="button" onClick={() => learn(controls.calibration.poseId)}>
+                        Test my saved pose <Icon name="arrowRight" size={15} />
+                      </button>
+                    )}
+                  </div>
+                )}
+                {controls.practice && !controls.calibrating && (
                   <button type="button" onClick={() => controls.setPractice(false)}>
                     Finish teaching & enable actions
                   </button>

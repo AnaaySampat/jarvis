@@ -359,7 +359,7 @@ export function JarvisHUD({
       {hudCards && <div className="im-frame" aria-hidden="true" />}
 
       <header className="home-top">
-        <button type="button" className="home-hands-free" onClick={onOpenHandsFree}>Hands-free</button>
+        {!IS_MOBILE && <button type="button" className="home-hands-free" onClick={onOpenHandsFree}>Hands-free</button>}
         <div className="home-brand">
           <span className="home-logo" aria-hidden />
           <span className="home-name">JARVIS</span>
@@ -395,7 +395,7 @@ export function JarvisHUD({
             ))}
           </nav>
         )}
-        <HeaderTools>{toolbar}</HeaderTools>
+        <HeaderTools direct={IS_MOBILE}>{toolbar}</HeaderTools>
       </header>
 
       <main className="home-main" ref={mainRef}>
@@ -587,6 +587,7 @@ function TabButton({ n, on: [isOn, open], badge }) {
     <button
       type="button"
       className={`home-tab${isOn ? " is-on" : ""}`}
+      data-gesture-safe="true"
       onClick={open}
       aria-label={badge ? `${n.label}, new reply` : n.label}
     >

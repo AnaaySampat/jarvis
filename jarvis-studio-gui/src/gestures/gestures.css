@@ -108,6 +108,36 @@
   font-size: 12px;
   white-space: nowrap;
 }
+.gesture-settings .gesture-guide-entry {
+  display: flex; width: 100%; gap: 12px; padding: 12px 14px;
+  margin-bottom: 17px; text-align: left; background: transparent;
+}
+.gesture-guide-entry > svg { color: var(--accent); }
+.gesture-guide-entry > span { flex: 1; min-width: 0; }
+.gesture-guide-entry strong { display: block; font-size: 12px; }
+.gesture-guide-entry small { display: block; margin-top: 4px; color: var(--g-muted); font-size: 11px; }
+.gesture-guide > .gesture-muted { margin-top: 10px; font-size: 12px; }
+.gesture-guide-steps { list-style: none; margin: 22px 0; padding: 0; }
+.gesture-guide-steps > li { display: flex; gap: 13px; padding: 17px 0; border-top: 1px solid var(--g-border); }
+.gesture-guide-number {
+  display: grid; place-items: center; flex: 0 0 28px; height: 28px;
+  border: 1px solid var(--g-border); border-radius: 50%; color: var(--accent); font-size: 12px;
+}
+.gesture-guide h5 { font-size: 14px; font-weight: 600; }
+.gesture-guide-steps p, .gesture-guide-custom p { font-size: 12px; color: var(--g-muted); margin-top: 8px; line-height: 1.7; }
+.gesture-guide-steps button, .gesture-guide-custom button { margin-top: 12px; font-size: 12px; min-height: 44px; }
+.gesture-guide-steps > li > div { min-width: 0; flex: 1; }
+.gesture-guide-mapping { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0 0; font-size: 12px; }
+.gesture-guide-mapping > svg { color: var(--accent); }
+.gesture-guide-mapping strong { font-weight: 500; }
+.gesture-guide-custom { display: flex; gap: 12px; padding: 17px; border: 1px solid var(--g-border); border-radius: 12px; background: var(--g-surface); }
+.gesture-guide-custom > svg { color: var(--accent); flex-shrink: 0; }
+.gesture-guide-custom > div { min-width: 0; }
+.gesture-guide-stop { display: flex; align-items: flex-start; gap: 8px; padding-top: 16px; font-size: 11px; }
+.gesture-guide-stop svg { flex-shrink: 0; color: var(--accent); }
+.gesture-calibration { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--g-surface); border-radius: 8px; }
+.gesture-calibration strong { font-size: 12px; font-weight: 500; }
+.gesture-calibration progress { width: 100%; accent-color: var(--accent); height: 6px; }
 .gesture-settings input,
 .gesture-settings textarea,
 .gesture-settings select {
@@ -244,7 +274,7 @@
   background: transparent;
   color: var(--g-muted);
   padding: 8px 10px;
-  min-height: 36px;
+  min-height: 44px;
   font-size: 12px;
 }
 .gesture-tabs button[aria-selected="true"] {
@@ -262,7 +292,7 @@
 }
 .gesture-session-buttons button {
   font-size: 11px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 8px 10px;
 }
 .gesture-notice {
@@ -1058,6 +1088,8 @@ body:has(.gesture-settings) .gesture-workspace {
   outline-offset: 4px;
 }
 @container (max-width: 560px) {
+  .gesture-settings button { min-height: 44px; }
+  .gesture-settings :is(input, select, textarea) { font-size: 16px; }
   .gesture-header {
     margin-bottom: 17px;
   }
@@ -1092,8 +1124,14 @@ body:has(.gesture-settings) .gesture-workspace {
     padding: 9px 0;
   }
   .gesture-tabs {
-    flex: 1;
+    flex: 1 0 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-width: 0;
   }
+  .gesture-tabs button { min-width: 0; padding: 8px 4px; gap: 4px; font-size: 11px; }
+  .gesture-guide-custom { padding: 13px; gap: 8px; }
+  .gesture-guide-steps > li { gap: 9px; }
   .gesture-session-buttons {
     flex: 1;
     justify-content: flex-end;
@@ -1108,6 +1146,7 @@ body:has(.gesture-settings) .gesture-workspace {
     grid-template-columns: 1fr;
     gap: 19px;
   }
+  .gesture-control-content { order: -1; }
   .gesture-camera {
     aspect-ratio: 2.05;
   }
@@ -1227,6 +1266,10 @@ body:has(.gesture-settings) .gesture-workspace {
   .gesture-workspace * {
     transition: none !important;
   }
+}
+@media (pointer: coarse) {
+  .gesture-settings button { min-height: 44px; }
+  .gesture-settings :is(input, select, textarea) { font-size: 16px; }
 }
 /* Keep the hand and camera in view while learning, instead of repeating setup chrome. */
 .gesture-settings.is-focused .gesture-header {

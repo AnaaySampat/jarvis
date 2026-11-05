@@ -52,6 +52,7 @@ export function useGestureModes({
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks(safeStorage()));
   const bookmarksRef = useRef(bookmarks);
   const [calibrating, setCalibrating] = useState(false);
+  const [calibrationProgress, setCalibrationProgress] = useState(null);
   const [cursor, setCursor] = useState(null);
   const [recognition, setRecognition] = useState(idleRecognition);
   const [practice, setPracticeState] = useState(false);
@@ -531,6 +532,10 @@ export function useGestureModes({
             calibration.current = null;
             setCalibrating(false);
             setMessage("Camera stopped during calibration.");
+            setCalibrationProgress({
+              phase: "error",
+              message: "Camera stopped. No pose was saved. Start it and try again.",
+            });
           }
           drag.current = null;
           setCursor((old) => (old === null ? old : null));
@@ -544,6 +549,25 @@ export function useGestureModes({
           const c = calibration.current;
           if (c && Date.now() > c.until)
             throw new Error("Calibration timed out. Keep one well-lit hand still and try again.");
+          if (c) {
+            if (!visible || context.current.blocked)
+              throw new Error("Keep JARVIS visible and dismiss approvals before calibration.");
+            const remaining = Math.max(0, Math.ceil((c.startAt - Date.now()) / 1000));
+            const phase = remaining ? "prepare" : "capture";
+            setCalibrationProgress((old) =>
+              old?.phase === phase &&
+              old.remaining === remaining &&
+              old.samples === c.samples.length
+                ? old
+                : {
+                    phase,
+                    remaining,
+                    samples: c.samples.length,
+                    hint: "Keep one whole hand still until the bar fills.",
+                  },
+            );
+            if (remaining) setMessage("Form your pose: capturing in " + remaining + "...");
+          }
           if (snapshot.frame && snapshot.frame.seq !== latestFrame.current) {
             latestFrame.current = snapshot.frame.seq;
             consume(
@@ -566,15 +590,8 @@ export function useGestureModes({
               setPracticePassed(passedRef.current);
             }
             if (c) {
-              if (!visible || context.current.blocked)
-                throw new Error("Keep JARVIS visible and dismiss approvals before calibration.");
-              if (Date.now() < c.startAt)
-                setMessage(
-                  "Form your pose: capturing in " +
-                    Math.ceil((c.startAt - Date.now()) / 1000) +
-                    "...",
-                );
-              else if (
+              if (
+                Date.now() >= c.startAt &&
                 snapshot.frame.pose !== "FIST" &&
                 (snapshot.frame.handCount === undefined || snapshot.frame.handCount === 1) &&
                 Date.now() - snapshot.frame.observedAt >= 0 &&
@@ -582,6 +599,7 @@ export function useGestureModes({
                 validLandmarks(snapshot.frame.landmarks)
               ) {
                 c.samples.push(snapshot.frame.landmarks);
+                setCalibrationProgress({ phase: "capture", samples: c.samples.length });
                 setMessage("Hold still: " + c.samples.length + " / 8 frames.");
                 if (c.samples.length >= 8) {
                   const template = calibratePose(c.name, c.samples, poseId());
@@ -595,12 +613,26 @@ export function useGestureModes({
                   const next = sanitizeConfig({
                     ...configRef.current,
                     customPoses: [...configRef.current.customPoses, template],
+                    bindings: {
+                      ...configRef.current.bindings,
+                      custom: { ...configRef.current.bindings.custom, [template.id]: c.action },
+                    },
                   });
                   changeConfig(next);
                   calibration.current = null;
                   setCalibrating(false);
+                  setCalibrationProgress({
+                    phase: "saved",
+                    poseId: template.id,
+                    name: template.name,
+                    action: c.action,
+                  });
                   setMessage(
-                    "Saved pose " + template.name + ". Choose its action on the gesture card.",
+                    "Saved pose " +
+                      template.name +
+                      (c.action === "none"
+                        ? ". Choose its action on the gesture card."
+                        : ". Test it in practice before enabling actions."),
                   );
                 }
               }
@@ -613,6 +645,7 @@ export function useGestureModes({
           if (calibration.current) {
             calibration.current = null;
             setCalibrating(false);
+            setCalibrationProgress({ phase: "error", message: String(error?.message || error) });
           }
           consume(engine.current.reset());
           queuedNavigation.current = null;
@@ -739,6 +772,7 @@ export function useGestureModes({
     page,
     bookmarks,
     calibrating,
+    calibration: calibrationProgress,
     cursor,
     recognition,
     practice,
@@ -772,6 +806,7 @@ export function useGestureModes({
     blocked: Boolean(blocked),
     availability: host.availability || {},
     supported: enabled,
+    platform: host.platform,
     camera,
     latestReply,
     changeConfig,
@@ -801,7 +836,14 @@ export function useGestureModes({
       setStep(value);
       setMessage(`Step ${value + 1}.`);
     },
-    calibrate: (name) => {
+    cancelCalibration: () => {
+      calibration.current = null;
+      setCalibrating(false);
+      setCalibrationProgress(null);
+      resetInteraction();
+      setMessage("Capture cancelled. No pose was saved.");
+    },
+    calibrate: (name, action = "none") => {
       const clean = String(name || "")
         .trim()
         .slice(0, 40);
@@ -823,15 +865,19 @@ export function useGestureModes({
       engine.current.reset();
       calibration.current = {
         name: clean,
+        action: typeof action === "string" && hasOwn(ACTIONS, action) ? action : "none",
         samples: [],
         startAt: Date.now() + 3000,
         until: Date.now() + 18000,
       };
       setCalibrating(true);
+      setCalibrationProgress({ phase: "prepare", remaining: 3, samples: 0 });
       setMessage("Form your pose: capturing in 3 seconds...");
     },
-    removePose: (id) =>
-      changeConfig((current) => ({ customPoses: current.customPoses.filter((p) => p.id !== id) })),
+    removePose: (id) => {
+      if (calibrationProgress?.poseId === id) setCalibrationProgress(null);
+      changeConfig((current) => ({ customPoses: current.customPoses.filter((p) => p.id !== id) }));
+    },
     renameBookmark: (at, name) =>
       changeBookmarks((previous) =>
         previous.map((b) => (b.at === at ? { ...b, name: name.slice(0, 80) } : b)),
