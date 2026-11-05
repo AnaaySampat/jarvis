@@ -6,9 +6,14 @@ is inconvenient. Physical-device accuracy and battery testing are still required
 
 ## Start using controls
 
-1. Open **Settings → Gestures**, or find **Settings: Gestures** in the command
-   palette. Choose Voice, Music, Slides, Read, Photo or Steps. Other activities are
-   under **More activities**. Voice settings also link to this page.
+1. On Android, tap **Gestures** in the single top action row. You can also open
+   **Settings → Gestures**, or find **Settings: Gestures** in the command palette.
+   Android puts Phone, Music, Voice, Read, Photo and Steps first; Slides and other
+   activities are under **More activities**. Voice settings also link to this page.
+   Open **Guide** or **Set up, learn & calibrate** for numbered instructions covering
+   phone placement, practice, gesture-to-action mapping and custom calibration.
+   Built-in hand shapes do not need calibration. Guide pauses an active session;
+   returning to Control restores its prior pause state. Stop remains available.
 2. **Control** has illustrated gesture cards and real touch buttons for the current
    activity. Buttons work with the camera off, except photo capture. Read lets you
    paste text and turn pages; Steps keeps the current instruction and timer at hand.
@@ -53,8 +58,28 @@ Restore default actions affects only the selected activity. The floating session
 panel includes Pause/Resume, Stop, touch controls and gesture reminders, and can be
 minimized. The duplicate panel hides while gesture settings are open.
 
+### Calibrate your own hand shape
+
+1. Open **My gestures**, either under More activities or from Guide. Give the pose
+   a name and choose **What should it do?** before starting capture.
+2. Tap **Start camera for setup**. Commands stay off in practice. Face the front
+   camera with one complete, well-lit hand and keep JARVIS visible.
+3. Tap **Capture my pose**. The countdown gives three seconds to prepare; the bar
+   then fills as eight usable frames are collected. Keep your shape still. Cancel
+   capture saves nothing; Stop camera and closed fist remain available.
+4. The saved-pose confirmation shows its assigned action. Tap **Test my saved
+   pose**, lower your hand, then repeat the shape until it is recognized. Practice
+   does not run the action. **Use gestures** enables the saved mapping after a
+   fresh hand release. Change on its card can edit the action afterward.
+
+Calibration saves the pose and selected action together in My gestures. Shapes
+that collide with an existing template are rejected with an explanation. The
+countdown also advances when no hand is visible; a capture with no usable frames
+times out visibly instead of appearing stuck.
+
 | Mode                  | Default controls / setup                                                                                                                                                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phone (Android)       | Palm play/pause; thumbs up/down volume; peace flashlight on; pointing up flashlight off; love sign automatic brightness; pointing swipes up/down set brightness to 80%/30%. No PC required. Brightness can require Android's Modify system settings permission; return to JARVIS and retry after granting it. |
 | Voice / accessibility | Palm stops speech; peace holds push-to-talk, release sends; thumbs up gives feedback. Remap poses and adjust timing.                                                                                                                  |
 | Music                 | Palm play/pause; peace next; love sign previous; thumbs up/down volume; pointing up mute. Controls the device running this camera.                                                                                                    |
 | TV                    | The same controls use the existing TV bridge. Configure its connection first.                                                                                                                                                         |
@@ -65,7 +90,7 @@ minimized. The duplicate panel hides while gesture settings are open.
 | Photos                | Peace requests a photo with a visible three-second countdown. Android saves JPEG to Pictures/JARVIS (app pictures on older Android); Windows requests a JPEG save/download. Uses the analysis camera, not full camera-app resolution. |
 | Calls / meetings      | Palm mutes and peace unmutes the default system microphone where supported. An error appears if the API cannot confirm it. A meeting app may use a different input.                                                                   |
 | HUD                   | Index fingertip moves the cursor. Pinch thumb/index to select safe navigation or a HUD card; hold the pinch, move onto another card, and release to reorder. Approval buttons are excluded.                                           |
-| Custom poses          | Name a pose, start calibration, prepare during the three-second countdown and hold still for eight usable frames. Choose its action on the new gesture card. Stores up to 12 geometry templates.                                          |
+| Custom poses          | Name a pose and choose its action, start calibration, prepare during the three-second countdown and hold still for eight usable frames. Test the saved mapping in practice. Stores up to 12 geometry templates.                                          |
 
 To swipe, point your index finger and move your whole hand smoothly. A swipe
 requires at least three samples and palm translation; finger flexing or a two-frame

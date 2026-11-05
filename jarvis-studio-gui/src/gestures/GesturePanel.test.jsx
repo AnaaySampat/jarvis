@@ -48,7 +48,7 @@ async function render(value, routines = []) {
 }
 const textOf = (node) => (typeof node === "string" ? node : node.children.map(textOf).join(""));
 const button = (root, name) =>
-  root.findAllByType("button").find((node) => (node.props["aria-label"] || textOf(node)) === name);
+  root.findAllByType("button").find((node) => (node.props["aria-label"] || textOf(node).replace(/\s+/g, " ").trim()) === name);
 const tab = (root, name) =>
   root.findAllByProps({ role: "tab" }).find((node) => textOf(node) === name);
 const byLabel = (root, name) => root.findByProps({ "aria-label": name });
@@ -58,6 +58,79 @@ async function update(view, value) {
 }
 
 describe("human gesture workflows", () => {
+  it("prioritizes useful phone activities and opens the setup guide without starting the camera", async () => {
+    const value = controls("phone", { platform: "android" });
+    const view = await render(value);
+    const activities = byLabel(view.root, "Choose activity");
+    expect(activities.findAllByType("button").map((node) => node.props["aria-label"])).toEqual([
+      "Choose Phone",
+      "Choose Music",
+      "Choose Voice",
+      "Choose Read",
+      "Choose Photo",
+      "Choose Steps",
+    ]);
+    await act(async () => tab(view.root, "Guide").props.onClick());
+    const guide = byLabel(view.root, "Gesture setup guide");
+    expect(textOf(guide)).toContain("Calibration is only needed");
+    expect(textOf(guide)).toContain("hand commands pause when you switch to another app");
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.act).not.toHaveBeenCalled();
+    await act(async () => button(guide, "Practice open palm").props.onClick());
+    expect(value.setPractice).toHaveBeenCalledWith(true);
+    expect(value.setPracticeTarget).toHaveBeenCalledWith("OPEN_PALM");
+    expect(byLabel(view.root, "Guided practice")).toBeDefined();
+    expect(value.start).not.toHaveBeenCalled();
+    await act(async () => view.unmount());
+  });
+
+  it("keeps a live session paused while the guide opens action editing and resumes after saving", async () => {
+    const value = controls("phone", { platform: "android", status: { running: true } });
+    const view = await render(value);
+    await act(async () => tab(view.root, "Guide").props.onClick());
+    expect(value.setPaused).toHaveBeenLastCalledWith(true);
+    await update(view, { ...value, paused: true });
+    await act(async () => button(view.root, "Choose this gesture’s action").props.onClick());
+    expect(value.setPaused).not.toHaveBeenCalledWith(false);
+    const editor = byLabel(view.root, "Change action for Open palm");
+    await act(async () => button(editor, "Save action").props.onClick());
+    expect(value.changeConfig).toHaveBeenCalledOnce();
+    expect(value.setPaused).toHaveBeenLastCalledWith(false);
+    await act(async () => view.unmount());
+  });
+
+  it("chooses a custom pose action before capture and starts setup with commands disabled", async () => {
+    const value = controls("custom", { calibrate: vi.fn() });
+    const view = await render(value);
+    await act(async () => button(view.root, "Start camera for setup").props.onClick());
+    expect(value.setPractice).toHaveBeenCalledWith(true);
+    expect(value.setPractice.mock.invocationCallOrder[0]).toBeLessThan(
+      value.start.mock.invocationCallOrder[0],
+    );
+    await update(view, { ...value, practice: true, status: { running: true } });
+    await act(async () =>
+      byLabel(view.root, "Pose name").props.onChange({ target: { value: "My signal" } }),
+    );
+    await act(async () =>
+      byLabel(view.root, "Custom pose action").props.onChange({ target: { value: "phone.dim" } }),
+    );
+    expect(button(view.root, "Capture my pose").props.disabled).toBeFalsy();
+    await act(async () => button(view.root, "Capture my pose").props.onClick());
+    expect(value.calibrate).toHaveBeenCalledWith("My signal", "phone.dim");
+    expect(value.act).not.toHaveBeenCalled();
+    await update(view, {
+      ...value,
+      practice: true,
+      calibrating: true,
+      status: { running: true },
+      calibration: { phase: "capture", samples: 4 },
+      cancelCalibration: vi.fn(),
+    });
+    expect(byLabel(view.root, "Pose capture progress").props.value).toBe(4);
+    expect(button(view.root, "Finish teaching & enable actions")).toBeUndefined();
+    await act(async () => view.unmount());
+  });
+
   it("offers six useful activities first and switches a running camera without restarting it", async () => {
     const value = controls("voice", { status: { running: true, starting: false } });
     const view = await render(value);

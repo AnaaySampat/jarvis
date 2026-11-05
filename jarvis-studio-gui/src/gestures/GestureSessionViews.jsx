@@ -16,6 +16,11 @@ const ACTION_ICONS = {
   "timer.start": "clock",
   "mic.mute": "mute",
   "mic.unmute": "mic",
+  "phone.flashlightOn": "power",
+  "phone.flashlightOff": "power",
+  "phone.bright": "sun",
+  "phone.dim": "moon",
+  "phone.autoBrightness": "sun",
 };
 const actionIcon = (action) =>
   ACTION_ICONS[action] ||

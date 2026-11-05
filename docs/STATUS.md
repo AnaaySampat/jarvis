@@ -1,5 +1,26 @@
 # Status
 
+**2026-11-04 — Phone menu and gesture setup:** the Android header now has one
+compact row of direct, labeled shortcuts, including Gestures. At narrow widths the
+row scrolls horizontally and retains 44-pixel touch targets. Point-and-pinch can
+reach these shortcuts and the bottom navigation. Android's activity list starts
+with Phone: sound/playback, explicit flashlight on/off and brightness controls use
+the existing device dispatcher and preserve its confirmed result or failure.
+
+Guide adds numbered setup instructions, the current pose-to-action mapping,
+practice and editing links, custom calibration instructions and phone limitations.
+Custom capture chooses an action first, shows countdown/sample progress, supports
+cancel and opens practice for the saved mapping. Pose and action save together;
+practice keeps commands off until the user enables them. Phone layouts show useful
+touch controls before the camera placeholder.
+
+Validation: 716 JS tests passed (9 existing skips), TypeScript checking, lint and web
+build. Chromium checks at 320, 360, 390 and 600 pixels cover one-row navigation,
+reachable controls, guide layout, action editing and a synthetic capture → practice
+→ mapped-action → fist-stop flow. This verifies UI/policy behavior with a fake
+camera and action host, not Android permissions, real-hand accuracy or hardware
+effects. Native APK packaging and physical-phone verification remain pending.
+
 Usability follow-up, **2026-11-04**: Hands-free is a direct Home/Skills/Settings
 entry with camera-independent reading/steps, nearby named bookmarks, safe Learn
 practice, Tune presets and activity-specific status. Browser preview startup now
@@ -7,6 +28,7 @@ uses the in-app brain regardless of viewport size. Browser/unit checks are
 recorded in [the implementation report](USABILITY-IMPLEMENTATION.md). These UI
 changes have not been installed or verified on a physical Android device in this
 session; the earlier camera/gesture device evidence below is unchanged.
+
 
 **2026-11-04 — v2.5.2 build-source integration:** combined the gesture controls
 redesign with the latest upstream camera/runtime and ecosystem fixes. Android keeps

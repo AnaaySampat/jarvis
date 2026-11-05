@@ -115,11 +115,41 @@ describe("gesture hook lifecycle regressions", () => {
       0,
     ]);
     frameExtra = { landmarks: points, handCount: 1, score: 0.3 };
-    await act(async () => controls.calibrate("My shape"));
+    await act(async () => controls.calibrate("My shape", "phone.dim"));
+    expect(controls.calibration).toMatchObject({ phase: "prepare", remaining: 3, samples: 0 });
     await advance(4000);
     expect(controls.config.customPoses).toHaveLength(1);
     expect(controls.config.customPoses[0].name).toBe("My shape");
+    const id = controls.config.customPoses[0].id;
+    expect(controls.config.bindings.custom[id]).toBe("phone.dim");
+    expect(controls.calibration).toMatchObject({ phase: "saved", poseId: id, action: "phone.dim" });
+    expect(controls.calibrating).toBe(false);
     expect(host.perform).not.toHaveBeenCalled();
+  });
+  it("cancels calibration without saving a pose or running its selected action", async () => {
+    await start();
+    await act(async () => controls.setPractice(true));
+    await act(async () => controls.calibrate("Cancelled pose", "phone.flashlightOn"));
+    await advance(1000);
+    await act(async () => controls.cancelCalibration());
+    await advance(4000);
+    expect(controls.calibration).toBeNull();
+    expect(controls.calibrating).toBe(false);
+    expect(controls.config.customPoses).toHaveLength(0);
+    expect(controls.practice).toBe(true);
+    expect(host.perform).not.toHaveBeenCalled();
+    expect(controls.message).toContain("cancelled");
+  });
+  it("advances the calibration countdown even if the camera has no fresh hand frame", async () => {
+    await start();
+    publish = false;
+    await act(async () => controls.calibrate("Waiting pose"));
+    await advance(3500);
+    expect(controls.calibration).toMatchObject({ phase: "capture", samples: 0 });
+    expect(controls.config.customPoses).toHaveLength(0);
+    await advance(15000);
+    expect(controls.calibration).toMatchObject({ phase: "error" });
+    expect(controls.calibrating).toBe(false);
   });
   it("rejects newly calibrated poses that would collide with an existing template", async () => {
     const points = Array.from({ length: 21 }, (_, i) => [

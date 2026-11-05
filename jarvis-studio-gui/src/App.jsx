@@ -13,6 +13,7 @@ import { inTauri } from "./brain/tools/httpClient";
 import Onboarding from "./components/Onboarding";
 import MobileOnboarding from "./components/MobileOnboarding";
 import MobileRemotePC from "./components/MobileRemotePC";
+import MobileQuickControls from "./components/MobileQuickControls";
 import TaskPasskeyPrompt from "./components/TaskPasskeyPrompt";
 import RemoteDesktop from "./components/RemoteDesktop";
 import SetupProgress from "./components/SetupProgress";
@@ -806,7 +807,21 @@ export default function App() {
   ]);
 
   // Quick controls, in the home screen's header (the desktop's three groups).
-  const toolbar = (
+  const toolbar = IS_MOBILE ? (
+    <MobileQuickControls
+      muted={muted}
+      onMute={() => setMute(!muted)}
+      onSettings={() => openSettings()}
+      onGestures={() => openSettings("gestures")}
+      onDevices={() => setRemoteOpen(true)}
+      onTasks={() => setActivityOpen(true)}
+      onCustomize={() => setCustomizeOpen(true)}
+      onPhone={() => setPowerOpen(true)}
+      onSearch={() => setPaletteOpen(true)}
+      taskActive={anyTaskActive}
+      cameraActive={gestures.status.running}
+    />
+  ) : (
     <div className="tb" role="toolbar" aria-label="Quick controls">
       <div className="tb-group" role="group" aria-label="Voice">
         {/* Tap-to-cut: the phone has the STOP pill and the orb for this. */}

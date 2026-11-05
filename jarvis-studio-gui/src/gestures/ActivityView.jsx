@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { readerPages } from "./engine";
 import { documentId } from "./storage";
 import { timeLeft, timerLabel } from "./timers";
+import { QuickControls } from "./GestureSessionViews";
 
 export function TimerCards({ timers }) {
   const [notice, setNotice] = useState("");
@@ -349,6 +350,12 @@ export default function ActivityView({ controls, compact = false }) {
               {label}
             </button>
           ))}
+        </section>
+      )}
+      {config.mode === "phone" && (
+        <section className="activity-content" aria-label="Phone controls">
+          <p>Control sound, flashlight and brightness. Keep JARVIS visible for hand gestures.</p>
+          <QuickControls controls={controls} />
         </section>
       )}
       <TimerCards timers={controls.timers} />

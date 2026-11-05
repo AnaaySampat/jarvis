@@ -26,6 +26,13 @@ export const POSE_HELP = {
   SWIPE_DOWN: "Point your index finger up, then move your whole hand downward.",
 };
 export const ACTIVITIES = {
+  phone: {
+    name: "Phone",
+    icon: "hand",
+    description: "Control your phone’s sound, flashlight and screen brightness.",
+    prompt:
+      "No PC needed. Start music in its app, then return to JARVIS to control it. Keep JARVIS visible for hand gestures.",
+  },
   voice: {
     name: "Voice",
     icon: "mic",
@@ -103,7 +110,18 @@ export const MODE_DESCRIPTIONS = Object.fromEntries(
   Object.entries(ACTIVITIES).map(([id, value]) => [id, value.description]),
 );
 export const MAIN_ACTIVITIES = ["voice", "media", "pc", "reading", "photo", "cooking"];
+export const PHONE_ACTIVITIES = ["phone", "media", "voice", "reading", "photo", "cooking"];
 export const QUICK_ACTIONS = {
+  phone: [
+    "media.down",
+    "media.toggle",
+    "media.up",
+    "phone.flashlightOn",
+    "phone.flashlightOff",
+    "phone.autoBrightness",
+    "phone.dim",
+    "phone.bright",
+  ],
   voice: ["voice.listen", "voice.stop"],
   accessibility: ["voice.listen", "voice.stop"],
   media: ["media.previous", "media.toggle", "media.next", "media.down", "media.up", "media.mute"],
@@ -134,7 +152,7 @@ const SHORT_ACTIONS = {
 export function actionLabel(action) {
   const label =
     SHORT_ACTIONS[action] ||
-    ACTIONS[action]?.replace(/^(Music|PC|TV|Reader|Instructions): /, "") ||
+    ACTIONS[action]?.replace(/^(Phone|Music|PC|TV|Reader|Instructions): /, "") ||
     "No action";
   return label[0].toUpperCase() + label.slice(1);
 }

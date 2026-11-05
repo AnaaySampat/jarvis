@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function HeaderTools({ children }) {
+export default function HeaderTools({ children, direct = false }) {
   const [open, setOpen] = useState(false);
   const root = useRef(null);
   const trigger = useRef(null);
@@ -25,6 +25,7 @@ export default function HeaderTools({ children }) {
       node?.removeEventListener("keydown", key);
     };
   }, [open]);
+  if (direct) return <div className="home-tools">{children}</div>;
   return (
     <div className="home-tools" ref={root}>
       <button

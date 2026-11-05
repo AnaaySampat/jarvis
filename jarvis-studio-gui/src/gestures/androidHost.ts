@@ -23,6 +23,7 @@ interface HostOptions {
 export function androidGestureHost(options: HostOptions) {
   return {
     ...options,
+    platform: "android",
     async startTimer({ seconds, label, token }: { seconds: number; label: string; token: string }) {
       const result = await androidPlatform.clock.setTimer(seconds, label);
       return {
@@ -58,18 +59,27 @@ export function androidGestureHost(options: HostOptions) {
       cfg: GestureConfig,
       camera: { photo: () => Promise<ToolResult> },
     ) {
-      const device: Record<string, string> = {
-        "media.toggle": "media_play_pause",
-        "media.next": "media_next",
-        "media.previous": "media_previous",
-        "media.up": "volume_up",
-        "media.down": "volume_down",
-        "media.mute": "mute_toggle",
-        "mic.mute": "microphone_mute",
-        "mic.unmute": "microphone_unmute",
+      const device: Record<string, [string, number]> = {
+        "media.toggle": ["media_play_pause", 1],
+        "media.next": ["media_next", 1],
+        "media.previous": ["media_previous", 1],
+        "media.up": ["volume_up", 1],
+        "media.down": ["volume_down", 1],
+        "media.mute": ["mute_toggle", 1],
+        "mic.mute": ["microphone_mute", 1],
+        "mic.unmute": ["microphone_unmute", 1],
+        "phone.flashlightOn": ["flashlight_on", 1],
+        "phone.flashlightOff": ["flashlight_off", 0],
+        "phone.bright": ["brightness", 80],
+        "phone.dim": ["brightness", 30],
+        "phone.autoBrightness": ["brightness", -1],
       };
       if (device[action])
-        return options.runAction({ type: "device", do: device[action], value: 1 });
+        return options.runAction({
+          type: "device",
+          do: device[action][0],
+          value: device[action][1],
+        });
       if (action.startsWith("pc.")) return options.pcAction(action);
       const tv: Record<string, [string, string]> = {
         "tv.toggle": ["key", "play_pause"],
