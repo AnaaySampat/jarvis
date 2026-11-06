@@ -257,8 +257,6 @@ export default function Customize({ screen, onClose, onPatch, onReplayIntro }) {
           Iron Man mode”.
         </p>
 
-        {IS_MOBILE && <TopBarEditor value={s.topBar} onChange={(topBar) => onPatch({ topBar })} onReplayIntro={onReplayIntro} />}
-
         <section className="cz-sec">
           <h3>Theme</h3>
           <p className="cz-note">
@@ -518,6 +516,7 @@ export default function Customize({ screen, onClose, onPatch, onReplayIntro }) {
             })}
           </div>
         </section>
+        {IS_MOBILE && <TopBarEditor value={s.topBar} onChange={(topBar) => onPatch({ topBar })} onReplayIntro={onReplayIntro} />}
       </div>
     </Sheet>
   );

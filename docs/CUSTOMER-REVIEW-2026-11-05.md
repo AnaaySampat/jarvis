@@ -35,8 +35,7 @@ No provider credentials or external accounts were configured.
 
 The default bar shows assistant status on the left, Sound and Settings on the
 right, and Stop while working or speaking. Search and decorative branding are
-absent. **Settings → Interface → Edit top bar** opens the live editor at the start
-of Appearance. If Menu is selected, it also has an Edit top bar entry.
+absent. **Settings → Interface → Edit top bar** opens Customize, with GUI appearance controls first and the shortcut editor after the appearance sections. If Menu is selected, it also has an Edit top bar entry.
 
 People can select any number of the available buttons, reorder them, hide status and show short
 button labels. Choices include Sound, Settings, Menu, Activities, Tasks, PC & TV,

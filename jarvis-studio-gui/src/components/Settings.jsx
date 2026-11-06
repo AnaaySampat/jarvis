@@ -1596,13 +1596,13 @@ export default function Settings({
         tone: null,
         body: (
           <Group title="Home screen">
-            {IS_MOBILE && <ActionRow icon="layout" title="Edit top bar" desc="Choose buttons, their order, status and labels." onClick={onOpenCustomize} />}
             <ActionRow
               icon="palette"
               title="Customize the home screen"
               desc="Theme, colours, Modern or Iron Man, background, and which cards show."
               onClick={onOpenCustomize}
             />
+            {IS_MOBILE && <ActionRow icon="layout" title="Edit top bar" desc="Choose buttons, their order, status and labels." onClick={onOpenCustomize} />}
           </Group>
         ),
       },
