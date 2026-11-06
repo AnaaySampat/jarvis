@@ -231,7 +231,7 @@ export function createBrain(opts: BrainOptions = {}): Brain {
 
     if (!configReady(config)) {
       return {
-        reply: "I need an API key first — set one in onboarding/settings.",
+        reply: "Set up an AI provider in Settings → API Keys, then resend your request. You can read text and follow steps without a key.",
         toolResults: [],
       };
     }

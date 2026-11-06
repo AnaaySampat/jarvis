@@ -37,7 +37,7 @@ export const ACTIVITIES = {
     name: "Voice",
     icon: "mic",
     description: "Talk to JARVIS with your hands.",
-    prompt: "Hold peace to talk. Lower your hand to send.",
+    prompt: "Voice controls.",
   },
   media: {
     name: "Music",
@@ -188,3 +188,43 @@ export const RESPONSE_PRESETS = [
   },
   { name: "Quick", detail: "Shorter holds", holdMs: 350, releaseMs: 300, confidence: 0.8 },
 ];
+
+export const TASKS = ["voice", "media", "reading", "cooking", "photo", "routines"];
+export const DEVICE_TASKS = ["phone", "pc", "tv", "calls"];
+export const PRIMARY_ACTIONS = {
+  phone: ["media.down", "media.toggle", "media.up"],
+  media: ["media.previous", "media.toggle", "media.next"],
+  tv: ["tv.previous", "tv.toggle", "tv.next"],
+  pc: ["pc.previous", "pc.next"],
+  reading: ["reader.previous", "reader.speak", "reader.next"],
+  cooking: ["steps.previous", "steps.repeat", "steps.next"],
+  voice: ["voice.listen", "voice.stop"],
+  accessibility: ["voice.listen", "voice.stop"],
+  photo: ["photo.capture"],
+  calls: ["mic.mute", "mic.unmute"],
+  routines: ["routine.run"],
+};
+export const SECONDARY_ACTIONS = {
+  media: ["media.down", "media.up", "media.mute"],
+  tv: ["tv.down", "tv.up", "tv.mute"],
+  pc: ["pc.toggle", "pc.mute"],
+  reading: ["reader.bookmark", "voice.stop"],
+  cooking: ["voice.stop"],
+  phone: [
+    "phone.flashlightOn",
+    "phone.flashlightOff",
+    "phone.dim",
+    "phone.bright",
+    "phone.autoBrightness",
+  ],
+};
+export function poseForAction(config, action) {
+  const bindings = config.bindings[config.mode] || {};
+  const poses = ["SWIPE_LEFT", "SWIPE_RIGHT", "SWIPE_UP", "SWIPE_DOWN", ...Object.keys(bindings)];
+  return (
+    poses.find(
+      (pose) =>
+        bindings[pose] === action || (action === "voice.listen" && bindings[pose] === "voice.ptt"),
+    ) || null
+  );
+}

@@ -106,14 +106,11 @@ export interface GestureConfig {
   cameraId: string;
   mirror: boolean;
 }
-const voice = { OPEN_PALM: "voice.stop", PEACE: "voice.ptt", THUMBS_UP: "feedback" };
+const voice = { OPEN_PALM: "voice.stop", PEACE: "voice.listen" };
 const media = (prefix: string) => ({
   OPEN_PALM: prefix + ".toggle",
-  PEACE: prefix + ".next",
   THUMBS_UP: prefix + ".up",
   THUMBS_DOWN: prefix + ".down",
-  POINT_UP: prefix + ".mute",
-  LOVE: prefix + ".previous",
   SWIPE_LEFT: prefix + ".previous",
   SWIPE_RIGHT: prefix + ".next",
 });
@@ -127,31 +124,22 @@ export function defaults(): GestureConfig {
     bindings: {
       phone: {
         OPEN_PALM: "media.toggle",
-        PEACE: "phone.flashlightOn",
-        POINT_UP: "phone.flashlightOff",
         THUMBS_UP: "media.up",
         THUMBS_DOWN: "media.down",
-        LOVE: "phone.autoBrightness",
-        SWIPE_UP: "phone.bright",
-        SWIPE_DOWN: "phone.dim",
       },
       voice: { ...voice },
       media: media("media"),
       tv: media("tv"),
-      pc: { ...media("pc"), PEACE: "pc.next", LOVE: "pc.previous" },
+      pc: media("pc"),
       cooking: {
-        OPEN_PALM: "steps.repeat",
-        PEACE: "steps.next",
-        THUMBS_UP: "timer.start",
-        THUMBS_DOWN: "steps.previous",
-        POINT_UP: "voice.stop",
+        OPEN_PALM: "voice.stop",
+        PEACE: "steps.repeat",
+        SWIPE_LEFT: "steps.previous",
+        SWIPE_RIGHT: "steps.next",
       },
       reading: {
-        OPEN_PALM: "reader.speak",
-        PEACE: "reader.next",
-        THUMBS_UP: "reader.bookmark",
-        THUMBS_DOWN: "reader.previous",
-        POINT_UP: "voice.stop",
+        OPEN_PALM: "voice.stop",
+        PEACE: "reader.speak",
         SWIPE_LEFT: "reader.previous",
         SWIPE_RIGHT: "reader.next",
         SWIPE_UP: "reader.scrollDown",
@@ -206,6 +194,14 @@ export function sanitizeConfig(raw: unknown): GestureConfig {
   for (const mode of Object.keys(MODES)) {
     const bindings = r.bindings?.[mode];
     if (!bindings || typeof bindings !== "object") continue;
+    // Existing mappings are complete choices, including gestures left unassigned.
+    // New defaults apply only to fresh users or an explicit reset.
+    if (
+      Object.values(bindings).some(
+        (action) => typeof action === "string" && hasOwn(ACTIONS, action),
+      )
+    )
+      cfg.bindings[mode] = {};
     for (const pose of [...POSES, ...cfg.customPoses.map((p) => p.id)]) {
       const action = bindings[pose];
       if (typeof action === "string" && hasOwn(ACTIONS, action))
@@ -374,15 +370,12 @@ export class GestureEngine {
       return events;
     }
     if (this.lastFrame === null || now - this.lastFrame < 700) return [];
-    const finish = this.ptt;
-    this.ptt = false;
     const events = this.reset();
     this.recognition = {
       ...idleRecognition(),
       phase: "uncertain",
       hint: "Camera tracking stalled. Lower your hand and try again.",
     };
-    if (finish) events.unshift({ kind: "action", action: "voice.finish", pose: "UNKNOWN" });
     return events;
   }
   reset(): GestureEvent[] {
@@ -533,13 +526,13 @@ export class GestureEngine {
       if (this.releaseAt === null) this.releaseAt = now;
       if (this.ptt && now - this.releaseAt >= this.config.releaseMs) {
         this.ptt = false;
-        events.push({ kind: "action", action: "voice.finish", pose });
+        events.push({ kind: "action", action: "voice.cancel", pose });
       }
     } else {
       this.releaseAt = null;
       if (this.ptt && this.config.bindings[this.config.mode][pose] !== "voice.ptt") {
         this.ptt = false;
-        events.push({ kind: "action", action: "voice.finish", pose });
+        events.push({ kind: "action", action: "voice.cancel", pose });
       }
     }
     if (this.needsNeutral) return events;

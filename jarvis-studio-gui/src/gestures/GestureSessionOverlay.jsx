@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icon } from "./GestureIcon";
-import { ACTIVITIES, actionLabel, poseLabel } from "./presentation";
+import GestureGlyph from "./GestureGlyph";
+import { ACTIVITIES } from "./presentation";
 import { ActivityContent, CameraView, SessionFeedback } from "./GestureSessionViews";
 import "./gestures.css";
 
@@ -8,9 +9,6 @@ export default function GestureSessionOverlay({ controls, onOpen }) {
   const [minimized, setMinimized] = useState(false);
   const { config, status, cursor } = controls;
   const active = status.running || status.starting;
-  const shortcuts = Object.entries(config.bindings[config.mode])
-    .filter(([pose, action]) => pose !== "FIST" && !["none", "feedback"].includes(action))
-    .slice(0, 3);
   return (
     <>
       {cursor && active && config.mode === "hud" && !controls.paused && !controls.practice && (
@@ -36,7 +34,7 @@ export default function GestureSessionOverlay({ controls, onOpen }) {
             <div className="gesture-workspace__buttons">
               {onOpen && (
                 <button type="button" onClick={onOpen}>
-                  Open Hands-free
+                  Open activities
                 </button>
               )}
               <button
@@ -54,8 +52,14 @@ export default function GestureSessionOverlay({ controls, onOpen }) {
               >
                 <Icon name={minimized ? "chevUp" : "chevDown"} size={16} />
               </button>
-              <button type="button" className="gesture-stop" onClick={controls.stop}>
+              <button
+                type="button"
+                className="gesture-stop"
+                aria-label="Stop camera"
+                onClick={controls.stop}
+              >
                 <Icon name="stop" size={14} />
+                <GestureGlyph pose="FIST" size={24} />
                 Stop camera
               </button>
             </div>
@@ -64,29 +68,16 @@ export default function GestureSessionOverlay({ controls, onOpen }) {
             <div className="gesture-workspace__body">
               <SessionFeedback controls={controls} />
               {controls.practice ? (
-                <p className="gesture-notice">
-                  Learning only. Commands are off. Open Settings → Gestures → Learn for guided
-                  practice.
-                </p>
+                <p className="gesture-notice">Testing · actions off</p>
               ) : (
-                <ActivityContent controls={controls} location="workspace" />
+                <ActivityContent controls={controls} location="workspace" simple />
               )}
-              <details className="gesture-source">
-                <summary>Gesture reminders</summary>
-                <ul className="gesture-shortcuts">
-                  {shortcuts.map(([pose, action]) => (
-                    <li key={pose}>
-                      <strong>{poseLabel(pose, config)}</strong>
-                      <span>{actionLabel(action)}</span>
-                    </li>
-                  ))}
-                  <li>
-                    <strong>Closed fist</strong>
-                    <span>Stop camera</span>
-                  </li>
-                </ul>
-                {controls.camera.preview && <CameraView controls={controls} />}
-              </details>
+              {controls.camera.preview && (
+                <details className="gesture-source">
+                  <summary>Camera</summary>
+                  <CameraView controls={controls} simple />
+                </details>
+              )}
             </div>
           )}
         </aside>

@@ -90,7 +90,7 @@ it("shows practice guidance instead of command buttons during learning", async (
     view = create(<GestureWorkspace controls={valueFor({ practice: true })} />);
   });
   expect(view.root.findAllByProps({ "aria-label": "Touch controls" })).toHaveLength(0);
-  expect(textOf(view.root)).toContain("Learning only. Commands are off.");
+  expect(textOf(view.root)).toContain("Testing · actions off");
   expect(button(view.root, "Stop camera")).toBeDefined();
   await act(async () => view.unmount());
 });

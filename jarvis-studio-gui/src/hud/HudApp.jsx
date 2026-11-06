@@ -293,6 +293,7 @@ export function JarvisHUD({
         weather={weather}
         open={p("weather")}
         onToggle={tog("weather")}
+        onOpenLocation={() => onOpenSettings("location")}
       />
     ),
     network: (
@@ -359,7 +360,7 @@ export function JarvisHUD({
       {hudCards && <div className="im-frame" aria-hidden="true" />}
 
       <header className="home-top">
-        {!IS_MOBILE && <button type="button" className="home-hands-free" onClick={onOpenHandsFree}>Hands-free</button>}
+        {!IS_MOBILE && <button type="button" className="home-hands-free" onClick={onOpenHandsFree}>Activities</button>}
         <div className="home-brand">
           <span className="home-logo" aria-hidden />
           <span className="home-name">JARVIS</span>
@@ -569,6 +570,8 @@ export function JarvisHUD({
         onRefreshConversations={onRefreshConversations}
         onClearConversations={onClearConversations}
         prefill={prefill}
+        providerRequired={Boolean(sysInfo?.needs_setup)}
+        onSetupProvider={() => onOpenSettings("keys")}
         onListen={onListen}
         conversationMode={conversationMode}
         onConversationMode={onConversationMode}

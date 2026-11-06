@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { applyScreenAction, cleanLook, moveInColumn, patchScreenConfig } from "./screenConfig";
+import { applyScreenAction, cleanLook, moveInColumn, patchScreenConfig, loadScreenConfig } from "./screenConfig";
+import { cleanTopBar, DEFAULT_TOP_BAR, TOP_BAR_ACTIONS } from "./topBarConfig";
 import { toolPalette } from "../tools/registry";
 
 /** Minimal Storage stub — this suite runs in node, which has no localStorage.
@@ -232,5 +233,34 @@ describe("moveInColumn (the phone's one-column order)", () => {
 
   it("falls back to the default layout when nothing is stored", () => {
     expect(moveInColumn(undefined, "system", 1).left).toEqual(["power", "system", "agenda"]);
+  });
+});
+
+describe("saved Android top bar", () => {
+  beforeEach(() => Object.defineProperty(globalThis, "localStorage", { configurable: true, value: new TestStorage() }));
+  afterEach(() => { Reflect.deleteProperty(globalThis, "localStorage"); });
+  it("preserves choices and ordering across reloads and unrelated appearance changes", () => {
+    const topBar = { showStatus: false, showLabels: true, buttons: ["tasks", "menu", "devices"] as const };
+    patchScreenConfig({ topBar: { ...topBar, buttons: [...topBar.buttons] } });
+    expect(loadScreenConfig()?.topBar).toEqual(topBar);
+    patchScreenConfig({ accent: "amber", style: "ironman" });
+    expect(loadScreenConfig()?.topBar).toEqual(topBar);
+    patchScreenConfig({ reset: true });
+    expect(cleanTopBar(loadScreenConfig()?.topBar)).toEqual(DEFAULT_TOP_BAR);
+  });
+  it("validates persisted buttons without truncating choices and retains an editor route", () => {
+    expect(cleanTopBar(undefined)).toEqual(DEFAULT_TOP_BAR);
+    const clean = cleanTopBar({ showStatus: "no", showLabels: true, buttons: ["tasks", "tasks", "__proto__", "devices", "phone", "sound"] });
+    expect(clean).toEqual({ showStatus: true, showLabels: true, buttons: ["tasks", "devices", "phone", "sound", "settings"] });
+    expect(cleanTopBar({ buttons: [] }).buttons).toEqual(["settings"]);
+    expect(cleanTopBar({ buttons: ["menu"] }).buttons).toEqual(["menu"]);
+    const first = cleanTopBar(); first.buttons.pop();
+    expect(cleanTopBar()).toEqual(DEFAULT_TOP_BAR);
+  });
+  it("persists every available shortcut in the chosen order across unrelated updates", () => {
+    const buttons = Object.keys(TOP_BAR_ACTIONS).reverse() as (keyof typeof TOP_BAR_ACTIONS)[];
+    patchScreenConfig({ topBar: { showStatus: false, showLabels: true, buttons } });
+    patchScreenConfig({ accent: "amber" });
+    expect(loadScreenConfig()?.topBar?.buttons).toEqual(buttons);
   });
 });

@@ -6,10 +6,13 @@ is inconvenient. Physical-device accuracy and battery testing are still required
 
 ## Start using controls
 
-1. On Android, tap **Gestures** in the single top action row. You can also open
-   **Settings → Gestures**, or find **Settings: Gestures** in the command palette.
-   Android puts Phone, Music, Voice, Read, Photo and Steps first; Slides and other
-   activities are under **More activities**. Voice settings also link to this page.
+1. On Android, open **Settings → Activities & gestures**. You can also use an
+   Activities or Menu shortcut if you have added one to your top bar, or find
+   **Activities** in the command palette.
+   All entry points open the same workspace. Use its **Activity** picker for Read,
+   Steps, Music, Photo, Slides, My gestures and other activities. Voice settings
+   also link to this workspace. Home offers **Read text** and **Follow steps**
+   directly, including immediately after **Explore without an AI key**.
    Open **Guide** or **Set up, learn & calibrate** for numbered instructions covering
    phone placement, practice, gesture-to-action mapping and custom calibration.
    Built-in hand shapes do not need calibration. Guide pauses an active session;
@@ -17,7 +20,12 @@ is inconvenient. Physical-device accuracy and battery testing are still required
 2. **Control** has illustrated gesture cards and real touch buttons for the current
    activity. Buttons work with the camera off, except photo capture. Read lets you
    paste text and turn pages; Steps keeps the current instruction and timer at hand.
-   Actual command results appear below the preview and in **Recent actions**.
+   Finish entering text with **Done editing**. Existing Read and Steps content opens
+   in a focused view; **Show activity setup** brings back the picker, Guide, Learn
+   and Tune. Camera setup stays collapsed while the camera is off. Text, bookmarks
+   and gesture preferences save automatically on this device. An action editor
+   applies its draft when you choose **Save action**. Actual command results appear
+   below the preview and in **Recent actions**.
 3. Open **Learn**, or tap **Learn** on a gesture card. Practice targets one pose at a
    time, shows finger placement and hold progress, and confirms only the target
    actually recognized. Start practice explicitly to turn on the camera. Commands
@@ -42,6 +50,15 @@ Windows stops its camera on minimize, navigation, permission loss or disconnect.
 Both platforms block commands while approval or clarification is pending. TV and
 PC activities show connection/setup instructions; setup does not bypass approvals.
 
+## Customize the Android top bar
+
+Open **Settings → Interface → Edit top bar**. Choose up to three buttons, reorder
+them with the left/right arrows, and show or hide assistant status and button
+labels. Changes apply live and are saved on this device. **Reset top bar** restores
+status, Sound and Settings without changing the rest of your appearance. Keep
+Settings or Menu so you can return to the editor. Stop remains available while
+JARVIS is working or speaking, even when status is hidden.
+
 ## Modes and defaults
 
 Tap **Change** on a gesture card to edit its action in place. Actions relevant to
@@ -56,11 +73,11 @@ mirroring and optional detailed sliders. Stop the camera before changing timing 
 camera settings. Defaults are 600 ms hold, 400 ms release and 80% confidence.
 Restore default actions affects only the selected activity. The floating session
 panel includes Pause/Resume, Stop, touch controls and gesture reminders, and can be
-minimized. The duplicate panel hides while gesture settings are open.
+minimized. The floating panel hides while the activity workspace is open.
 
 ### Calibrate your own hand shape
 
-1. Open **My gestures**, either under More activities or from Guide. Give the pose
+1. Open **My gestures**, from the Activity picker or from Guide. Give the pose
    a name and choose **What should it do?** before starting capture.
 2. Tap **Start camera for setup**. Commands stay off in practice. Face the front
    camera with one complete, well-lit hand and keep JARVIS visible.

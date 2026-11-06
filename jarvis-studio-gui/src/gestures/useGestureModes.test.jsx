@@ -3,7 +3,7 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { useGestureModes } from "./useGestureModes";
 import { documentId } from "./storage";
-import { poseFeatures } from "./engine";
+import { defaults, poseFeatures } from "./engine";
 let controls,
   renderer,
   camera,
@@ -28,6 +28,9 @@ beforeEach(async () => {
   vi.useFakeTimers();
   vi.setSystemTime(T);
   store = new Map();
+  const legacy = defaults();
+  legacy.bindings.voice.PEACE = "voice.ptt";
+  store.set("jarvis.gestures.v2", JSON.stringify(legacy));
   saved = vi.fn((k, v) => store.set(k, v));
   vi.stubGlobal("localStorage", { getItem: (k) => store.get(k) || null, setItem: saved });
   const doc = new EventTarget();
@@ -241,15 +244,16 @@ describe("gesture hook lifecycle regressions", () => {
     await show("OPEN_PALM");
     expect(host.stopSpeech).toHaveBeenCalledTimes(2);
   });
-  it("ticks stalled frames and ends only its own admitted PTT", async () => {
+  it("cancels its own admitted PTT when frames stall", async () => {
     await start();
     await show("PEACE");
     expect(host.pttStart).toHaveBeenCalledTimes(1);
+    expect(host.finishListen).not.toHaveBeenCalled();
     publish = false;
     await advance(1000);
-    expect(host.finishListen).toHaveBeenCalledTimes(1);
+    expect(host.cancelListen).toHaveBeenCalledTimes(1);
     await advance(1000);
-    expect(host.finishListen).toHaveBeenCalledTimes(1);
+    expect(host.cancelListen).toHaveBeenCalledTimes(1);
   });
   it("does not finish when canListen rejected the start", async () => {
     props = { ...props, canListen: false };
@@ -598,4 +602,59 @@ it("keeps the current step status when older speech finishes after manual naviga
   });
   expect(controls.step).toBe(2);
   expect(controls.message).toBe("Step 3.");
+});
+
+it("keeps camera-off instructions accurate after leaving practice or unpausing", async () => {
+  await act(async () => controls.setPractice(true));
+  expect(controls.message).toContain("Camera is off");
+  await act(async () => controls.setPractice(false));
+  expect(controls.message).toContain("use the buttons");
+  expect(controls.message).not.toContain("Lower your hand");
+  await act(async () => controls.setPaused(false));
+  expect(controls.message).toContain("Camera is off");
+  await start();
+  await act(async () => controls.setPractice(false));
+  expect(controls.message).toContain("Lower your hand");
+});
+
+it("clears a failed step timer when changing activity without discarding text", async () => {
+  host.startTimer = vi.fn(async () => ({ ok: false, summary: "Native timer unavailable" }));
+  await act(async () =>
+    controls.changeConfig({ mode: "cooking", steps: "Boil water", reader: "Saved reading" }),
+  );
+  await act(async () => controls.timers.start(10, "Step 1"));
+  expect(controls.timers.error).toBe("Native timer unavailable");
+  await act(async () => controls.switchMode("reading"));
+  expect(controls.timers.error).toBe("");
+  expect(controls.config.reader).toBe("Saved reading");
+  expect(controls.config.steps).toBe("Boil water");
+});
+
+it("opens direct local activities in Control after leaving Learn and preserves a paused camera", async () => {
+  await act(async () => controls.setPractice(true));
+  expect(controls.practice).toBe(true);
+  await act(async () => controls.openActivity("reading"));
+  expect(controls.config.mode).toBe("reading");
+  expect(controls.practice).toBe(false);
+  expect(controls.message).toContain("Camera is off");
+  expect(camera.start).not.toHaveBeenCalled();
+  await start();
+  await act(async () => controls.setPaused(true));
+  await act(async () => controls.openActivity("cooking"));
+  expect(controls.config.mode).toBe("cooking");
+  expect(controls.paused).toBe(true);
+  expect(controls.status.running).toBe(true);
+  expect(controls.message).toContain("Gestures paused");
+});
+
+it("starts one-shot voice without tying the recording to camera tracking", async () => {
+  await act(async () => controls.changeConfig({ bindings: defaults().bindings }));
+  await start();
+  await show("PEACE");
+  expect(host.listen).toHaveBeenCalledOnce();
+  expect(host.pttStart).not.toHaveBeenCalled();
+  publish = false;
+  await advance(1500);
+  expect(host.finishListen).not.toHaveBeenCalled();
+  expect(host.cancelListen).not.toHaveBeenCalled();
 });

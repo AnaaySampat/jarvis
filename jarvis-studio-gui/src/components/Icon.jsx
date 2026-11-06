@@ -40,6 +40,7 @@ const P = {
   alert: "M12 3.5 22 20H2L12 3.5Z M12 10v4 M12 17h.01",
   shield: "M12 3l8 3v6c0 4.4-3.3 8.2-8 9-4.7-.8-8-4.6-8-9V6l8-3Z M12 8.5v4 M12 15.5h.01",
   close: "M6 6l12 12M18 6 6 18",
+  more: "M12 5h.01M12 12h.01M12 19h.01",
   check: "M5 12.5l4.5 4.5L19 7",
   cloud: "M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.6 1.5A3.3 3.3 0 0 0 7 18Z",
   // ── weather (the phone's Weather card; the brain's WMO table still hands out emoji) ──

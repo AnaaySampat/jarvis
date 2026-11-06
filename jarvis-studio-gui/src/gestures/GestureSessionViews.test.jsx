@@ -59,7 +59,12 @@ it("disables reader boundary controls while leaving valid reading actions availa
   await act(async () =>
     view.update(<QuickControls controls={{ ...value, config: { ...value.config, reader: "" } }} />),
   );
-  expect(view.root.findAllByType("button").every((node) => node.props.disabled)).toBe(true);
+  expect(
+    view.root
+      .findAllByType("button")
+      .filter((node) => node.props["data-action"]?.startsWith("reader."))
+      .every((node) => node.props.disabled),
+  ).toBe(true);
   await act(async () => view.unmount());
 });
 
@@ -172,5 +177,22 @@ it("keeps the reading editor open when the first typed character creates a page"
     ),
   );
   expect(view.root.findByType("details").props.open).toBe(true);
+  await act(async () => view.unmount());
+});
+
+it("keeps local reading controls usable without a supported gesture camera", async () => {
+  const value = valueFor("reading", {
+    supported: false,
+    config: { ...defaults(), mode: "reading", reader: "First.\n\nSecond." },
+    status: { running: false },
+  });
+  let view;
+  await act(async () => {
+    view = create(<QuickControls controls={value} />);
+  });
+  const next = named(view.root, "Next page");
+  expect(next.props.disabled).toBeFalsy();
+  await act(async () => next.props.onClick());
+  expect(value.act).toHaveBeenCalledWith("reader.next");
   await act(async () => view.unmount());
 });

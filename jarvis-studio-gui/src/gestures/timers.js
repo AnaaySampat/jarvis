@@ -258,6 +258,7 @@ export function useActivityTimers(host) {
     timers,
     now,
     error,
+    clearError: () => setError(""),
     busy,
     start,
     cancel,

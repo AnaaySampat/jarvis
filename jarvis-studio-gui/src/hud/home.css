@@ -4,6 +4,18 @@
    solid / aurora / minimal / image) and density (normal / compact); the HUD card style
    and font are ironman.css. The panels that open on top are hud.css. */
 
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+.app-shell > .hud {
+  flex: 1;
+  min-height: 0;
+}
+
 .home {
   --h-bg: #0a0c10;
   --h-card: #11151b;
@@ -484,33 +496,10 @@
 .home--phone .im-tag { white-space: normal; letter-spacing: 0.3em; line-height: 1.8; }
 .home--phone .home-top {
   height: auto; min-height: 56px; gap: 0; flex-wrap: nowrap;
-  padding: env(safe-area-inset-top, 0px) max(4px, env(safe-area-inset-right, 0px)) 0 max(4px, env(safe-area-inset-left, 0px));
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
 }
 .home--phone .home-brand { display: none; }
 .home--phone .home-tools { width: 100%; min-width: 0; flex: 1; }
-.mobile-quick-controls {
-  display: flex; flex-wrap: nowrap; align-items: center;
-  width: 100%; overflow-x: auto; overscroll-behavior-x: contain;
-  scrollbar-width: thin; scrollbar-color: var(--h-line-2) transparent;
-  padding: 3px 0;
-}
-.mobile-quick-controls button {
-  position: relative; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 4px; flex: 1 0 44px;
-  min-width: 44px; min-height: 48px; padding: 4px 2px;
-  border: 0; border-radius: var(--h-r-s); background: none;
-  color: var(--h-t2); font: 10px/1.2 var(--body); cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.mobile-quick-controls button span { white-space: nowrap; }
-.mobile-quick-controls button:is(:active, [aria-pressed="true"]) {
-  color: var(--ac); background: color-mix(in oklab, var(--ac) 9%, transparent);
-}
-.mobile-quick-controls button.is-active svg { color: var(--ac); }
-.mobile-quick-controls button i {
-  position: absolute; top: 3px; left: calc(50% + 9px);
-  width: 5px; height: 5px; border-radius: 50%; background: var(--ac);
-}
 /* overflow-x: the column only ever scrolls up and down; nothing in it may slide it sideways */
 .home--phone .home-main { padding: 12px 14px 20px; gap: 12px; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
 /* the agent row as wide as the ask box (the desktop's rule), scrolling inside itself */
@@ -570,6 +559,10 @@
 .home--cards-hud .home-tab.is-on { background: color-mix(in oklab, var(--ac) 14%, transparent); color: var(--ac); }
 .home--cards-hud .home-tab-mic { box-shadow: 0 0 0 5px var(--h-bg), 0 0 22px var(--im-glow); }
 .home--font-hud .home-tab span { font-family: var(--disp); font-size: 8.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+@media (max-width: 390px) {
+  .home-tabs { grid-template-columns: 1fr 1fr 64px 1fr minmax(80px, 1.25fr); }
+  .home--font-hud .home-tab span { letter-spacing: 0.03em; }
+}
 
 /* No hover on a touch screen: the agenda's edit and remove buttons always show. */
 @media (hover: none) {
@@ -671,3 +664,6 @@
   .home .home-nav { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
   .home .home-nav::-webkit-scrollbar { display: none; }
 }
+
+.cv-provider-setup { margin-top: 10px; }
+.cv-provider-setup p { color: var(--text-sec); font-size: 12px; line-height: 1.5; }

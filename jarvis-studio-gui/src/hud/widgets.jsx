@@ -565,7 +565,7 @@ const aqiTone = (a) =>
   a <= 50 ? "Good" : a <= 100 ? "Moderate" : a <= 150 ? "Unhealthy for some" : "Unhealthy";
 const sentence = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : "");
 
-export function WeatherWidget({ weather, open, onToggle }) {
+export function WeatherWidget({ weather, open, onToggle, onOpenLocation }) {
   const w = weather || {};
   const has = w.temp != null;
   const temp = has ? `${Math.round(n0(w.temp))}°` : "—";
@@ -588,8 +588,9 @@ export function WeatherWidget({ weather, open, onToggle }) {
       {!has ? (
         <div className="wd-empty">
           {IS_MOBILE
-            ? "Finding your location. If no forecast appears, set one in Settings ▸ Files & Location."
+            ? "Finding your location. If no forecast appears, set one in Settings → Location."
             : "Finding your location…"}
+          {onOpenLocation && <button type="button" className="sp-btn" onClick={onOpenLocation}>Set location</button>}
         </div>
       ) : (
         <>

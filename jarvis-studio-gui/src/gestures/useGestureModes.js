@@ -160,11 +160,31 @@ export function useGestureModes({
         setPracticeTargetState(null);
         passedRef.current = [];
         setPracticePassed([]);
+        timersRef.current.clearError?.();
         setMessage(running.current ? "Lower your hand, then use your new controls." : "");
       }
       setConfigState(next);
     },
     [resetInteraction],
+  );
+  // A direct Read/Steps entry opens controls, even if Learn was left open.
+  // Keep an explicitly paused camera paused and require a fresh hand release.
+  const openActivity = useCallback(
+    (mode) => {
+      if (!hasOwn(MODES, mode)) return;
+      changeConfig({ mode });
+      practiceRef.current = false;
+      setPracticeState(false);
+      resetInteraction();
+      setMessage(
+        !running.current
+          ? "Camera is off. You can use the buttons."
+          : pausedRef.current
+            ? "Gestures paused. You can still use the buttons."
+            : "Lower your hand, then use your new controls.",
+      );
+    },
+    [changeConfig, resetInteraction],
   );
   const setPractice = (value) => {
     practiceRef.current = Boolean(value);
@@ -173,7 +193,13 @@ export function useGestureModes({
     setPausedState(false);
     resetInteraction();
     setMessage(
-      value ? "Practice only. No commands will run." : "Lower your hand to start using gestures.",
+      running.current
+        ? value
+          ? "Practice only. No commands will run."
+          : "Lower your hand to start using gestures."
+        : value
+          ? "Camera is off. Start practice when you are ready."
+          : "Camera is off. You can use the buttons.",
     );
   };
   const changeBookmarks = (update) => {
@@ -253,7 +279,10 @@ export function useGestureModes({
         return;
       }
       if (event.kind === "action" && event.action === "voice.cancel") {
+        const interrupted = pttOwned.current;
         cancelPtt();
+        if (interrupted && running.current && !context.current.blocked && !document.hidden)
+          setMessage("Recording cancelled: tracking lost.");
         return;
       }
       if (practiceRef.current || (pausedRef.current && event.pose !== "manual")) return;
@@ -446,7 +475,11 @@ export function useGestureModes({
             epoch === session.current &&
             (!navigation(action) || selectionRevision === navigationRevision.current)
           )
-            setMessage(summary);
+            setMessage(
+              action === "timer.start" && cfg.mode === "cooking" && result?.ok === false
+                ? ""
+                : summary,
+            );
         }
       } catch (error) {
         if (alive.current) {
@@ -764,6 +797,7 @@ export function useGestureModes({
   };
   return {
     config,
+    openActivity,
     status,
     busy,
     timers,
@@ -785,7 +819,9 @@ export function useGestureModes({
       setMessage(
         value
           ? "Gestures paused. You can still use the buttons."
-          : "Lower your hand, then resume gestures.",
+          : running.current
+            ? "Lower your hand, then resume gestures."
+            : "Camera is off. You can use the buttons.",
       );
     },
     practiceTarget,

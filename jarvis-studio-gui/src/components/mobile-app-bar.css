@@ -1,0 +1,284 @@
+/* Personal Android header. Defaults: assistant status, Sound and Settings. */
+.mobile-app-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 56px;
+  width: 100%;
+  padding: 0 8px 0 16px;
+}
+.mobile-app-bar__status-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 32%;
+  flex: 0 0 auto;
+}
+.mobile-app-bar__status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--h-t2);
+  font: 500 13px/1.4 var(--body);
+}
+.mobile-app-bar__actions {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  gap: 4px;
+}
+.mobile-app-bar button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--h-t2);
+  font: 500 12px/1.3 var(--body);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-app-bar button:active,
+.mobile-app-bar button[aria-pressed="true"] {
+  color: var(--ac);
+  background: color-mix(in srgb, var(--ac) 9%, transparent);
+}
+.mobile-app-bar .mobile-app-bar__stop {
+  flex-shrink: 0;
+  padding: 0 8px;
+  color: #ff9da7;
+}
+.mobile-app-bar__actions.has-labels button {
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  font-size: 10px;
+}
+.mobile-app-bar button:focus-visible,
+.mobile-tools-sheet button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Reuse the app's modal/back-button handling in a compact tools sheet. */
+.settings-overlay:has(> .mobile-tools-sheet) {
+  align-items: flex-end;
+  padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(10px, env(safe-area-inset-bottom, 0px));
+}
+.sp.mobile-tools-sheet {
+  width: min(420px, 100%);
+  height: auto;
+  max-height: 100%;
+  border: 1px solid var(--sp-line-2);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 16px 60px #0008;
+}
+.mobile-tools-sheet .sp-hdr {
+  min-height: 60px;
+  padding: 4px 12px 0 22px;
+  border: 0;
+}
+.mobile-tools-sheet .sp-title {
+  font-size: 17px;
+}
+.mobile-tools-sheet .sp-body {
+  flex: 0 1 auto;
+  padding: 0 10px 10px;
+}
+.mobile-tools-list {
+  display: flex;
+  flex-direction: column;
+}
+.mobile-tools-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 51px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-pri);
+  font: 500 14px/1.4 var(--body);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-tools-item > .icon {
+  flex-shrink: 0;
+  color: var(--text-sec);
+}
+.mobile-tools-item > .icon:last-child {
+  opacity: 0.5;
+}
+.mobile-tools-item__text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.mobile-tools-item__text small {
+  color: var(--text-sec);
+  font: 400 12px/1.4 var(--body);
+}
+.mobile-tools-item__state {
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mobile-tools-item:hover,
+.mobile-tools-item:active {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.mobile-tools-sound {
+  margin-top: 8px;
+  border-top: 1px solid var(--sp-line);
+  border-radius: 0 0 12px 12px;
+  padding-top: 16px;
+}
+.mobile-tools-switch {
+  flex: 0 0 34px;
+  height: 20px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--sp-line-2);
+}
+.mobile-tools-switch::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-sec);
+  transition: transform 0.15s;
+}
+.mobile-tools-sound[aria-checked="true"] .mobile-tools-switch {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.mobile-tools-sound[aria-checked="true"] .mobile-tools-switch::before {
+  background: var(--accent);
+  transform: translateX(14px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-tools-switch::before {
+    transition: none;
+  }
+}
+
+/* Top-bar editor in Appearance. */
+.top-bar-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 12px;
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #090d12;
+  color: var(--text-sec);
+}
+.top-bar-preview > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.top-bar-preview > span { flex: 0 0 auto; }
+.top-bar-preview__button {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 32px;
+}
+.top-bar-preview__button small {
+  font-size: 9px;
+}
+.top-bar-editor__option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.top-bar-editor__selected {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.top-bar-editor__selected li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.top-bar-editor__selected li > span {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.top-bar-editor__selected li > span small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-sec);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.top-bar-editor__selected .cz-move {
+  width: 40px;
+  min-height: 44px;
+}
+.top-bar-editor__selected li > .icon {
+  flex: 0 0 18px;
+  margin-right: 4px;
+}
+.top-bar-editor__available {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.top-bar-editor__available button {
+  flex: 1 1 220px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  height: auto;
+  white-space: normal;
+  text-align: left;
+  min-height: 44px;
+}
+.top-bar-editor__available button > .icon { flex-shrink: 0; }
+.top-bar-editor__available button span { min-width: 0; }
+.top-bar-editor__available button small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-sec);
+  font: 400 11px/1.5 var(--body);
+  white-space: normal;
+}

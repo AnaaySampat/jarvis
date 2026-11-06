@@ -56,7 +56,11 @@ export function SkillsOverlay({
       onClose={onClose}
     >
       <div className="sp-sheet">
-        <Group title="Hands-free"><ActionRow icon="skills" title="Read, Steps and Music" desc="Activities and gesture practice." onClick={() => { onClose(); onOpenHandsFree?.(); }} /></Group>
+        <Group title="Activities">
+          <ActionRow icon="skills" title="Read text" desc="Read and save bookmarks without an AI key." onClick={() => { onClose(); onOpenHandsFree?.("reading"); }} />
+          <ActionRow icon="skills" title="Follow steps" desc="Keep your place in a recipe or instructions." onClick={() => { onClose(); onOpenHandsFree?.("cooking"); }} />
+          <ActionRow icon="hand" title="All activities & gestures" desc="Music, setup, practice and your own poses." onClick={() => { onClose(); onOpenHandsFree?.(); }} />
+        </Group>
         <Group title="QR code">
           <Field hint="Anyone who scans it gets this link or text.">
             <div className="sp-inline">
@@ -970,7 +974,7 @@ function AgentMessage({ m }) {
   );
 }
 
-const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy }) {
+const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy, onSetupProvider }) {
   if (m.role === "agents") return <AgentMessage m={m} />;
   const user = m.role === "user";
   return (
@@ -986,6 +990,10 @@ const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy }) {
           <ResponseRenderer text={m.text} actions={m.actions} runAction={runAction} />
         )}
       </div>
+      {!user && onSetupProvider && <div className="cv-provider-setup">
+        <button type="button" className="sp-btn sp-btn--primary" onClick={onSetupProvider}>Set up an AI provider</button>
+        <p>Your conversation stays here. Close Settings to return, then resend your request.</p>
+      </div>}
       {!user && !m.streaming && m.text && onCopy && (
         <button
           type="button"
@@ -1057,6 +1065,8 @@ export function AgentRow({ active = "auto", pcPaired, onPick }) {
 }
 
 export function ChatOverlay({
+  providerRequired = false,
+  onSetupProvider,
   open,
   onClose,
   status,
@@ -1361,7 +1371,8 @@ export function ChatOverlay({
     >
       <div className="cv" aria-live="polite">
         {messages.map((m) => (
-          <ChatMessage key={m.id} m={m} runAction={runAction} onCopy={copy} />
+          <ChatMessage key={m.id} m={m} runAction={runAction} onCopy={copy}
+            onSetupProvider={providerRequired && m === messages.at(-1) && messages.some((item) => item.role === "user") ? onSetupProvider : undefined} />
         ))}
         {/* Until you've said something — the launch greeting alone used to hide these. */}
         {!messages.some((m) => m.role === "user") && (

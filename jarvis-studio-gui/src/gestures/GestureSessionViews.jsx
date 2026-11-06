@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./GestureIcon";
 import { readerPages } from "./engine";
-import { QUICK_ACTIONS, ACTIVITIES, actionLabel } from "./presentation";
+import {
+  QUICK_ACTIONS,
+  ACTIVITIES,
+  PRIMARY_ACTIONS,
+  SECONDARY_ACTIONS,
+  actionLabel,
+} from "./presentation";
 import GestureGlyph from "./GestureGlyph";
 import GestureFeedback from "./GestureFeedback";
+import ActionButton from "./ActionButton";
+import "./tasks.css";
 
 const ACTION_ICONS = {
   "voice.listen": "mic",
@@ -46,66 +54,84 @@ function SourceEditor({ initialOpen, children, summary }) {
   );
 }
 
-export function QuickControls({ controls }) {
+export function QuickControls({ controls, actions: selectedActions, onAction }) {
   const cfg = controls.config;
   const pages = readerPages(cfg.reader);
   const steps = cfg.steps
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-  const actions = QUICK_ACTIONS[cfg.mode] || [];
+  const primary =
+    selectedActions ||
+    PRIMARY_ACTIONS[cfg.mode] ||
+    (cfg.mode === "custom"
+      ? [
+          ...new Set(
+            Object.values(cfg.bindings.custom).filter(
+              (action) => !["none", "feedback"].includes(action),
+            ),
+          ),
+        ]
+      : QUICK_ACTIONS[cfg.mode]) ||
+    [];
+  const secondary = selectedActions ? [] : SECONDARY_ACTIONS[cfg.mode] || [];
+  const actions = [...primary, ...secondary];
   if (!actions.length) return null;
   const unavailable = controls.availability?.[cfg.mode]?.ready === false;
+  const renderAction = (action, main) => {
+    const empty =
+      (action.startsWith("reader.") && !pages.length) ||
+      (action.startsWith("steps.") && !steps.length) ||
+      (action === "routine.run" && !cfg.routineName);
+    const boundary =
+      (action === "reader.previous" && controls.page <= 0) ||
+      (action === "reader.next" && controls.page >= pages.length - 1) ||
+      (action === "steps.previous" && controls.step <= 0) ||
+      (action === "steps.next" && controls.step >= steps.length - 1);
+    const label =
+      action === "timer.start"
+        ? `Start ${Math.round((cfg.timerSeconds / 60) * 10) / 10} min timer`
+        : action === "voice.listen" && controls.listening
+          ? "Finish listening"
+          : actionLabel(action);
+    return (
+      <ActionButton
+        key={action}
+        controls={controls}
+        action={action}
+        label={label}
+        icon={actionIcon(action)}
+        primary={
+          main &&
+          (action.endsWith(".toggle") ||
+            ["photo.capture", "reader.speak", "steps.repeat", "voice.listen"].includes(action))
+        }
+        disabled={
+          (controls.supported === false && !/^(reader|steps|voice)\./.test(action)) ||
+          (action === "photo.capture" && !controls.status.running) ||
+          controls.practice ||
+          controls.blocked ||
+          unavailable ||
+          empty ||
+          boundary
+        }
+        onClick={onAction ? () => onAction(action) : undefined}
+      />
+    );
+  };
   return (
-    <div className="gesture-quick" role="group" aria-label="Touch controls">
-      {actions.map((action) => {
-        const empty =
-          (action.startsWith("reader.") && !pages.length) ||
-          (action.startsWith("steps.") && !steps.length) ||
-          (action === "routine.run" && !cfg.routineName);
-        const boundary =
-          (action === "reader.previous" && controls.page <= 0) ||
-          (action === "reader.next" && controls.page >= pages.length - 1) ||
-          (action === "steps.previous" && controls.step <= 0) ||
-          (action === "steps.next" && controls.step >= steps.length - 1);
-        const label =
-          action === "timer.start"
-            ? `Start ${Math.round((cfg.timerSeconds / 60) * 10) / 10} min timer`
-            : action === "voice.listen" && controls.listening
-              ? "Finish listening"
-              : actionLabel(action);
-        return (
-          <button
-            key={action}
-            type="button"
-            data-gesture-safe="true"
-            aria-label={label}
-            className={
-              action.endsWith(".toggle") || action === "photo.capture" || action === "reader.speak"
-                ? "gesture-quick__main"
-                : ""
-            }
-            disabled={
-              controls.supported === false ||
-              (action === "photo.capture" && !controls.status.running) ||
-              controls.practice ||
-              controls.blocked ||
-              unavailable ||
-              empty ||
-              boundary
-            }
-            onClick={() => controls.act(action)}
-          >
-            <Icon name={actionIcon(action)} size={19} />
-            <span>{label}</span>
-          </button>
-        );
-      })}
+    <div className="gesture-quick task-action-set" role="group" aria-label="Touch controls">
+      <div className="task-actions">{primary.map((action) => renderAction(action, true))}</div>
+      {secondary.length > 0 && (
+        <div className="task-secondary-actions">
+          {secondary.map((action) => renderAction(action, false))}
+        </div>
+      )}
     </div>
   );
 }
 
-export function CameraView({ controls, target }) {
+export function CameraView({ controls, target, simple = false }) {
   const video = useRef(null);
   const running = controls.status.running;
   useEffect(() => {
@@ -132,14 +158,18 @@ export function CameraView({ controls, target }) {
             {controls.status.starting
               ? "Opening camera…"
               : running
-                ? "Keep your whole hand in view"
+                ? simple
+                  ? "Camera on"
+                  : "Keep your whole hand in view"
                 : "Your camera is off"}
           </strong>
-          <span>
-            {running
-              ? "Use the floating camera preview on your phone. You can move or collapse it."
-              : "Recognition runs on your device."}
-          </span>
+          {!simple && (
+            <span>
+              {running
+                ? "Use the floating camera preview on your phone. You can move or collapse it."
+                : "Recognition runs on your device."}
+            </span>
+          )}
         </div>
       )}
       <div className="gesture-camera__badge">
@@ -164,6 +194,7 @@ export function ActivityContent({
   editable = false,
   routines = [],
   location = "workspace",
+  simple = false,
 }) {
   const { config: cfg, page = 0, step = 0 } = controls;
   const pages = readerPages(cfg.reader);
@@ -308,23 +339,23 @@ export function ActivityContent({
           )}
         </section>
       )}
-      {!["reading", "cooking", "routines", "custom"].includes(cfg.mode) && (
+      {!simple && !["reading", "cooking", "routines", "custom"].includes(cfg.mode) && (
         <p className="gesture-activity-hint">{ACTIVITIES[cfg.mode].prompt}</p>
       )}
       <QuickControls controls={controls} />
-      {!controls.status.running && (QUICK_ACTIONS[cfg.mode] || []).length > 0 && (
+      {!simple && !controls.status.running && (QUICK_ACTIONS[cfg.mode] || []).length > 0 && (
         <p className="gesture-muted gesture-touch-hint">
           {cfg.mode === "photo"
             ? "Start the camera to take a photo."
             : "These buttons work with the camera off. Start the camera when you want gestures."}
         </p>
       )}
-      {controls.practice && (
+      {!simple && controls.practice && (
         <p className="gesture-muted gesture-touch-hint">
           Touch actions are off while you practice.
         </p>
       )}
-      {controls.status.running && !controls.practice && (
+      {!simple && controls.status.running && !controls.practice && (
         <p className="gesture-muted gesture-touch-hint">
           You can tap these controls too. Keep JARVIS visible.
         </p>
@@ -337,16 +368,22 @@ export function SessionFeedback({ controls }) {
   return (
     <>
       <GestureFeedback controls={controls} />
-      {controls.message && (
-        <p className="gesture-result" role="status">
-          {controls.message}
-        </p>
-      )}
-      {!controls.message && !controls.status.running && (
-        <p className="gesture-result" role="status">
-          {controls.status.summary}
-        </p>
-      )}
+      {controls.message &&
+        !/^(Camera is off\.|Lower your hand|Practice only\.|Gestures paused\.|Camera is off:)/.test(
+          controls.message,
+        ) && (
+          <p className="gesture-result" role="status">
+            {controls.message}
+          </p>
+        )}
+      {!controls.message &&
+        !controls.status.running &&
+        controls.status.summary &&
+        !/^(Camera is off\.|Webcam is off\.)$/.test(controls.status.summary) && (
+          <p className="gesture-result" role="status">
+            {controls.status.summary}
+          </p>
+        )}
     </>
   );
 }

@@ -7,6 +7,7 @@
 
 import { useState, useRef } from "react";
 import Sheet from "./Sheet";
+import TopBarEditor from "./TopBarEditor";
 import Icon from "./Icon";
 import { Switch, ConfirmButton, AddField } from "./controls";
 import { IS_MOBILE } from "../hooks/useAssistant";
@@ -185,7 +186,7 @@ function saveThemeFile(preset) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function Customize({ screen, onClose, onPatch }) {
+export default function Customize({ screen, onClose, onPatch, onReplayIntro }) {
   const [s, live] = useLivePatch(screen, onPatch);
   const [error, setError] = useState("");
   const picture = useRef(null);
@@ -255,6 +256,8 @@ export default function Customize({ screen, onClose, onPatch }) {
           Changes apply live. You can also just tell JARVIS — “make the screen amber”, or “switch to
           Iron Man mode”.
         </p>
+
+        {IS_MOBILE && <TopBarEditor value={s.topBar} onChange={(topBar) => onPatch({ topBar })} onReplayIntro={onReplayIntro} />}
 
         <section className="cz-sec">
           <h3>Theme</h3>

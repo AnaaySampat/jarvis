@@ -1532,3 +1532,28 @@ body:has(.gesture-settings) .gesture-workspace {
     font-size: 17px;
   }
 }
+
+/* One activity workspace: content first, camera setup on demand. */
+.activity-panel [hidden] { display: none !important; }
+.activity-panel .gesture-activity-caption { display: none; }
+.activity-panel .activity-picker { margin: 0 0 10px; }
+.activity-panel .gesture-toolbar { margin-bottom: 10px; }
+.activity-panel .gesture-tabs { flex: 1; }
+.activity-panel.is-local .gesture-session-buttons:has(.gesture-primary) { display: none; }
+.activity-panel .activity-content { margin-top: 0; }
+.activity-panel .activity-page { max-height: 48dvh; min-height: 140px; }
+.activity-camera-setup { margin-top: 16px; border-top: 1px solid var(--g-border); padding-top: 8px; }
+.activity-camera-setup .gesture-camera { max-width: 360px; margin: 10px 0; }
+.activity-camera-setup > button { margin: 5px; }
+.activity-save-note { margin-top: 16px !important; color: var(--g-muted); font-size: 12px !important; }
+@media (max-width: 600px) {
+  .hands-free { gap: 6px; padding: 12px; }
+  .activity-panel .gesture-tabs button { flex: 1; padding: 8px 6px; }
+  .activity-panel .gesture-tabs button svg { display: none; }
+  .activity-panel .gesture-toolbar { flex-wrap: wrap; }
+  .activity-panel .gesture-session-buttons { flex-wrap: wrap; }
+}
+
+.activity-focus-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.activity-focus-bar > strong { font-size: 18px; }
+.activity-panel .activity-focus-bar button { min-height: 36px; padding: 7px 10px; font-size: 12px; }

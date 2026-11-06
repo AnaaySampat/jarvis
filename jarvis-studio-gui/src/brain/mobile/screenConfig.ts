@@ -4,6 +4,8 @@
  * validated settings (they all end up in CSS), with built-in and saved presets.
  */
 
+import { cleanTopBar, type TopBarConfig } from "./topBarConfig";
+
 export type Rgb = [number, number, number];
 
 export interface ScreenLook {
@@ -25,6 +27,7 @@ export interface ScreenPreset extends ScreenLook {
 }
 
 export interface ScreenConfig extends ScreenLook {
+  topBar?: TopBarConfig;
   density?: string;
   panels?: Record<string, boolean>;
   order?: { left?: string[]; right?: string[] };
@@ -251,6 +254,7 @@ export function patchScreenConfig(patch: ScreenPatch): ScreenConfig {
     const gone = presetName(patch.delete_preset).toLowerCase();
     next.presets = (next.presets ?? []).filter((p) => presetName(p.name).toLowerCase() !== gone);
   }
+  if (patch.topBar !== undefined) next.topBar = cleanTopBar(patch.topBar);
   if (patch.density === "normal" || patch.density === "compact") next.density = patch.density;
   if (patch.panels) {
     const cur = { ...(prev.panels ?? {}) };

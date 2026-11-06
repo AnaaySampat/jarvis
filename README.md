@@ -166,6 +166,11 @@ verification codes are redacted from notification text.
 4. **Start with the mic or chat.** Optionally open **Remote PC & TV** to pair the
    [Windows app](https://github.com/AnaaySampat/jarvis-windows) or set up your TV.
 
+On first launch, a short introduction explains the buttons and lets you choose
+your shortcut bar. Add any of the available shortcuts, reorder them, and swipe
+the bar if they don’t all fit. Change them or replay the introduction under
+**Settings → Interface → Edit top bar**. **Capabilities** shows example requests.
+
 Keys are encrypted on the phone with Android Keystore and are sent only to their
 provider. See [security and permissions](docs/SECURITY.md) for how phone and PC control
 are protected.

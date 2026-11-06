@@ -1012,9 +1012,9 @@ export default function Settings({
         <Group>
           <ActionRow
             icon="camera"
-            title="Open gesture controls"
-            desc="Camera, practice and hands-free actions have their own page in Settings."
-            onClick={() => setPage("gestures")}
+            title="Open activities"
+            desc="Read, follow steps and set up gestures in the Activities workspace."
+            onClick={() => onOpenHandsFree ? onOpenHandsFree() : setPage("gestures")}
           />
         </Group>
       )}
@@ -1578,10 +1578,10 @@ export default function Settings({
       },
       gestureControls && {
         id: "gestures",
-        title: "Gestures",
+        title: "Activities & gestures",
         icon: "camera",
         desc: "Control JARVIS with your hands. Try a pose, practice and choose its action.",
-        words: "hand gesture camera practice motion hands free recognition poses",
+        words: "hand gesture camera practice motion hands free recognition poses read reading steps activities",
         value: gestureControls.status.running ? "Camera on" : "Camera off",
         tone: gestureControls.status.running ? "on" : "off",
         body: <GestureControls controls={gestureControls} onOpen={onOpenHandsFree} />,
@@ -1591,11 +1591,12 @@ export default function Settings({
         title: "Interface",
         icon: "layout",
         desc: "The home screen's look and layout.",
-        words: "home screen customize theme iron man look cards",
+        words: "home screen customize theme iron man look cards top bar toolbar header buttons",
         value: "",
         tone: null,
         body: (
           <Group title="Home screen">
+            {IS_MOBILE && <ActionRow icon="layout" title="Edit top bar" desc="Choose buttons, their order, status and labels." onClick={onOpenCustomize} />}
             <ActionRow
               icon="palette"
               title="Customize the home screen"
@@ -1751,7 +1752,7 @@ export default function Settings({
                         key={p.id}
                         className={`sp-nav-row ${p.id === page ? "is-current" : ""}`}
                         aria-current={p.id === page ? "page" : undefined}
-                        onClick={() => setPage(p.id)}
+                        onClick={() => p.id === "gestures" && onOpenHandsFree ? onOpenHandsFree() : setPage(p.id)}
                       >
                         <Icon name={p.icon} size={18} className="sp-nav-ico" />
                         <span className="sp-nav-title">{p.title}</span>

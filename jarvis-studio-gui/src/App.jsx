@@ -1,4 +1,5 @@
-import LocalFeatures from "./components/LocalFeatures";
+import QuickStart from "./components/QuickStart";
+import { useQuickStart } from "./hooks/useQuickStart";
 import { useLocalExploration } from "./hooks/useLocalExploration";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
@@ -46,10 +47,11 @@ const SETTINGS_PAGES = [
   ["keys", "API Keys", "key", "groq gemini openrouter credentials"],
   ["routing", "Routing & Quota", "route", "rate limit benched rank"],
   ["voice", "Voice", "volume", "wake word speech tts"],
-  ["gestures", "Gestures", "camera", "hand gesture camera practice motion hands free"],
+  ["gestures", "Activities & gestures", "camera", "hand gesture camera practice motion hands free"],
   ...(IS_MOBILE ? [["skills", "Skills", "spark", "import upload instructions markdown"]] : []),
   ["interface", "Interface", "layout", "home screen customize look"],
-  ["files", "Files & Location", "folder", "storage folder location city"],
+  ["files", "Files", "folder", "storage folder"],
+  ["location", "Location", "globe", "location city weather gps"],
   ["calendar", "Calendar", "calendar", "agenda sync events"],
   ["linked", "Devices", "phone", "pc whatsapp paired"],
   ["diagnostics", "System", "wrench", "diagnostics logs version"],
@@ -94,6 +96,8 @@ function ClarifyPrompt({ request, onRespond }) {
 
 export default function App() {
   const [exploring, exploreLocal] = useLocalExploration();
+  const quickStart = useQuickStart();
+  const showQuickStart = IS_MOBILE && quickStart.open;
   const {
     status,
     messages,
@@ -196,14 +200,20 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [handsFreeOpen, setHandsFreeOpen] = useState(false);
   const closeHandsFree = useCallback(() => setHandsFreeOpen(false), []);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState(null); // a page to open Settings on
   const openSettings = useCallback((page = null) => {
+    if (page === "gestures") {
+      setChatOpen(false);
+      setSkillsOpen(false);
+      setShowSettings(false);
+      setHandsFreeOpen(true);
+      return;
+    }
     setHandsFreeOpen(false);
     setSettingsPage(page);
     setShowSettings(true);
   }, []);
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const openHandsFree = useCallback(() => { setChatOpen(false); setSkillsOpen(false); setShowSettings(false); setHandsFreeOpen(true); }, []);
   const [capsOpen, setCapsOpen] = useState(false);
   const [powerOpen, setPowerOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -282,6 +292,15 @@ export default function App() {
     blocked: Boolean(permissionRequest || phoneApproval || clarifyRequest),
     latestReply: [...messages].reverse().find((m) => m.role === "jarvis")?.text || "",
   });
+
+  const changeActivity = gestures.openActivity;
+  const openHandsFree = useCallback((mode) => {
+    if (typeof mode === "string") changeActivity(mode);
+    setChatOpen(false);
+    setSkillsOpen(false);
+    setShowSettings(false);
+    setHandsFreeOpen(true);
+  }, [changeActivity]);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null); // {text, id}: a brief confirmation pill
@@ -683,7 +702,7 @@ export default function App() {
             "theme preset colour color accent font glow corners background picture image layout cards iron man",
         },
       ),
-      cmd("hands-free", "Panels", "Hands-free activities", "skills", openHandsFree, { keywords: "read reader reading steps recipe instructions music gestures practice" }),
+      cmd("hands-free", "Panels", "Activities", "skills", () => openHandsFree(), { keywords: "read reader reading steps recipe instructions music gestures practice" }),
       cmd("settings", "Menus", "Settings", "settings", () => openSettings()),
       cmd(
         "agent-mode",
@@ -809,15 +828,21 @@ export default function App() {
   // Quick controls, in the home screen's header (the desktop's three groups).
   const toolbar = IS_MOBILE ? (
     <MobileQuickControls
+      status={status}
+      preferences={screen?.topBar}
+      onStop={() => {
+        if (stopAllTasks) stopAllTasks();
+        else stopPhoneTask();
+        stopSpeech();
+      }}
       muted={muted}
       onMute={() => setMute(!muted)}
       onSettings={() => openSettings()}
-      onGestures={() => openSettings("gestures")}
+      onGestures={() => openHandsFree()}
       onDevices={() => setRemoteOpen(true)}
       onTasks={() => setActivityOpen(true)}
       onCustomize={() => setCustomizeOpen(true)}
       onPhone={() => setPowerOpen(true)}
-      onSearch={() => setPaletteOpen(true)}
       taskActive={anyTaskActive}
       cameraActive={gestures.status.running}
     />
@@ -955,8 +980,6 @@ export default function App() {
       <GestureWorkspace controls={gestures} open={handsFreeOpen} onClose={closeHandsFree} onOpen={openHandsFree}
         routines={IS_MOBILE ? listRoutines() : Array.isArray(memory?.routines) ? memory.routines : []} />
       <div className="app-shell">
-        {exploring && (!isConnected || sysInfo.needs_setup) &&
-          <LocalFeatures connected={isConnected} onConnect={() => openSettings("keys")} />}
         <JarvisHUD
           config={hudConfig}
           toolbar={toolbar}
@@ -975,7 +998,7 @@ export default function App() {
           allowedDirs={sysInfo.allowed_dirs || []}
           panels={panels}
           onTogglePanel={togglePanel}
-          chatOpen={chatOpen}
+          chatOpen={chatOpen && !showSettings}
           setChatOpen={setChatOpen}
           skillsOpen={skillsOpen}
           setSkillsOpen={setSkillsOpen}
@@ -1147,6 +1170,10 @@ export default function App() {
           screen={screen}
           onClose={() => setCustomizeOpen(false)}
           onPatch={(patch) => sendScreen(patch)}
+          onReplayIntro={() => {
+            setCustomizeOpen(false);
+            quickStart.replay();
+          }}
         />
       )}
 
@@ -1214,11 +1241,21 @@ export default function App() {
       {/* Booting: shown until the backend WebSocket connects (frozen backend start
           + first-run download). Client-side only, so it shows even if the backend
           is slow or failed to start. */}
-      <BootOverlay localAssistant={IS_MOBILE} connected={(isConnected && typeof sysInfo.needs_setup === "boolean") || exploring} onContinue={exploreLocal} />
+      {!showQuickStart && <BootOverlay localAssistant={IS_MOBILE} connected={(isConnected && typeof sysInfo.needs_setup === "boolean") || exploring} onContinue={exploreLocal} />}
+
+      {showQuickStart && (
+        <QuickStart
+          preferences={screen?.topBar}
+          onFinish={(topBar) => {
+            sendScreen({ topBar });
+            quickStart.finish();
+          }}
+        />
+      )}
 
       {/* First-run setup: API keys. On a phone there's no Windows storage folder to
           pick, so use the slim mobile key-entry; on desktop, the full Onboarding. */}
-      {isConnected &&
+      {!showQuickStart && isConnected &&
         sysInfo.needs_setup && !exploring &&
         (IS_MOBILE ? (
           <MobileOnboarding onExplore={exploreLocal} onSave={sendConfig} />

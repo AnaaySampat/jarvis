@@ -12,7 +12,12 @@ import {
 } from "./engine";
 import { clampIndex, documentId, loadBookmarks } from "./storage";
 const T = 1_800_000_000_000;
-function stream(config = defaults()) {
+function holdToTalkConfig() {
+  const config = defaults();
+  config.bindings.voice.PEACE = "voice.ptt";
+  return config;
+}
+function stream(config = holdToTalkConfig()) {
   const engine = new GestureEngine(config);
   let seq = 0;
   const feed = (
@@ -106,14 +111,14 @@ describe("gesture session policy", () => {
     expect(delayed(7, 800, 1300)).toEqual([]);
     expect(delayed(8, 1100, 1400)[0]).toMatchObject({ action: "voice.stop" });
   });
-  it("finishes only admitted PTT when a camera stops producing frames", () => {
+  it("cancels admitted PTT when a camera stops producing frames", () => {
     const { engine, feed, hold } = stream();
     feed("PEACE", 500);
     expect(hold("PEACE", 600, 1100)[0]).toMatchObject({ action: "voice.ptt" });
     expect(engine.confirmPttStart()).toBe(true);
     expect(engine.tick(T + 1801)).toContainEqual({
       kind: "action",
-      action: "voice.finish",
+      action: "voice.cancel",
       pose: "UNKNOWN",
     });
     expect(engine.tick(T + 3000)).toEqual([]);
@@ -180,7 +185,7 @@ describe("gesture session policy", () => {
     });
     expect(config.holdMs).toBe(200);
     expect(config.releaseMs).toBe(1500);
-    expect(config.bindings.voice.PEACE).toBe("voice.ptt");
+    expect(config.bindings.voice.PEACE).toBe("voice.listen");
     expect(config.bindings.voice.FIST).toBeUndefined();
   });
   it("tracks pinch hysteresis, mirroring and release after a hand disappears", () => {
@@ -361,4 +366,54 @@ describe("personal poses and storage", () => {
     });
     expect(reorderCards(order, "approve", "weather")).toBe(order);
   });
+});
+
+it("gives fresh users one-shot voice and consistent directional navigation", () => {
+  const config = defaults();
+  expect(config.bindings.voice.PEACE).toBe("voice.listen");
+  for (const mode of ["media", "tv", "pc", "reading", "cooking"])
+    expect(config.bindings[mode].SWIPE_LEFT).toMatch(/previous$/);
+  expect(config.bindings.phone.PEACE).toBeUndefined();
+  expect(config.bindings.media.LOVE).toBeUndefined();
+});
+
+it("preserves complete saved mappings including intentionally unassigned gestures", () => {
+  const saved = {
+    ...defaults(),
+    bindings: {
+      voice: { PEACE: "voice.ptt", OPEN_PALM: "voice.stop" },
+      media: { LOVE: "media.previous", OPEN_PALM: "none" },
+    },
+  };
+  const config = sanitizeConfig(saved);
+  expect(config.bindings.voice).toEqual(saved.bindings.voice);
+  expect(config.bindings.media).toEqual(saved.bindings.media);
+  expect(config.bindings.media.SWIPE_RIGHT).toBeUndefined();
+});
+
+it("cancels unclear optional hold-to-talk but finishes a deliberate hand release", () => {
+  for (const unclear of [true, false]) {
+    const { engine, hold } = stream();
+    hold("PEACE", 500, 1200);
+    expect(engine.confirmPttStart()).toBe(true);
+    const events = hold(
+      "UNKNOWN",
+      1300,
+      1900,
+      unclear ? 0.3 : 1,
+      unclear ? hand() : [],
+      unclear ? { handCount: 1 } : { handCount: 0 },
+    );
+    expect(events).toContainEqual({
+      kind: "action",
+      action: unclear ? "voice.cancel" : "voice.finish",
+      pose: "UNKNOWN",
+    });
+    expect(
+      events.some(
+        (event) =>
+          event.kind === "action" && event.action === (unclear ? "voice.finish" : "voice.cancel"),
+      ),
+    ).toBe(false);
+  }
 });

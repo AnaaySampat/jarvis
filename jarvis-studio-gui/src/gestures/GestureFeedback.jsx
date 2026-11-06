@@ -1,5 +1,6 @@
 import { Icon } from "./GestureIcon";
-import { poseLabel } from "./presentation";
+import GestureGlyph from "./GestureGlyph";
+import { actionLabel } from "./presentation";
 
 export default function GestureFeedback({ controls }) {
   const recognition = controls.recognition;
@@ -7,23 +8,37 @@ export default function GestureFeedback({ controls }) {
   const paused = controls.paused || recognition.phase === "paused";
   const progress = paused ? 0 : Math.max(0, Math.min(1, recognition.progress || 0));
   const hasPose = recognition.pose && recognition.pose !== "UNKNOWN";
+  const action = controls.config.bindings[controls.config.mode][recognition.pose];
   return (
     <div className="gesture-feedback" data-phase={paused ? "paused" : recognition.phase}>
       <div className="gesture-feedback__heading">
-        <strong>
+        <strong role="status">
           <Icon
             name={paused ? "eyeOff" : recognition.phase === "recognized" ? "check" : "activity"}
             size={15}
           />
           {paused
-            ? "Gestures paused"
-            : hasPose
-              ? poseLabel(recognition.pose, controls.config)
-              : recognition.phase === "neutral"
-                ? "Lower your hand to begin"
-                : "Ready for your hand"}
+            ? "Paused"
+            : controls.listening
+              ? "Listening"
+              : recognition.pose === "FIST"
+                ? "Stop camera"
+                : hasPose
+                  ? action && !["none", "feedback"].includes(action)
+                    ? actionLabel(action)
+                    : "No shortcut"
+                  : recognition.phase === "neutral"
+                    ? "Resetting"
+                    : recognition.phase === "uncertain"
+                      ? "Hand not clear"
+                      : "Ready"}
         </strong>
-        {hasPose && !paused && <small>{Math.round((recognition.score || 0) * 100)}%</small>}
+        {!paused && ["neutral", "recognized"].includes(recognition.phase) && (
+          <span className="task-release-cue" aria-label="Waiting for hand release">
+            <GestureGlyph pose="OPEN_PALM" size={22} />
+            <Icon name="arrowDown" size={14} />
+          </span>
+        )}
       </div>
       <div
         role="progressbar"
@@ -35,11 +50,6 @@ export default function GestureFeedback({ controls }) {
       >
         <span style={{ width: `${progress * 100}%` }} />
       </div>
-      <p role="status">
-        {paused
-          ? "Resume when you’re ready. The buttons still work."
-          : recognition.hint || "Keep one whole hand in view."}
-      </p>
     </div>
   );
 }
