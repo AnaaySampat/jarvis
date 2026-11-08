@@ -32,8 +32,13 @@ export interface MemoryStore {
 
   // ── Conversation history ──
   /** The recent turns to send to the model (clipped). */
-  recentTurns(limit?: number): Promise<ChatMessage[]>;
+  recentTurns(limit?: number, excludeUiIds?: string[]): Promise<ChatMessage[]>;
   appendTurn(message: ChatMessage): Promise<void>;
+  recentChatTurns?(): Promise<ChatMessage[]>;
+  readChatTurns?(): ChatMessage[];
+  saveChatTurn?(message: ChatMessage): Promise<boolean>;
+  beginChatTurn?(user: ChatMessage, reply: ChatMessage): Promise<boolean>;
+  updateChatTurn?(message: ChatMessage): Promise<boolean>;
   /** "New chat" archives; voice "clear" destroys (mirrors S39 behaviour). */
   archiveConversation(): Promise<void>;
   clearConversation(): Promise<ToolResult>;
@@ -267,8 +272,8 @@ export function markFactGone(keys: string[], at: number = Date.now()): void {
 export class PersistentStore implements MemoryStore {
   private kv: KV;
 
-  constructor() {
-    this.kv = makeKV();
+  constructor(kv?: KV) {
+    this.kv = kv ?? makeKV();
   }
 
   // ── Durable facts ──
@@ -370,9 +375,73 @@ export class PersistentStore implements MemoryStore {
   }
 
   // ── Conversation history ──
-  async recentTurns(limit = MAX_TURNS): Promise<ChatMessage[]> {
+  async recentTurns(limit = MAX_TURNS, excludeUiIds: string[] = []): Promise<ChatMessage[]> {
     const turns = readJson<ChatMessage[]>(this.kv, TURNS_KEY, []);
-    return turns.slice(-limit);
+    return turns
+      .filter((turn) => !turn.uiPending && !excludeUiIds.includes(turn.uiId ?? ""))
+      .slice(-limit)
+      .map(({ uiId: _id, uiPending: _pending, ...turn }) => turn);
+  }
+
+  readChatTurns(): ChatMessage[] {
+    return readJson<ChatMessage[]>(this.kv, TURNS_KEY, []).slice(-MAX_TURNS);
+  }
+  async recentChatTurns(): Promise<ChatMessage[]> {
+    return this.readChatTurns();
+  }
+
+  async saveChatTurn(message: ChatMessage): Promise<boolean> {
+    const turns = readJson<ChatMessage[]>(this.kv, TURNS_KEY, []);
+    const clean = {
+      role: message.role,
+      content: clip(message.content),
+      ...(message.display ? { display: message.display } : {}),
+      uiId: message.uiId,
+      uiPending: message.uiPending === true,
+    };
+    const index = turns.findIndex((t) => t.uiId && t.uiId === message.uiId);
+    if (index >= 0) turns[index] = clean;
+    else turns.push(clean);
+    return writeJson(this.kv, TURNS_KEY, turns.slice(-MAX_TURNS));
+  }
+  async beginChatTurn(user: ChatMessage, reply: ChatMessage): Promise<boolean> {
+    const clean = (message: ChatMessage): ChatMessage => ({
+      role: message.role,
+      content: clip(message.content),
+      ...(message.display ? { display: message.display } : {}),
+      uiId: message.uiId,
+      uiPending: message.uiPending === true,
+    });
+    const turns = readJson<ChatMessage[]>(this.kv, TURNS_KEY, []);
+    return writeJson(this.kv, TURNS_KEY, [...turns, clean(user), clean(reply)].slice(-MAX_TURNS));
+  }
+
+  /** Patches active or archived turns; a deleted/switched chat is never recreated. */
+  async updateChatTurn(message: ChatMessage): Promise<boolean> {
+    if (!message.uiId) return false;
+    const update = (turn: ChatMessage) => ({
+      ...turn,
+      content: clip(message.content),
+      ...(message.display ? { display: message.display } : {}),
+      uiPending: false,
+    });
+    const turns = readJson<ChatMessage[]>(this.kv, TURNS_KEY, []);
+    if (turns.some((t) => t.uiId === message.uiId))
+      return writeJson(
+        this.kv,
+        TURNS_KEY,
+        turns.map((t) => (t.uiId === message.uiId ? update(t) : t)),
+      );
+    const recents = readJson<ArchivedThread[]>(this.kv, RECENTS_KEY, []);
+    if (!recents.some((r) => r.turns.some((t) => t.uiId === message.uiId))) return false;
+    return writeJson(
+      this.kv,
+      RECENTS_KEY,
+      recents.map((r) => ({
+        ...r,
+        turns: r.turns.map((t) => (t.uiId === message.uiId ? update(t) : t)),
+      })),
+    );
   }
 
   async appendTurn(message: ChatMessage): Promise<void> {
@@ -423,10 +492,11 @@ export class PersistentStore implements MemoryStore {
   }
 
   async restoreRecent(id: string): Promise<boolean> {
-    const turns = await this.loadRecent(id);
+    const turns = readJson<ArchivedThread[]>(this.kv, RECENTS_KEY, []).find(
+      (r) => r.id === id,
+    )?.turns;
     if (!turns) return false;
-    writeJson(this.kv, TURNS_KEY, turns);
-    return true;
+    return writeJson(this.kv, TURNS_KEY, turns);
   }
 }
 

@@ -454,6 +454,17 @@ describe("gesture session usability", () => {
     expect(panel.scrollBy).toHaveBeenCalledWith({ top: 195, behavior: "smooth" });
     expect(floating.scrollBy).not.toHaveBeenCalled();
   });
+
+  it("scrolls the hands-free menu body when no inline reader is open", async () => {
+    const handsFreeBody = { clientHeight: 400, scrollBy: vi.fn() };
+    document.querySelector = vi.fn((selector) =>
+      selector === ".hands-free-body" ? handsFreeBody : null,
+    );
+    await act(async () => controls.switchMode("tv"));
+    await start();
+    await act(async () => controls.act("reader.scrollDown"));
+    expect(handsFreeBody.scrollBy).toHaveBeenCalledWith({ top: 260, behavior: "smooth" });
+  });
 });
 
 it("executes explicit touch actions with the camera off", async () => {

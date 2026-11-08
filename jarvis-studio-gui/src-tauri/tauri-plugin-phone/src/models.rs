@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppUpdateRequest { pub action: String, pub options: String }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthStatusResponse {
@@ -85,6 +88,8 @@ pub struct ActionResponse {
     pub code: Option<String>,
     #[serde(default)]
     pub generation: Option<i64>,
+    #[serde(default)]
+    pub verification: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +161,9 @@ pub struct SpeakingStateResponse {
 pub struct StopOverlayStateResponse {
     #[serde(default)]
     pub seq: i32,
+    /// Actual native window state; absent on older plugins and desktop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
 }
 
 // ── Request payloads forwarded to the Kotlin plugin ──
@@ -852,4 +860,41 @@ pub struct ClockActionRequest {
     /// "daily", "weekdays", "weekends", or "mon,wed,fri".
     #[serde(default)]
     pub days: String,
+}
+
+#[cfg(test)]
+mod action_response_tests {
+    use super::{ActionResponse, StopOverlayStateResponse};
+    use serde_json::json;
+
+    #[test]
+    fn native_verification_survives_the_rust_bridge() {
+        let verification = json!({
+            "status": "verified", "method": "android_audio_manager_readback",
+            "expected": {"streamIndex": 6}, "observed": {"streamIndex": 6}
+        });
+        let reply: ActionResponse = serde_json::from_value(json!({
+            "ok": true, "summary": "Media volume is 40%.", "verification": verification
+        })).unwrap();
+        assert_eq!(serde_json::to_value(reply).unwrap()["verification"], verification);
+    }
+
+    #[test]
+    fn legacy_responses_do_not_gain_verification_evidence() {
+        let reply: ActionResponse = serde_json::from_value(json!({
+            "ok": true, "summary": "Opened an app."
+        })).unwrap();
+        assert!(reply.verification.is_none());
+    }
+
+    #[test]
+    fn stop_overlay_visibility_survives_the_rust_bridge() {
+        let reply: StopOverlayStateResponse = serde_json::from_value(json!({
+            "seq": 3, "visible": false
+        })).unwrap();
+        assert_eq!(serde_json::to_value(reply).unwrap(), json!({"seq": 3, "visible": false}));
+        let legacy: StopOverlayStateResponse = serde_json::from_value(json!({"seq": 2})).unwrap();
+        assert!(legacy.visible.is_none());
+        assert_eq!(serde_json::to_value(legacy).unwrap(), json!({"seq": 2}));
+    }
 }

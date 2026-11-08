@@ -235,7 +235,7 @@ function ActionCard({ results, runAction }) {
                 </div>
               </div>
             ) : (
-              <img className="action-qr" src={r.image} alt="QR code" />
+              <img className={r.type === "screenshot" ? "action-image" : "action-qr"} src={r.image} alt={r.type === "screenshot" ? "Task screenshot" : "QR code"} />
             ))}
           {Array.isArray(r.sources) && r.sources.length > 0 && (
             <div className="action-sources">

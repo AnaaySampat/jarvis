@@ -4,6 +4,7 @@ import ModalPanel from "./ModalPanel";
 import { stepIcon } from "../hooks/agentActivity";
 import { ACTIVE_TASK_STATES, TERMINAL_TASK_STATES } from "../hooks/taskCenter";
 import { taskDisplayState, TASK_LABELS } from "../hooks/workflowTasks";
+import { toolPerformance } from "../brain/toolMetrics";
 
 const STATUS = {
   accepted: { label: "accepted", cls: "activity-pill--run" },
@@ -62,8 +63,26 @@ function updatedTime(value) {
   return value && !Number.isNaN(date.getTime()) ? date : null;
 }
 
-export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onStopAll, onReview }) {
+export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onStopAll, onReview, onCheckWorkflow, onResumeWorkflow }) {
   const [zoom, setZoom] = useState(null);
+  const [reports, setReports] = useState({});
+  const [busy, setBusy] = useState(null);
+  const performance = toolPerformance(tasks || []);
+  const recoveryAction = async (task, resume = false) => {
+    if (busy) return;
+    setBusy(task.id);
+    try {
+      if (resume) {
+        const reply = await onResumeWorkflow(task, reports[task.id].token);
+        setReports((prev) => ({ ...prev, [task.id]: { reason: reply } }));
+      } else {
+        const report = await onCheckWorkflow(task);
+        setReports((prev) => ({ ...prev, [task.id]: report }));
+      }
+    } catch (error) {
+      setReports((prev) => ({ ...prev, [task.id]: { reason: error?.message || String(error) } }));
+    } finally { setBusy(null); }
+  };
   const ordered = [...(tasks || [])].sort(
     (a, b) => (updatedTime(b.updatedAt)?.getTime() || 0) - (updatedTime(a.updatedAt)?.getTime() || 0),
   );
@@ -90,6 +109,15 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
       }
     >
       <>
+        {performance.tasks > 0 && (
+          <details className="activity-notice">
+            <summary>Tool performance · {performance.verified}/{performance.tasks} tasks verified</summary>
+            <p>Choosing: {performance.choosing_ms} ms · Executing: {performance.executing_ms} ms · Verifying: {performance.verifying_ms} ms</p>
+            <p>{performance.invalid}/{performance.proposed} proposed calls invalid · {performance.duplicates} duplicate actions prevented</p>
+            <p>{performance.requests} model requests · {performance.fallbacks} fallback replies · {performance.hedges} hedges</p>
+            <p>Measured tasks in this list. Execution time sums tool durations, including overlapping reads. Tool-selection accuracy requires labelled evaluations.</p>
+          </details>
+        )}
         {ordered.length === 0 ? (
           <StateMessage variant="empty" icon="inbox" title="No tasks yet">
             Conversations, PC and phone work appear here with live progress, recovery details
@@ -143,7 +171,17 @@ export default function AgentActivity({ tasks, onClose, onClear, onStopTask, onS
                   )}
                   {task.retryInfo && <div className="activity-notice">Retry: {task.retryInfo}</div>}
                   {task.completed?.length > 0 && <div className="activity-notice"><strong>Completed</strong><ul>{task.completed.map((line, i) => <li key={i}>{line}</li>)}</ul></div>}
+                  {task.uncertain?.length > 0 && <div className="activity-notice"><strong>Uncertain</strong><ul>{task.uncertain.map((line, i) => <li key={i}>{line}</li>)}</ul></div>}
                   {task.remaining?.length > 0 && <div className="activity-notice"><strong>Remaining</strong><ul>{task.remaining.map((line, i) => <li key={i}>{line}</li>)}</ul></div>}
+                  {task.canCheck && onCheckWorkflow && (
+                    <button className="activity-clear" disabled={!!busy} onClick={() => recoveryAction(task)}>
+                      {busy === task.id ? "Checking…" : "Check outcomes"}
+                    </button>
+                  )}
+                  {task.canCheck && reports[task.id]?.canResume && onResumeWorkflow && (
+                    <button className="activity-clear" disabled={!!busy} onClick={() => recoveryAction(task, true)}>Continue remaining work</button>
+                  )}
+                  {reports[task.id] && <div className="activity-notice" role="status">{reports[task.id].reason}</div>}
                   {["needs_you", "partial"].includes(displayState) && onReview && (
                     <button className="activity-clear" onClick={() => onReview(task)}>Review saved work</button>
                   )}

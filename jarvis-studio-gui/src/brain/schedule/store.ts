@@ -215,6 +215,22 @@ export interface ScheduleResult {
   item?: ScheduleItem;
 }
 
+/** Link a late calendar receipt to exactly one unchanged agenda row, without adding it again. */
+export function attachCalendarReceipt(day: string, expected: ScheduleItem, eventId: number): boolean {
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) return false;
+  const key = normaliseDay(day);
+  const data = readRaw();
+  const matches = (data[key] ?? []).filter((item) => item.time === expected.time &&
+    item.task === expected.task && item.date === expected.date);
+  if (matches.length !== 1) return false;
+  if (matches[0]!.calendarEventId === eventId) return true;
+  if (matches[0]!.calendarEventId) return false;
+  matches[0]!.calendarEventId = eventId;
+  writeRaw(data);
+  return (readRaw()[key] ?? []).some((item) => item.time === expected.time &&
+    item.task === expected.task && item.date === expected.date && item.calendarEventId === eventId);
+}
+
 /** Run a schedule action from the HUD or the `manage_schedule` tool. */
 export function runSchedule(payload: Record<string, unknown>): ScheduleResult {
   const action = String(payload.do ?? payload.action ?? "get").toLowerCase();

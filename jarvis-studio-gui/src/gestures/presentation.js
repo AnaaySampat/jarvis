@@ -60,7 +60,7 @@ export const ACTIVITIES = {
   photo: {
     name: "Photo",
     icon: "camera",
-    description: "Get in the frame. Show peace to take a photo.",
+    description: "Get in the frame. Take a photo with a gesture.",
     prompt: "A three-second countdown gives you time to pose.",
   },
   cooking: {

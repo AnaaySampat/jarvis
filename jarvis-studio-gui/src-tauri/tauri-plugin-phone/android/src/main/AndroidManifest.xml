@@ -33,6 +33,7 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- "When I get home": which Wi-Fi the phone is on (gateway and subnet only, no SSID). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -67,6 +68,11 @@
         tools:ignore="ProtectedPermissions" />
 
     <application>
+        <activity android:name="com.jarvis.phone.AppUpdateEntryActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver android:name="com.jarvis.phone.AppUpdateInstallReceiver" android:exported="false" />
+        <receiver android:name="com.jarvis.phone.AppUpdateDownloadReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE" /></intent-filter>
+        </receiver>
         <service
             android:name="com.jarvis.phone.GestureCameraService"
             android:exported="false"

@@ -89,6 +89,8 @@ object NativeOperator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val runs = ConcurrentHashMap<String, Run>()
 
+    fun isRunning(): Boolean = runs.values.any { it.outcome == null }
+
     private class Run(val taskId: String) {
         val steps = CopyOnWriteArrayList<JSONObject>()
         val benched = CopyOnWriteArrayList<JSONObject>()
@@ -143,7 +145,7 @@ object NativeOperator {
         routes: List<RouteSpec>,
         stayInApp: Boolean = false,
     ): String? {
-        if (runs.values.any { it.outcome == null }) return "Another phone task is already running."
+        if (isRunning()) return "Another phone task is already running."
         val run = Run(taskId)
         runs[taskId] = run
         // Keep the registry small: finished runs only matter until the WebView reads them.
@@ -152,6 +154,11 @@ object NativeOperator {
         // Ids only — never the URL or headers (they carry keys).
         Log.i(TAG, "task $taskId routes: " + routes.joinToString { "${it.provider}/${it.model}#${it.keyIndex}" })
         scope.launch {
+            // Native completion hides the previous run's overlay while JS may
+            // still consider it visible. Every run must establish its own STOP.
+            withContext(Dispatchers.Main) {
+                JarvisAccessibilityService.instance?.showStopOverlay()
+            }
             val journal = DaoJournal(dao, taskId)
             val model = HttpLadderModel(
                 routes,
@@ -185,7 +192,6 @@ object NativeOperator {
             }
             val final = commitTerminal(app, dao, taskId, outcome)
             Log.i(TAG, "task $taskId finished ok=${final.ok} error=${final.error}: ${final.summary}")
-            run.outcome = final
             // The WebView that would normally hide the STOP overlay may be paused
             // right now; don't leave it floating over the app the task just drove.
             withContext(Dispatchers.Main) {
@@ -194,6 +200,9 @@ object NativeOperator {
                     dismissShadeIfOpen()
                 }
             }
+            // Publish completion only after cleanup so an immediate next run
+            // cannot have its STOP hidden by this run's delayed main-thread work.
+            run.outcome = final
             notifyResult(app, final)
             // The spoken summary is produced by the (by now paused) WebView, so until the
             // user reopens JARVIS they hear nothing — measured 2026-09-23: the answer came

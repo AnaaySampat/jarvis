@@ -28,13 +28,39 @@ function makeDeps(onDispatched: DispatchDeps["onDispatched"]) {
 }
 
 describe("onDispatched", () => {
+  it("enforces current permission availability for direct actions before invoking native", async () => {
+    const deps = makeDeps(undefined);
+    deps.getToolAvailability = async () => ({ set_alarm: { state: "permission_required", reason: "Grant access first." } });
+    const reply = await dispatch({ type: "clock", do: "alarm", hour: 7, minute: 0 }, deps);
+    expect(reply).toMatchObject({ ok: false, error: "permission_required" });
+    expect(deps.platform.clock.setAlarm).not.toHaveBeenCalled();
+  });
+
+  it("polls the original phone task after a lost start acknowledgement without resubmitting or failing it", async () => {
+    vi.useFakeTimers();
+    try {
+      const deps = makeDeps(undefined);
+      const operatorStart = vi.fn(async () => ({ ok: false, error: "native_outcome_unknown", summary: "No start receipt." }));
+      const finishTask = vi.fn();
+      deps.platform.phone = { isEnabled: async () => true, beginTask: async () => ({ ok: true, summary: "Journaled." }),
+        operatorStart, finishTask,
+        operatorStatus: async () => ({ ok: true, done: true, result: { ok: true, summary: "Existing task completed.",
+          error: null, needsApproval: false, acted: true, findings: [], verificationReceipt: `aura.verify.v1:model:${"a".repeat(64)}` } }),
+      };
+      const pending = dispatch({ type: "phone_task", goal: "Read the Android version" }, deps);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await pending).toMatchObject({ ok: true, summary: "Existing task completed." });
+      expect(operatorStart).toHaveBeenCalledOnce();
+      expect(finishTask).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
   it("distinguishes an unsaved calendar draft from an event with a saved id", async () => {
     const deps = makeDeps(undefined);
     const add = vi.fn(async (): Promise<{ ok: boolean; summary: string; eventId?: number }> => ({
       ok: true,
       summary: "Opened your calendar to add it — tap save.",
     }));
-    const remove = vi.fn();
+    const remove = vi.fn(async () => ({ ok: true, summary: "Removed from calendar." }));
     deps.platform.calendar = { add, remove } as unknown as Platform["calendar"];
     const spec = { type: "schedule", do: "add", time: "23:54", task: "calendar regression" };
     const draft = await dispatch(spec, deps);

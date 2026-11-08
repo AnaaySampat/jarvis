@@ -63,3 +63,36 @@ describe("phone gesture actions", () => {
     expect(await host.perform("phone.flashlightOn", defaults(), { photo: vi.fn() })).toBe(result);
   });
 });
+
+describe("tv gesture actions", () => {
+  it.each<[Action, string, string]>([
+    ["tv.toggle", "toggle", ""],
+    ["tv.next", "next", ""],
+    ["tv.previous", "previous", ""],
+    ["tv.up", "volume_up", "5"],
+    ["tv.down", "volume_down", "5"],
+    ["tv.mute", "mute", ""],
+  ])("dispatches %s to tv_control with do: %s", async (action, expectedDo, expectedTarget) => {
+    const result = { ok: true, summary: "TV command sent." };
+    const runAction = vi.fn(async () => result);
+    const host = androidGestureHost({
+      listen: vi.fn(),
+      pttStart: vi.fn(),
+      finishListen: vi.fn(),
+      cancelListen: vi.fn(),
+      stopSpeech: vi.fn(),
+      runAction,
+      pcAction: vi.fn(),
+      sendMessage: vi.fn(),
+      isReady: () => true,
+      order: {},
+      sendScreen: vi.fn(),
+    });
+    expect(await host.perform(action, defaults(), { photo: vi.fn() })).toBe(result);
+    expect(runAction).toHaveBeenCalledExactlyOnceWith({
+      type: "tv_control",
+      do: expectedDo,
+      target: expectedTarget,
+    });
+  });
+});

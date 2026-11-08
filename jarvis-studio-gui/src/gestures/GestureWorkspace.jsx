@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import GesturePanel from "./GesturePanel";
 import GestureSessionOverlay from "./GestureSessionOverlay";
 import { useAndroidBack } from "../hooks/useAndroidBack";
+import { Icon } from "./GestureIcon";
 import "./gestures.css";
 
 export default function GestureWorkspace({
@@ -64,15 +65,20 @@ export default function GestureWorkspace({
       <div className="hands-free-scrim" />
       <section
         ref={dialog}
-        className="hands-free"
+        className="hands-free hands-free-console"
         role="dialog"
         aria-modal="true"
         aria-label="Activities"
       >
         <header className="activity-bar hands-free-header">
-          <h2>Activities</h2>
+          <div className="hands-free-title">
+            <span className="hands-free-kicker">
+              J.A.R.V.I.S. <span>/ GESTURE INTERFACE</span>
+            </span>
+            <h2>Hands-free</h2>
+          </div>
           <button type="button" onClick={onClose} aria-label="Close activities">
-            Done
+            <Icon name="close" size={20} />
           </button>
         </header>
         <div className="hands-free-body">

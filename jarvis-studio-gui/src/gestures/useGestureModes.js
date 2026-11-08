@@ -440,6 +440,9 @@ export function useGestureModes({
         } else if (action === "reader.scrollDown" || action === "reader.scrollUp") {
           const area =
             document.querySelector("[data-gesture-reader='panel']") ||
+            document.querySelector(".hands-free-body") ||
+            document.querySelector(".hands-free") ||
+            document.querySelector(".task-panel") ||
             document.querySelector(".gesture-workspace__text") ||
             document.querySelector(".home-main");
           if (!area) throw new Error("No reading area is open.");

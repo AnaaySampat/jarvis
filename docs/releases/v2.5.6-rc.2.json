@@ -1,0 +1,12 @@
+{
+  "versionName": "2.5.6-rc.2",
+  "title": "Updates inside JARVIS",
+  "features": [
+    { "id": "update-popup", "title": "See what's new before updating", "description": "A dedicated update popup shows the new features and fixes in each release." },
+    { "id": "in-app-downloads", "title": "Download updates inside JARVIS", "description": "Follow download progress, then install through Android's confirmation screen." },
+    { "id": "background-updates", "title": "Get notified about new releases", "description": "Background checks notify you when an update is available. Optional Wi-Fi downloads prepare it for you." }
+  ],
+  "fixes": [
+    { "id": "update-reminders", "title": "Control update reminders", "description": "Snooze until tomorrow, skip a version, or check again from Settings." }
+  ]
+}

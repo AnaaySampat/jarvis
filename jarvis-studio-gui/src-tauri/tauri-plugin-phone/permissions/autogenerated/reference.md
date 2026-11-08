@@ -4,6 +4,7 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 
 #### This default permission set includes the following:
 
+- `allow-app-update`
 - `allow-is-enabled`
 - `allow-health-status`
 - `allow-health-export`
@@ -87,6 +88,32 @@ Allows the JARVIS brain to drive the phone via the AccessibilityService.
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`phone:allow-app-update`
+
+</td>
+<td>
+
+Enables the app_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`phone:deny-app-update`
+
+</td>
+<td>
+
+Denies the app_update command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

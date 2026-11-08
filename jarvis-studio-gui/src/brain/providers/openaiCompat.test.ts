@@ -16,6 +16,19 @@ const ask = () =>
   });
 
 describe("OpenAICompatProvider — empty replies", () => {
+  it("refuses tool images rather than silently dropping their pixels", async () => {
+    await expect(new OpenAICompatProvider(cfg, "openrouter").chat([
+      { role: "tool", content: "Screen", images: ["PIXELS"] },
+    ], [], { model: "some/model:free" })).rejects.toThrow(/cannot send images/);
+  });
+  it("preserves malformed tool arguments as an error for the execution boundary", async () => {
+    body = { choices: [{ message: { content: null, tool_calls: [
+      { id: "x", function: { name: "set_alarm", arguments: "{not-json" } },
+    ] } }] };
+    const reply = await ask();
+    expect(reply.toolCalls[0]).toMatchObject({ name: "set_alarm", args: {} });
+    expect(reply.toolCalls[0]!.argumentError).toBeTruthy();
+  });
   it("treats a 200 with no text and no tool calls as a retryable failure", async () => {
     // Seen live 2026-09-23: OpenRouter's free nemotron answered 200 with nothing in it.
     body = { choices: [{ message: { role: "assistant", content: null }, finish_reason: "stop" }] };

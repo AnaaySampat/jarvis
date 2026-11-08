@@ -65,6 +65,7 @@ jobs:
           npm test
           npm run test:contracts
           npm run test:release-gate
+          node --test ../scripts/build-android-update.test.mjs
 
       - name: Stable foundation promotion requires live acceptance evidence
         if: env.PUBLISH == 'true' && !contains(github.ref_name, '-')
@@ -116,17 +117,26 @@ jobs:
           cp "$source" "$name"
           echo "APK=jarvis-studio-gui/$name" >> "$GITHUB_ENV"
 
-      - name: Publish the release
+      - name: Verify the signed APK and build updater metadata
+        if: env.APK_UNSIGNED != 'true'
+        run: |
+          node ../scripts/build-android-update.mjs "${APK#jarvis-studio-gui/}" android-update.json
+
+      - name: Publish complete release assets
         if: env.PUBLISH == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.APK }}
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "${APK#jarvis-studio-gui/}" android-update.json --draft --verify-tag --title "JARVIS ${GITHUB_REF_NAME#v}" --notes-file "../docs/releases/${GITHUB_REF_NAME}.md" "${flags[@]}"
+          gh release edit "$GITHUB_REF_NAME" --draft=false
 
       - name: Keep the dry run's APK
         if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APK_UNSIGNED == 'true' && 'jarvis-unsigned-release-apk' || 'jarvis-release-apk' }}
-          path: ${{ env.APK }}
+          path: |
+            ${{ env.APK }}
+            jarvis-studio-gui/android-update.json

@@ -113,6 +113,8 @@ const media = (prefix: string) => ({
   THUMBS_DOWN: prefix + ".down",
   SWIPE_LEFT: prefix + ".previous",
   SWIPE_RIGHT: prefix + ".next",
+  SWIPE_UP: "reader.scrollDown",
+  SWIPE_DOWN: "reader.scrollUp",
 });
 export function defaults(): GestureConfig {
   return {
@@ -126,8 +128,10 @@ export function defaults(): GestureConfig {
         OPEN_PALM: "media.toggle",
         THUMBS_UP: "media.up",
         THUMBS_DOWN: "media.down",
+        SWIPE_UP: "reader.scrollDown",
+        SWIPE_DOWN: "reader.scrollUp",
       },
-      voice: { ...voice },
+      voice: { ...voice, SWIPE_UP: "reader.scrollDown", SWIPE_DOWN: "reader.scrollUp" },
       media: media("media"),
       tv: media("tv"),
       pc: media("pc"),
@@ -136,6 +140,8 @@ export function defaults(): GestureConfig {
         PEACE: "steps.repeat",
         SWIPE_LEFT: "steps.previous",
         SWIPE_RIGHT: "steps.next",
+        SWIPE_UP: "reader.scrollDown",
+        SWIPE_DOWN: "reader.scrollUp",
       },
       reading: {
         OPEN_PALM: "voice.stop",
@@ -573,10 +579,8 @@ export class GestureEngine {
     }
     if (this.emitted) return events;
     const bindings = this.config.bindings[this.config.mode];
-    const hasSwipes = ["SWIPE_LEFT", "SWIPE_RIGHT", "SWIPE_UP", "SWIPE_DOWN"].some(
-      (p) => bindings[p] && bindings[p] !== "none",
-    );
-    if (pose === "POINT_UP" && quality && hasSwipes) {
+    const canSwipe = pose === "POINT_UP" || pose === "OPEN_PALM" || (this.anchor && quality);
+    if (canSwipe && quality) {
       // Track the palm, so bending a pointing finger cannot look like a swipe.
       const center = [0, 5, 9, 13, 17].reduce(
         (p, i) => ({ x: p.x + points[i][0] / 5, y: p.y + points[i][1] / 5 }),
@@ -589,14 +593,24 @@ export class GestureEngine {
       this.anchor.samples++;
       const dx = x - this.anchor.x,
         dy = y - this.anchor.y;
-      if (Math.hypot(dx, dy) > 0.07) this.anchor.moving = true;
+      if (Math.hypot(dx, dy) > 0.05) this.anchor.moving = true;
       let swipe = "";
-      if (this.anchor.samples >= 3 && now - this.anchor.at >= 120) {
-        if (Math.abs(dx) > 0.23 && Math.abs(dy) < 0.13)
+      if (this.anchor.samples >= 3 && now - this.anchor.at >= 100) {
+        if (Math.abs(dy) >= 0.14 && Math.abs(dy) > Math.abs(dx) * 1.1) {
+          swipe = dy > 0 ? "SWIPE_DOWN" : "SWIPE_UP";
+        } else if (Math.abs(dx) >= 0.14 && Math.abs(dx) > Math.abs(dy) * 1.1) {
           swipe = dx > 0 ? "SWIPE_RIGHT" : "SWIPE_LEFT";
-        if (Math.abs(dy) > 0.23 && Math.abs(dx) < 0.13) swipe = dy > 0 ? "SWIPE_DOWN" : "SWIPE_UP";
+        }
       }
-      if (swipe && bindings[swipe] && bindings[swipe] !== "none") {
+      let action: Action | "" = "";
+      if (bindings && bindings[swipe]) {
+        if (bindings[swipe] !== "none") action = bindings[swipe];
+      } else if (swipe === "SWIPE_UP") {
+        action = "reader.scrollDown";
+      } else if (swipe === "SWIPE_DOWN") {
+        action = "reader.scrollUp";
+      }
+      if (swipe && action) {
         this.emitted = swipe;
         this.anchor = null;
         this.hold.reset();
@@ -607,17 +621,17 @@ export class GestureEngine {
           phase: "recognized",
           hint: "Swipe recognized. Lower your hand before another command.",
         };
-        events.push({ kind: "action", action: bindings[swipe], pose: swipe });
+        events.push({ kind: "action", action, pose: swipe });
         return events;
       }
       if (this.anchor.moving) {
         this.hold.reset();
         this.recognition = {
-          pose,
+          pose: swipe || (pose !== "UNKNOWN" ? pose : "SWIPE_UP"),
           score,
           progress: 0,
           phase: "tracking",
-          hint: "Move your pointing hand smoothly to swipe.",
+          hint: "Move your hand smoothly to scroll or swipe.",
         };
         return events;
       }

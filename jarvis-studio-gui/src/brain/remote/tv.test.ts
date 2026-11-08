@@ -231,6 +231,57 @@ describe("runTvControl", () => {
       expect(r.summary, action).not.toMatch(/don't know the TV action/);
     }
   });
+
+  it("toggles playback through session state or media dispatch fallback", async () => {
+    const playingTv = fakeTv([
+      [/mCurrentFocus/, focus("com.netflix.ninja")],
+      [/media_session/, [nf(3, 1000), nf(3, 1000), nf(3, 1000), nf(3, 3500), nf(2, 3600)]],
+    ]);
+    const pauseRes = await runTvControl(playingTv.shell, "toggle", "", "", env);
+    expect(pauseRes).toMatchObject({ ok: true, summary: "Paused Netflix." });
+
+    const unknownTv = fakeTv([[/mCurrentFocus/, focus("com.example.player")]]);
+    const unknownRes = await runTvControl(unknownTv.shell, "toggle", "", "", env);
+    expect(unknownRes.ok).toBe(true);
+    expect(unknownTv.sent.some((c) => c.includes("cmd media_session dispatch play-pause"))).toBe(true);
+  });
+
+  it("sends next and previous commands with fallback keyevents", async () => {
+    const tv = fakeTv([[/mCurrentFocus/, focus("com.google.android.youtube.tv")]]);
+    const nextRes = await runTvControl(tv.shell, "next", "", "", env);
+    expect(nextRes.ok).toBe(true);
+    expect(tv.sent.some((c) => c.includes("cmd media_session dispatch next"))).toBe(true);
+
+    const prevRes = await runTvControl(tv.shell, "previous", "", "", env);
+    expect(prevRes.ok).toBe(true);
+    expect(tv.sent.some((c) => c.includes("cmd media_session dispatch previous"))).toBe(true);
+  });
+
+  it("handles key commands for play_pause, next, previous and mute", async () => {
+    const tv = fakeTv([[/mCurrentFocus/, focus("com.netflix.ninja")]]);
+    const playPauseRes = await runTvControl(tv.shell, "key", "play_pause", "", env);
+    expect(playPauseRes.ok).toBe(true);
+
+    const nextRes = await runTvControl(tv.shell, "key", "next", "", env);
+    expect(nextRes.ok).toBe(true);
+
+    const prevRes = await runTvControl(tv.shell, "key", "previous", "", env);
+    expect(prevRes.ok).toBe(true);
+
+    const muteRes = await runTvControl(tv.shell, "key", "mute", "", env);
+    expect(muteRes.ok).toBe(true);
+  });
+
+  it("recovers gracefully when mute state does not change in dumpsys audio", async () => {
+    const tv = fakeTv([[/dumpsys audio/, ["   Muted: false", "   Muted: false"]]]);
+    const r = await runTvControl(tv.shell, "mute", "", "", env);
+    expect(r).toMatchObject({ ok: true, summary: "Sent mute to the TV." });
+    expect(
+      tv.sent.some(
+        (c) => c.includes("cmd media_session dispatch mute") || c.includes("keyevent 91"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("helpers", () => {

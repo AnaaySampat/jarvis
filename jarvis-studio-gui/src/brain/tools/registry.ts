@@ -17,6 +17,7 @@
 
 import type { ActionSpec, Capabilities, ToolDeclaration, ToolParam } from "../types";
 import type { BrainConfig as Cfg } from "../config";
+import type { AvailabilityMap } from "./availability";
 
 const fn = (
   name: string,
@@ -38,7 +39,8 @@ const str = (description: string, en?: string[]) => ({
   description,
   ...(en ? { enum: en } : {}),
 });
-const int = (description: string) => ({ type: "integer" as const, description });
+const int = (description: string, minimum = -2_147_483_648, maximum = 2_147_483_647) =>
+  ({ type: "integer" as const, description, minimum, maximum });
 
 /**
  * What this install can actually DO — derived from the credentials present, not
@@ -56,11 +58,11 @@ const int = (description: string) => ({ type: "integer" as const, description })
  * question from "who is generating the tokens".
  */
 export function capabilitiesFor(cfg: Pick<Cfg, "tier" | "keys">): Capabilities {
-  // Grounded search needs a Gemini Developer API key specifically. Vertex callers
-  // carry one implicitly via the service account, so the tier still counts there.
-  const webOk = Boolean(cfg.keys?.gemini?.length) || cfg.tier === "vertex";
-  // Places is Vertex/ADC-only for now; everything else falls back to OpenStreetMap.
-  const placesOk = cfg.tier === "vertex";
+  // The implemented search paths use Developer API grounding or Tavily, not Vertex auth.
+  const webOk = Boolean(cfg.keys?.gemini?.length || cfg.keys?.tavily?.length);
+  // The current implementation is category lookup through OpenStreetMap on every tier.
+  // No Vertex-specific brand lookup is implemented; do not advertise one.
+  const placesOk = false;
   return { placesOk, webOk };
 }
 
@@ -111,6 +113,8 @@ export interface PaletteOpts {
   pcPaired?: boolean;
   /** An Android TV is set up → advertise `tv_control`. */
   tvPaired?: boolean;
+  availability?: AvailabilityMap;
+  imagesAvailable?: boolean;
 }
 
 /** Every `tv_control` action; each has its handler in remote/tv.ts:runTvControl. */
@@ -119,6 +123,9 @@ export const TV_ACTIONS = [
   "open_app",
   "pause",
   "resume",
+  "toggle",
+  "next",
+  "previous",
   "volume_up",
   "volume_down",
   "set_volume",
@@ -169,6 +176,10 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       { result_id: str("Result ID from an earlier tool result") },
       ["result_id"],
     ),
+    fn("check_action_outcome", "Check an uncertain action's actual native reply without running it again. Use the result_id from that action. An unknown result never authorizes a retry.",
+      { result_id: str("Result ID of the uncertain action in this workflow") }, ["result_id"]),
+    fn("request_tool_access", "Open the permission or folder setup needed by a phone tool. The user grants access in Android; opening setup does not grant it. Then try the original tool only after access is granted.",
+      { tool: str("Tool needing access", ["phone_task", "take_screenshot", "read_notifications", "read_file", "list_directory", "manage_schedule"]) }, ["tool"]),
     fn(
       "consult_agent",
       "Ask a specialist for information or a draft. Helpers cannot send, save, publish or change anything; no recursive consultations.",
@@ -193,7 +204,7 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       "name",
     ]),
     fn("open_website", "Open a URL.", { url: str("The full URL or domain.") }, ["url"]),
-    fn("set_volume", "Set the media volume (0–100).", { level: int("Volume from 0 to 100.") }, [
+    fn("set_volume", "Set the media volume (0–100).", { level: int("Volume from 0 to 100.", 0, 100) }, [
       "level",
     ]),
     // ── One-step phone actions (DirectActions.kt). Each reports the state Android
@@ -210,7 +221,7 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
         action: str("What to do.", DEVICE_ACTIONS),
         value: int(
           "brightness: 0-100, or -1 for auto-brightness. volume_up/volume_down: how many " +
-            "steps (default 1). Otherwise omit.",
+          "steps (default 1). Otherwise omit.", -1, 100,
         ),
       },
       ["action"],
@@ -285,15 +296,6 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       "Open a file JARVIS saved (recording, screenshot, QR…).",
       { name: str("Which saved file.") },
       ["name"],
-    ),
-    fn(
-      "record",
-      "Start/stop recording audio, video, or the screen.",
-      {
-        media: str("What to record.", ["audio", "video", "screen"]),
-        action: str("Start or stop.", ["start", "stop"]),
-      },
-      ["media", "action"],
     ),
     fn("read_clipboard", "Read what the user has copied."),
     fn(
@@ -370,15 +372,15 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
         "('5 minute timer') use set_timer instead.",
       {
         when: str("When to fire, e.g. 'in 10 minutes', 'at 3pm'."),
-        text: str("What to remind about (optional)."),
+        text: str("What to remind the user about."),
       },
-      ["when"],
+      ["when", "text"],
     ),
     fn(
       "set_timer",
       "Start a countdown timer in the phone's Clock app.",
       {
-        seconds: int("Length of the timer in seconds."),
+        seconds: int("Length of the timer in seconds.", 1),
         label: str("What the timer is for (optional)."),
       },
       ["seconds"],
@@ -387,8 +389,8 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
       "set_alarm",
       "Set an alarm in the phone's Clock app at a time of day.",
       {
-        hour: int("Hour of day, 0-23."),
-        minute: int("Minute, 0-59."),
+        hour: int("Hour of day, 0-23.", 0, 23),
+        minute: int("Minute, 0-59.", 0, 59),
         label: str("What the alarm is for (optional)."),
         days: str("Repeat: 'daily', 'weekdays', 'weekends', or 'mon,wed,fri'. Omit for one-off."),
       },
@@ -503,7 +505,10 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
     fn(
       "phone_task",
       "Do a WHOLE task in a phone app via the silent on-phone operator (it can " +
-        "open apps, read the screen, tap, type, scroll). Give the complete goal.",
+        "open apps, read the screen, tap, type, scroll). Give the complete goal, including " +
+        "every value the user wants reported. For a lookup, request the actual answer, " +
+        "not just opening its settings page. One successful phone_task completes the phone " +
+        "handoff for this request; use its answer and findings instead of launching it again.",
       {
         goal: str("The whole task, e.g. 'open WhatsApp and message X'."),
         stay_in_app: {
@@ -595,21 +600,32 @@ export function toolPalette(cfg: Cfg, opts: PaletteOpts = {}): ToolDeclaration[]
               season: int(
                 "For play on Netflix: the season number — only when the user names a season or " +
                   "episode ('season 1 episode 1', 'from the beginning' = 1). Omit to resume where " +
-                  "they left off.",
+                  "they left off.", 1,
               ),
               episode: int(
-                "For play on Netflix: the episode number — only when the user names one.",
+                "For play on Netflix: the episode number — only when the user names one.", 1,
               ),
             },
             ["action"],
           ),
         ]
       : []),
-  ];
+  ].filter((tool) =>
+    opts.availability?.[tool.name]?.state !== "unavailable" &&
+    (tool.name !== "take_screenshot" || opts.imagesAvailable !== false) &&
+    (tool.name !== "generate_image" || Boolean(cfg.keys.gemini?.length)),
+  ).map((tool) => {
+    const access = opts.availability?.[tool.name];
+    return access?.state === "permission_required"
+      ? { ...tool, description: `${tool.description} ACCESS REQUIRED: ${access.reason ?? "Grant access first."}` }
+      : tool;
+  });
 }
 
 // function name → ActionSpec builder. Port of `live_tools.py:_SPEC`.
 const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
+  check_action_outcome: (a) => ({ type: "check_action_outcome", result_id: a.result_id ?? "" }),
+  request_tool_access: (a) => ({ type: "request_tool_access", tool: a.tool ?? "" }),
   read_agent_result: (a) => ({ type: "read_agent_result", result_id: a.result_id ?? "" }),
   consult_agent: (a) => ({
     type: "consult_agent",
@@ -735,8 +751,8 @@ const SPEC: Record<string, (a: Record<string, unknown>) => ActionSpec> = {
 /** Lower a tool call to one internal ActionSpec. Port of `to_spec()`. */
 export function toSpec(name: string, args?: Record<string, unknown>): ActionSpec {
   const a = args ?? {};
-  const builder = SPEC[name];
-  return builder ? builder(a) : { type: name, ...a };
+  if (!Object.hasOwn(SPEC, name)) throw new Error("Unknown tool name.");
+  return SPEC[name]!(a);
 }
 
 // ── Wire-shape converters (single source of truth = `toolPalette`) ──
@@ -832,8 +848,8 @@ export const TOOL_GROUPS: Record<string, { blurb: string; tools: string[]; cue: 
     cue: /\b(near(?:by|est)?|closest|around here|directions?|how far|distance|route|restaurants?|caf[eé]s?|coffee|bakery|pharmacy|atm|hotels?|petrol|fuel|mall|airport|station|where am i|my location|i'?m (?:in|at|near)|i am (?:in|at|near)|pin)\b/i,
   },
   media: {
-    blurb: "recording, screenshots, QR codes, generating images",
-    tools: ["record", "take_screenshot", "make_qr_code", "generate_image"],
+    blurb: "screenshots, QR codes, generating images",
+    tools: ["take_screenshot", "make_qr_code", "generate_image"],
     cue: /\b(record(?:ing)?|screenshot|screen ?shot|qr|image|picture|draw(?:ing)?|logo|wallpaper|illustration|generate)\b/i,
   },
   planner: {

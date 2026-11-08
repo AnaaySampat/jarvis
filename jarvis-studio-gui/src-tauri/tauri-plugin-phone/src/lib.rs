@@ -41,6 +41,7 @@ impl<R: Runtime, T: Manager<R>> PhoneExt<R> for T {
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("phone")
         .invoke_handler(tauri::generate_handler![
+            commands::app_update,
             commands::is_enabled,
             commands::health_status,
             commands::health_export,

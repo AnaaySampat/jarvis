@@ -3,6 +3,7 @@
 [default]
 description = "Allows the JARVIS brain to drive the phone via the AccessibilityService."
 permissions = [
+    "allow-app-update",
     "allow-is-enabled",
     "allow-health-status",
     "allow-health-export",

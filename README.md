@@ -6,8 +6,8 @@ JARVIS is a voice assistant for Android that can use apps, carry out tasks on yo
 paired Windows PC, research with sources, and remember what matters to you.
 Say **“Hey Jarvis”**, type a request, or choose a specialist agent.
 
-The [ecosystem foundation preview](docs/ECOSYSTEM-IMPLEMENTATION.md) adds conversation
-task recovery, Health and private diagnostics. Enable it explicitly in Settings →
+The [ecosystem foundation preview](docs/ECOSYSTEM-IMPLEMENTATION.md) adds Health
+and private diagnostics. Enable it explicitly in Settings →
 Ecosystem Health → Foundation preview. The existing release remains available;
 later ecosystem milestones await the recorded live acceptance gate.
 
@@ -41,6 +41,14 @@ direct phone actions. Messages and calls can use contact names, with an on-scree
 confirmation before they go out. **“Hey Jarvis”** listens on-device through a
 foreground service, including while the app is in the background; push-to-talk,
 spoken replies and conversation mode are available too.
+
+### See the work in chat
+
+The 2.5.6-rc.3 build shows tool calls live inside each reply. Expand a row for
+its safe inputs, outcome and timing; longer phone/PC tasks group their progress
+underneath and link to Tasks and STOP. Activity stays with saved chats, and
+interrupted work restores as unconfirmed for review. These changes are included
+in the local signed APK; see [validation status](docs/STATUS.md).
 
 ### Specialist agents, including research directly on your phone
 
@@ -276,18 +284,35 @@ carries hand-made settings (`allowBackup="false"`, the release cleartext rule, s
 
 ## Releasing
 
-Bump `version` in `jarvis-studio-gui/package.json` and `src-tauri/tauri.conf.json`,
-commit, then tag and push: `git tag v2.5.0 && git push origin v2.5.0`. The Release
-workflow (`.github/workflows/release.yml`) checks the app (typecheck, lint, tests),
-builds a signed arm64 APK and publishes it as a GitHub release, which the app's update
-notice then offers. It refuses a tag that doesn't match the version.
+Android updates are checked at launch and approximately every six hours in the background.
+A dedicated popup shows the release's feature count, highlights and fixes. Users can download
+in the app, snooze until tomorrow, skip a version or check manually under **Settings → System → Updates**.
+Wi-Fi auto-download is optional. APKs are checked against their release checksum and the installed
+app's package/signing identity before Android asks the user to confirm installation.
 
-It needs the key the installed app is signed with, as repository secrets:
-`ANDROID_KEYSTORE_BASE64` (the keystore, base64), `ANDROID_KEY_ALIAS` and
-`ANDROID_KEYSTORE_PASSWORD`. Without them nothing is published — an APK signed with
-another key can't update the app. (Built locally with the debug keystore so far? That's
-`~/.android/debug.keystore`, alias `androiddebugkey`, password `android`.) "Run workflow"
-on the Actions tab does a dry run with no release.
+For each release:
+
+1. Bump the version in `jarvis-studio-gui/package.json`, its lockfile, `src-tauri/tauri.conf.json`
+   and the app's Cargo package/lockfile. Set `bundle.android.versionCode` explicitly to a value
+   higher than every published build, including RCs and betas.
+2. Add `docs/releases/v<version>.json` with `versionName`, `title`, `features` and `fixes`.
+   Each highlight has a stable `id`, short `title` and optional `description`. Add matching Markdown notes.
+3. Tag and push the matching version. `.github/workflows/release.yml` runs checks, builds the
+   signed arm64 APK, inspects its package/version/ABI, verifies its signature and generates
+   `android-update.json` with the real APK size and SHA-256. Publishing checks that the Android
+   build code exceeds published legacy and manifest-based releases, uploads all assets to a draft,
+   then publishes the complete release. Existing foundation-promotion gates still apply.
+
+The release needs the **same signing key as the installed app**, supplied through repository
+secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEYSTORE_PASSWORD`.
+The updater rejects signing mismatches; uninstalling is not an update strategy.
+"Run workflow" performs a dry run and uploads artifacts without publishing.
+
+The first updater-enabled release must be installed through the existing release link.
+Subsequent releases can use the in-app flow. Background timing depends on Android scheduling,
+and denied notification permission leaves the popup available when JARVIS next opens.
+
+See [the implementation plan and validation notes](docs/ANDROID-AUTO-UPDATE-PLAN.md).
 
 ## Keys and security
 

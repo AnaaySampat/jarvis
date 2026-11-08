@@ -3,6 +3,7 @@
 // plugin is compiled into the app. Command names here are the snake_case JS names;
 // the Rust mobile layer maps each to its camelCase Kotlin @Command method.
 const COMMANDS: &[&str] = &[
+    "app_update",
     "is_enabled",
     "health_status",
     "health_export",

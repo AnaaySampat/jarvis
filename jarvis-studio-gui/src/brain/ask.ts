@@ -105,11 +105,13 @@ export function benchFromNative(b: {
   );
 }
 
+export type RouteEvent = "request" | "fallback" | "hedge";
 export interface AskOpts {
   maxOutputTokens?: number;
   disableThinking?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
+  onRouteEvent?: (event: RouteEvent) => void;
 }
 
 /**
@@ -157,14 +159,14 @@ export async function chatOverLadder(
   const userText = [...convo].reverse().find((m) => m.role === "user")?.content ?? "";
   // The class also picks the smart-routing tier for a pinned model's fallbacks.
   const requestedClass = opts?.disableThinking ? "dumb" : taskModelClass(userText);
-  // A photo the user attached goes only to Google's models: the OpenAI-compatible client
-  // sends text alone, so any other route would answer about a photo it never saw.
-  const hasPhoto = convo.some((m) => m.role === "user" && m.images?.length);
+  // Both user attachments and tool screenshots must reach a client that sends pixels.
+  // Keep the restriction for every round, fallback and hedge carrying those images.
+  const hasPhoto = convo.some((m) => Boolean(m.images?.length));
   const allRoutes = fastFirst(routesFor(cfg, requestedClass, tools.length > 0)).filter(
     (r) => !hasPhoto || !isCompatProvider(r.provider),
   );
   if (hasPhoto && !allRoutes.length) {
-    throw new Error("Looking at photos needs a Gemini or Vertex AI key — add one in Settings.");
+    throw new Error("Looking at photos or tool screenshots needs an image-capable Gemini or Vertex AI route. Check your provider selection and keys in Settings.");
   }
   let lastError: unknown = null;
   const skipModels = new Set<string>();
@@ -226,6 +228,7 @@ export async function chatOverLadder(
         // window — exactly the silent fallback this is here to surface.
         const head = allRoutes[0]!;
         if (route.model !== head.model || route.provider !== head.provider) {
+          opts?.onRouteEvent?.("fallback");
           // lastError is null when the preferred route never ran this turn because
           // quota had already benched it — say that instead of printing "null".
           const why = lastError
@@ -282,13 +285,15 @@ export async function chatOverLadder(
   ): Promise<{ reply: LLMReply; route: quota.Route; ms: number }> {
     type Settled = { ok: true; reply: LLMReply } | { ok: false; err: unknown };
     const started = Date.now();
-    const ask = (route: quota.Route, signal: AbortSignal): Promise<Settled> =>
-      providerFor(cfg, route.provider)
+    const ask = (route: quota.Route, signal: AbortSignal): Promise<Settled> => {
+      opts?.onRouteEvent?.("request");
+      return providerFor(cfg, route.provider)
         .chat(convo, tools, { ...opts, model: route.model, keyIndex: route.keyIndex, signal })
         .then(
           (reply): Settled => ({ ok: true, reply }),
           (err: unknown): Settled => ({ ok: false, err }),
         );
+    };
     const ctlA = linkedAbort(opts?.signal);
     const a = ask(first, ctlA.signal);
     const early = backup
@@ -300,6 +305,7 @@ export async function chatOverLadder(
       return { reply: early.reply, route: first, ms: Date.now() - started };
     }
     const hedge = backup!;
+    opts?.onRouteEvent?.("hedge");
     const hedgeStart = Date.now();
     console.info(
       `[route] ${first.provider}/${first.model} slow (>${HEDGE_AFTER_MS}ms) — also asking ${hedge.provider}/${hedge.model}`,

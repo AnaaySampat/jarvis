@@ -20,6 +20,7 @@ fn unavailable() -> ActionResponse {
         summary: "On-phone control is only available on Android.".into(),
         code: Some("not_on_device".into()),
         generation: None,
+        verification: None,
     }
 }
 
@@ -44,6 +45,9 @@ macro_rules! unavailable_command {
 }
 
 impl<R: Runtime> Phone<R> {
+    pub fn app_update(&self, _p: AppUpdateRequest) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "phase": "unavailable" }))
+    }
     unavailable_command!(start_gesture_recognition(GestureStartRequest));
     unavailable_command!(take_gesture_photo());
     unavailable_command!(stop_gesture_recognition());
@@ -101,7 +105,7 @@ impl<R: Runtime> Phone<R> {
     unavailable_command!(show_stop_overlay());
     unavailable_command!(hide_stop_overlay());
     pub fn poll_stop_overlay(&self) -> crate::Result<crate::models::StopOverlayStateResponse> {
-        Ok(crate::models::StopOverlayStateResponse { seq: 0 })
+        Ok(crate::models::StopOverlayStateResponse { seq: 0, visible: None })
     }
     unavailable_command!(request_overlay_permission());
     pub fn get_device_stats(&self) -> crate::Result<DeviceStatsResponse> {

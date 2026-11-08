@@ -34,22 +34,38 @@ export const resultId = () =>
 
 export function agentResult(r: ToolResult, task = "", tool = ""): AgentResult {
   const data = object(r.data);
-  const delegated = tool === "phone_task" || tool === "pc_task";
+  const delegated = ["phone_task", "pc_task", "pc_screenshot"].includes(tool);
   const proof = object(data.proof);
   const nativeReceipt =
     typeof data.verificationReceipt === "string" &&
     /^aura\.verify\.v1:(model|deterministic):[a-f0-9]{64}$/.test(data.verificationReceipt);
   const remoteReceipt = proof.passed === true && strings(proof.evidence_ids).length > 0;
-  const verified = !delegated || nativeReceipt || remoteReceipt;
+  const check = r.verification;
+  const readbackMatches =
+    !check ||
+    (check.status === "verified" &&
+      typeof check.method === "string" &&
+      Boolean(check.method.trim()) &&
+      Boolean(check.expected && Object.keys(check.expected).length && check.observed) &&
+      Object.entries(check.expected ?? {}).every(
+        ([key, value]) =>
+          value !== undefined &&
+          Object.hasOwn(check.observed!, key) &&
+          JSON.stringify(value) === JSON.stringify(check.observed?.[key]),
+      ));
+  const verified = (!delegated || nativeReceipt || remoteReceipt) && readbackMatches;
   const status: ResultStatus = r.ok
     ? verified
       ? "succeeded"
       : "unverified"
-    : r.needsApproval || /approval|blocked/.test(r.error ?? "")
-      ? "blocked"
-      : /unverified|operator_lost|verification/.test(r.error ?? "")
-        ? "unverified"
-        : "failed";
+    : check?.status === "unverified"
+      ? "unverified"
+      : r.needsApproval || /approval|blocked/.test(r.error ?? "")
+        ? "blocked"
+        : data.acted === true ||
+            /unverified|operator_lost|verification|plugin_error|native_outcome_unknown/.test(r.error ?? "")
+          ? "unverified"
+          : "failed";
   const evidence =
     r.ok && verified
       ? [
@@ -59,7 +75,7 @@ export function agentResult(r: ToolResult, task = "", tool = ""): AgentResult {
               : (strings(proof.evidence_ids)[0] ?? resultId()),
             kind: delegated ? "completion_check" : "tool_result",
             source: tool,
-            detail: r.summary,
+            detail: check ? `${check.method}: ${JSON.stringify(check.observed)}` : r.summary,
           },
         ]
       : [];
@@ -89,7 +105,11 @@ export function agentResult(r: ToolResult, task = "", tool = ""): AgentResult {
     status,
     ok: status === "succeeded",
     summary:
-      r.ok && !verified ? "Completion could not be verified. Check before retrying." : r.summary,
+      r.ok && !verified
+        ? check?.status === "unverified"
+          ? r.summary
+          : "Completion could not be verified. Check before retrying."
+        : r.summary,
     findings,
     artifacts,
     evidence,

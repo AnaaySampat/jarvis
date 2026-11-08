@@ -13,6 +13,7 @@ import { toSpec } from "./registry";
 import { runSchedule } from "../schedule/store";
 import type { Platform } from "../platform";
 import type { BrainConfig } from "../config";
+import type { ToolResult } from "../types";
 
 function makeDeps(over: Partial<BrainConfig> = {}) {
   const clock = {
@@ -64,6 +65,14 @@ describe("tool lowering", () => {
 });
 
 describe("clock dispatch", () => {
+  it("does not report a saved alarm when native only accepted the intent", async () => {
+    const { clock, deps } = makeDeps();
+    clock.setAlarm.mockResolvedValueOnce({ ok: true, summary: "Sent the alarm request. Check Clock.",
+      verification: { status: "unverified", method: "android_clock_intent_accepted" },
+    } as ToolResult);
+    expect(await dispatch({ type: "clock", do: "alarm", hour: 7, minute: 0 }, deps))
+      .toMatchObject({ ok: false, error: "unverified_success" });
+  });
   it("starts a timer in the Clock app", async () => {
     const { clock, deps } = makeDeps();
     const r = await dispatch({ type: "clock", do: "timer", seconds: 300, label: "pasta" }, deps);
@@ -138,6 +147,7 @@ describe("reminders", () => {
     const r = await dispatch({ type: "reminder", when: "sometime later", text: "x" }, deps);
     expect(clock.setAlarm).not.toHaveBeenCalled();
     expect(r.summary).toMatch(/nothing will go off/i);
+    expect(r.ok).toBe(false);
   });
 
   it("still reports the agenda entry when the Clock refuses", async () => {
@@ -147,10 +157,35 @@ describe("reminders", () => {
     // The agenda write really happened, so don't claim total failure — but do
     // surface that the alarm part didn't.
     expect(r.summary).toMatch(/No clock app/);
+    expect(r.ok).toBe(false);
   });
 });
 
 describe("calendar mirroring", () => {
+  it("reconciles a late calendar receipt without adding a second event or agenda item", async () => {
+    const { calendar, deps } = makeDeps();
+    runSchedule({ do: "clear", day: "today" });
+    calendar.add.mockResolvedValueOnce({ ok: false, summary: "Calendar receipt unavailable.", nativeOutcomeId: "calendar-1", error: "native_outcome_unknown" } as ToolResult);
+    deps.platform.reconcileOutcome = vi.fn(async () => ({ ok: true, summary: "Saved event.", eventId: 7429 }));
+    const reply = await dispatch({ type: "schedule", do: "add", day: "today", time: "18:00", task: "late calendar test" }, deps);
+    expect(reply).toMatchObject({ ok: false, nativeOutcomeId: "calendar-1", error: "native_outcome_unknown" });
+    expect(await reply.reconcileOutcome!()).toMatchObject({ ok: true });
+    expect(calendar.add).toHaveBeenCalledOnce();
+    expect(runSchedule({ do: "get", day: "today" }).summary).toContain("1 item");
+    expect(runSchedule({ do: "remove", day: "today", match: "late calendar test" }).item?.calendarEventId).toBe(7429);
+  });
+
+  it("keeps a late receipt unverified when its agenda row is ambiguous", async () => {
+    const { calendar, deps } = makeDeps();
+    runSchedule({ do: "clear", day: "today" });
+    runSchedule({ do: "add", day: "today", time: "18:00", task: "ambiguous event" });
+    calendar.add.mockResolvedValueOnce({ ok: false, summary: "No receipt.", nativeOutcomeId: "calendar-2" } as ToolResult);
+    deps.platform.reconcileOutcome = vi.fn(async () => ({ ok: true, summary: "Saved event.", eventId: 7430 }));
+    const reply = await dispatch({ type: "schedule", do: "add", day: "today", time: "18:00", task: "ambiguous event" }, deps);
+    expect(await reply.reconcileOutcome!()).toMatchObject({ ok: false, error: "native_outcome_unknown" });
+    expect(calendar.add).toHaveBeenCalledOnce();
+    runSchedule({ do: "clear", day: "today" });
+  });
   it("writes an agenda add into the real calendar and keeps the event id", async () => {
     const { calendar, deps } = makeDeps();
     runSchedule({ do: "clear", day: "monday" });

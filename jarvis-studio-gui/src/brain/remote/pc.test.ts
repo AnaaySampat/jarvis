@@ -724,7 +724,8 @@ describe("RemotePC — durable v2 transport", () => {
     pc.connect();
     await vi.advanceTimersByTimeAsync(0);
     await waitForOnline(pc);
-    const task = pc.runTask("do mine only");
+    const progress = vi.fn();
+    const task = pc.runTask("do mine only", "browser", "", progress);
     await vi.advanceTimersByTimeAsync(0);
     const ws = FakeWS.instances.at(-1)!;
     await waitForWire(ws, "task.submit");
@@ -745,6 +746,8 @@ describe("RemotePC — durable v2 transport", () => {
       3,
     );
     await expect(task).resolves.toMatchObject({ ok: true, summary: "mine" });
+    expect(progress.mock.calls.every(([event]) => event.taskId === taskId)).toBe(true);
+    expect(progress.mock.calls.filter(([event]) => event.event === "task.event" && event.seq === 2)).toHaveLength(1);
   });
 
   it("ambient telemetry cannot extend the task watchdog and timeout sends task.cancel", async () => {

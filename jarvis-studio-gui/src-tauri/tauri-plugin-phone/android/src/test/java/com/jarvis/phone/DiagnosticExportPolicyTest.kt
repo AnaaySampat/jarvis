@@ -22,4 +22,18 @@ class DiagnosticExportPolicyTest {
     }
     @Test(expected = IllegalArgumentException::class)
     fun refusesUnversionedExports() { DiagnosticExportPolicy.sanitize("{}") }
+    @Test fun includesOnlyNumericPerformanceCounters() {
+        val secret = "private model route and prompt"
+        val row = JSONObject().put("status", "completed").put("instrumentation_version", 2)
+            .put("choosing_ms", 50).put("executing_ms", 30).put("fallbacks", 1)
+            .put("model_requests", 3).put("verifying_ms", secret).put("provider", secret)
+        val source = JSONObject().put("version", 1).put("tasks", JSONArray().put(row))
+        val exported = DiagnosticExportPolicy.sanitize(source.toString())
+        assertFalse(exported.contains(secret))
+        val task = JSONObject(exported).getJSONArray("tasks").getJSONObject(0)
+        assertEquals(50, task.getInt("choosing_ms"))
+        assertEquals(30, task.getInt("executing_ms"))
+        assertEquals(3, task.getInt("model_requests"))
+        assertFalse(task.has("verifying_ms"))
+    }
 }

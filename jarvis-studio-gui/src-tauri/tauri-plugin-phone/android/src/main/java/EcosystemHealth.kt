@@ -44,7 +44,10 @@ internal object DiagnosticExportPolicy {
             val status = row.optString("status")
             if (status !in states) continue
             val task = JSONObject().put("id", "task-${i + 1}").put("status", status)
-            for (key in listOf("elapsed_ms", "tool_calls", "model_decisions", "unverified_results")) {
+            for (key in listOf("elapsed_ms", "tool_calls", "model_decisions", "unverified_results",
+                "instrumentation_version", "choosing_ms", "executing_ms", "verifying_ms", "model_requests",
+                "fallbacks", "hedges", "proposed_calls", "invalid_calls", "scope_rejections",
+                "duplicates_prevented", "parallel_reads", "budget_extensions", "direct_turns", "recovery_checks", "resumes")) {
                 val value = row.optLong(key, -1)
                 if (value in 0..604_800_000L) task.put(key, value)
             }

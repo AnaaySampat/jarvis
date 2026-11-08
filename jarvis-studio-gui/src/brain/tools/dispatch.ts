@@ -17,7 +17,7 @@ import { type BrainConfig, configReady } from "../config";
 import { mediaNow, type Platform } from "../platform";
 import type { MemoryStore } from "../memory/store";
 import type { LocationService } from "./location";
-import { agendaStartMillis, runSchedule } from "../schedule/store";
+import { agendaStartMillis, attachCalendarReceipt, runSchedule } from "../schedule/store";
 import { parseReminderDetail } from "../schedule/reminderTime";
 import {
   addRoutine,
@@ -44,7 +44,12 @@ import { lookAtTv, runTvTask, type Sight } from "../remote/tvSight";
 import { chatOverLadder } from "../ask";
 import { agentMessage, PC_AGENT, type AgentMessage } from "../agents";
 import type { AgentResult } from "../results";
+import { agentResult } from "../results";
 import type { WorkflowJournal } from "../workflow";
+import { availabilityForSpec, type AvailabilityMap } from "./availability";
+import { activityToolName, toolActivity, emitToolActivity, finishToolActivity,
+  taskProgress, type ToolActivityContext, type ToolActivityObserver } from "../toolActivity";
+import { hasSideEffect } from "./operations";
 
 export function informationOnly(spec: ActionSpec): boolean {
   if (spec.type === "schedule") return ["get", "list", "show"].includes(String(spec.do ?? "get"));
@@ -62,16 +67,25 @@ export function informationOnly(spec: ActionSpec): boolean {
 }
 
 export interface DispatchDeps {
+  onToolActivity?: ToolActivityObserver;
+  toolActivity?: ToolActivityContext;
+  getToolAvailability?: () => Promise<AvailabilityMap>;
+  reconcileActionOutcome?: (resultId: string) => Promise<ToolResult>;
+  /** Stable identity committed before a side effect; never a provider-generated call ID. */
+  operationId?: string;
   /** Extra research rounds remain bounded and do not widen the tool scope. */
   maxToolRounds?: number;
+  /** An already claimed checkpoint; only WorkflowRecovery may provide this. */
+  resumeRun?: import("../workflow").Workflow;
   verifyCompletion?: (
     task: string,
     results: AgentResult[],
     answer: string,
+    onRouteEvent?: (event: import("../ask").RouteEvent) => void,
   ) => Promise<import("../completion").CompletionVerdict>;
   journal?: WorkflowJournal;
   readAgentResult?: (id: string) => AgentResult | undefined;
-  consultAgent?: (agent: string, question: string) => Promise<ToolResult>;
+  consultAgent?: (agent: string, question: string, parent?: ToolActivityContext) => Promise<ToolResult>;
   informationOnly?: boolean;
   platform: Platform;
   memory: MemoryStore;
@@ -81,7 +95,10 @@ export interface DispatchDeps {
   location: LocationService;
   /** Phase 3: a connected remote-PC link, or null when no PC is paired. */
   remote?: {
-    runTask(goal: string, kind?: "browser" | "computer" | "research"): Promise<ToolResult>;
+    runTask(goal: string, kind?: "browser" | "computer" | "research" | "auto", activity?: {
+      onProgress: (event: { event: string; data?: unknown; taskId?: string; seq?: number }) => void;
+      onApproval: (waiting: boolean) => void;
+    }): Promise<ToolResult>;
     /** Wake-on-LAN, then wait for the PC to reconnect (RemotePC.wake). */
     wake?(): Promise<ToolResult>;
   } | null;
@@ -126,20 +143,50 @@ export interface DispatchDeps {
  * remember to wire a new one up.
  */
 export async function dispatch(spec: ActionSpec, deps: DispatchDeps): Promise<ToolResult> {
-  const result: ToolResult =
-    deps.informationOnly && !informationOnly(spec)
-      ? {
-          ok: false,
-          error: "blocked",
-          summary: "Information-only consultation cannot change anything or call another helper.",
-        }
-      : await dispatchInner(spec, deps);
+  const activity = deps.toolActivity ?? toolActivity(activityToolName(spec), spec);
+  const started = Date.now();
+  let ran = false;
+  let progressSequence = 0;
+  emitToolActivity(deps.onToolActivity, activity, "queued");
   try {
-    deps.onDispatched?.(spec, result);
-  } catch {
-    /* an observer must never fail the action it's observing */
+    const access = deps.getToolAvailability
+      ? availabilityForSpec(spec, await deps.getToolAvailability()) : undefined;
+    let result: ToolResult;
+    if (deps.informationOnly && !informationOnly(spec)) {
+      result = { ok: false, error: "blocked",
+        summary: "Information-only consultation cannot change anything or call another helper." };
+    } else if (access && access.state !== "available") {
+      result = { ok: false, error: access.state === "permission_required" ? "permission_required" : "capability_unavailable",
+        summary: access.reason ?? "This tool is not available on this installation." };
+    } else {
+      ran = true;
+      emitToolActivity(deps.onToolActivity, activity, "running");
+      result = await dispatchInner(spec, { ...deps, toolActivity: activity,
+        onAgentEvent: (event) => {
+          taskProgress(deps.onToolActivity, activity, event, ++progressSequence);
+          try { deps.onAgentEvent?.(event); } catch { /* Observer only. */ }
+        },
+        ...(deps.authorizePhoneAction ? { authorizePhoneAction: async (request) => {
+          emitToolActivity(deps.onToolActivity, activity, "waiting_for_approval");
+          const decision = await deps.authorizePhoneAction!(request);
+          if (decision !== "deny") emitToolActivity(deps.onToolActivity, activity, "running");
+          return decision;
+        } } : {}),
+      });
+    }
+    if (result.ok && result.verification) {
+      const checked = agentResult(result, "", spec.type);
+      if (!checked.ok) result = { ...result, ok: false, error: "unverified_success", summary: checked.summary };
+    }
+    finishToolActivity(deps.onToolActivity, activity, result, started, ran);
+    try { deps.onDispatched?.(spec, result); }
+    catch { /* Display observers must never fail the action they observe. */ }
+    return result;
+  } catch (error) {
+    emitToolActivity(deps.onToolActivity, activity, ran && hasSideEffect(spec) ? "unconfirmed" : ran ? "failed" : "not_run",
+      { summary: "Execution ended without a confirmed result.", elapsedMs: Math.max(0, Date.now() - started) });
+    throw error;
   }
-  return result;
 }
 
 /**
@@ -151,6 +198,14 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
   const { platform, memory, remote } = deps;
   const httpCtx: HttpToolCtx = { config: deps.config, location: deps.location };
   switch (spec.type) {
+    case "check_action_outcome":
+      return deps.reconcileActionOutcome
+        ? deps.reconcileActionOutcome(String(spec.result_id ?? ""))
+        : { ok: false, error: "native_outcome_unknown", summary: "No native receipt is available for this action. Check the phone before retrying." };
+    case "request_tool_access":
+      return platform.requestToolAccess
+        ? platform.requestToolAccess(String(spec.tool ?? ""))
+        : { ok: false, error: "capability_unavailable", summary: "Permission setup is available only in the Android app." };
     case "read_agent_result": {
       const result = deps.readAgentResult?.(String(spec.result_id ?? ""));
       return result
@@ -163,7 +218,7 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
     }
     case "consult_agent":
       return deps.consultAgent
-        ? deps.consultAgent(String(spec.agent ?? ""), String(spec.question ?? ""))
+        ? deps.consultAgent(String(spec.agent ?? ""), String(spec.question ?? ""), deps.toolActivity)
         : { ok: false, error: "blocked", summary: "Consultation is unavailable in this request." };
     // ── HTTP info-tools (port from Python, pure network) ──
     case "weather":
@@ -242,6 +297,21 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
           const ev = await platform.calendar.add(String(payload.task ?? ""), startMillis);
           if (ev.ok && ev.eventId) payload.calendarEventId = ev.eventId;
           const r = runSchedule(payload);
+          if (ev.nativeOutcomeId) {
+            const reference = ev.nativeOutcomeId;
+            return { ok: false, error: "native_outcome_unknown", nativeOutcomeId: reference,
+              summary: `${r.summary} The calendar write is unconfirmed; it may still complete.`,
+              data: { completed: r.ok ? [r.summary] : [], remaining: ["Confirm the calendar write"] },
+              reconcileOutcome: async () => {
+                const actual = await platform.reconcileOutcome!(reference);
+                const eventId = "eventId" in actual ? Number(actual.eventId) : 0;
+                if (actual.ok && r.item && attachCalendarReceipt(String(payload.day ?? "today"), r.item, eventId))
+                  return { ok: true, summary: `${r.summary} It's in your calendar too.` };
+                return { ok: false, error: "native_outcome_unknown", nativeOutcomeId: reference,
+                  summary: `${r.summary} (${actual.summary}) The calendar link still needs confirmation.` };
+              },
+            };
+          }
           return {
             ok: r.ok,
             summary:
@@ -254,7 +324,16 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
 
       const r = runSchedule(payload);
       if (mirroring && (action === "remove" || action === "delete") && r.item?.calendarEventId) {
-        await platform.calendar.remove(r.item.calendarEventId);
+        const removed = await platform.calendar.remove(r.item.calendarEventId);
+        if (removed.nativeOutcomeId) {
+          const reference = removed.nativeOutcomeId;
+          return { ok: false, error: "native_outcome_unknown", nativeOutcomeId: reference,
+            summary: `${r.summary} The calendar deletion is unconfirmed.`,
+            reconcileOutcome: async () => {
+              const actual = await platform.reconcileOutcome!(reference);
+              return { ...actual, summary: `${r.summary} (${actual.summary})` };
+            } };
+        }
       }
       return { ok: r.ok, summary: r.summary };
     }
@@ -275,7 +354,8 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
       if (action === "alarm") {
         const hour = Number(spec.hour ?? -1);
         const minute = Number(spec.minute ?? 0);
-        if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+        if (!Number.isInteger(hour) || hour < 0 || hour > 23 ||
+            !Number.isInteger(minute) || minute < 0 || minute > 59) {
           return { ok: false, summary: "What time should I set that alarm for, sir?" };
         }
         return platform.clock.setAlarm(hour, minute, label, String(spec.days ?? ""));
@@ -309,7 +389,9 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
         // Couldn't resolve a concrete time — still on the agenda, but honest that
         // nothing will actually go off.
         return {
-          ok: agenda.ok,
+          ok: false,
+          error: "unverified_reminder",
+          data: { completed: agenda.ok ? [agenda.summary] : [], remaining: ["Set a reminder at a valid time"] },
           summary: `${agenda.summary} I couldn't work out exactly when though, so nothing will go off — check the agenda.`,
         };
       }
@@ -320,9 +402,29 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
         ? await platform.clock.setTimer(parsed.seconds, text)
         : await platform.clock.setAlarm(at.getHours(), at.getMinutes(), text);
       const kind = parsed.relative ? "timer" : "clock alarm";
-      return fired.ok
-        ? { ok: true, summary: `${agenda.summary} I've set a ${kind} for it too.` }
-        : { ok: agenda.ok, summary: `${agenda.summary} (${fired.summary})` };
+      if (fired.nativeOutcomeId) {
+        const reference = fired.nativeOutcomeId;
+        return { ok: false, error: "native_outcome_unknown", nativeOutcomeId: reference,
+          summary: `${agenda.summary} (${fired.summary})`,
+          data: { completed: agenda.ok ? [agenda.summary] : [], remaining: [`Confirm the ${kind}`] },
+          reconcileOutcome: async () => {
+            const actual = await platform.reconcileOutcome!(reference);
+            const checked = agentResult(actual, "", "clock");
+            return { ...actual, ok: agenda.ok && checked.ok,
+              error: checked.ok ? undefined : "native_outcome_unknown",
+              summary: `${agenda.summary} (${checked.summary})` };
+          },
+        };
+      }
+      const clockVerified = fired.ok && fired.verification?.status !== "unverified";
+      return clockVerified
+        ? { ok: agenda.ok, summary: `${agenda.summary} I've set a ${kind} for it too.` }
+        : {
+            ok: false,
+            error: "unverified_reminder",
+            summary: `${agenda.summary} (${fired.summary})`,
+            data: { completed: agenda.ok ? [agenda.summary] : [], remaining: [`Confirm the ${kind}`] },
+          };
     }
 
     // ── HUD screen customisation (local config) ──
@@ -427,15 +529,19 @@ async function dispatchInner(spec: ActionSpec, deps: DispatchDeps): Promise<Tool
     case "pc_task": {
       if (!remote) return { ok: false, summary: "No PC is paired yet." };
       // "research" only comes from the agent row (agents.ts); the model picks the two.
-      const kind = spec.kind === "computer" || spec.kind === "research" ? spec.kind : "browser";
+      const kind = spec.kind === "computer" || spec.kind === "research" || spec.kind === "auto" ? spec.kind : "browser";
       const goal = String(spec.goal ?? "");
       // The chat shows the hand-off: a picked PC agent gets the request ("handover", and
       // its result is the reply); the phone's turn asking one mid-turn gets its answer.
       const say = (m: AgentMessage) =>
         deps.onAgentEvent?.({ event: "agent_message", data: { ...m } });
-      const pcAgent = PC_AGENT[kind]!;
+      const pcAgent = PC_AGENT[kind === "auto" ? "computer" : kind]!;
       say(agentMessage("phone", pcAgent, spec.picked ? "handover" : "ask", goal));
-      const res = await remote.runTask(goal, kind);
+      let sequence = 0;
+      const res = await remote.runTask(goal, kind, {
+        onProgress: (event) => taskProgress(deps.onToolActivity, deps.toolActivity!, event, ++sequence),
+        onApproval: (waiting) => emitToolActivity(deps.onToolActivity, deps.toolActivity!, waiting ? "waiting_for_approval" : "running"),
+      });
       if (!spec.picked) {
         const found = (res.data as { findings?: unknown[] } | undefined)?.findings ?? [];
         say(agentMessage(pcAgent, "phone", "answer", res.summary, found));
@@ -694,7 +800,9 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
     return { ok: false, summary: quota.exhaustedMessage(), error: "rate_limited" };
   }
 
-  const id = `phone_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+  const id = deps.operationId
+    ? `phone_${deps.operationId.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+    : `phone_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   deps.onAgentEvent?.({ event: "agent_task", data: { id, kind: "phone", goal: g } });
   const end = (result: ToolResult, stopped = false): ToolResult => {
     deps.onAgentEvent?.({
@@ -768,7 +876,9 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
     }
     started = await phone.operatorStart({ taskId, goal: g, consent: true, routesJson, stayInApp });
   }
-  if (!started.ok) {
+  // A lost start acknowledgement must not mark a potentially running task failed.
+  // Poll the existing task identity; never submit a second operator_start.
+  if (!started.ok && started.error !== "native_outcome_unknown") {
     if (started.error === "accessibility_disabled") {
       await deps.platform.openAccessibilitySettings().catch(() => {});
       return giveUp({ ok: false, summary: A11Y_STALE_SUMMARY, error: "accessibility_disabled" });
@@ -801,14 +911,15 @@ async function runPhone(deps: DispatchDeps, goal: string, stayInApp = false): Pr
             "I lost track of that phone task, sir — it may have been interrupted. " +
             "Please check the screen before asking again.",
           error: "operator_lost",
+          nativeOutcomeId: `operator:${taskId}`,
           data: { acted: true }, // unknown, so assume it did: the next-turn retry is the user's call
         });
       }
       continue;
     }
     misses = 0;
-    for (const s of st.steps ?? []) {
-      deps.onAgentEvent?.({ event: "agent_step", data: { id, line: s.line, ok: s.ok } });
+    for (const [index, s] of (st.steps ?? []).entries()) {
+      deps.onAgentEvent?.({ event: "agent_step", data: { id, line: s.line, ok: s.ok, stepSeq: since + index + 1 } });
     }
     since += st.steps?.length ?? 0;
     if (!st.done || !st.result) continue;

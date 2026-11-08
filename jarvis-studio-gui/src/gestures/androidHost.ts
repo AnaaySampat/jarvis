@@ -82,9 +82,9 @@ export function androidGestureHost(options: HostOptions) {
         });
       if (action.startsWith("pc.")) return options.pcAction(action);
       const tv: Record<string, [string, string]> = {
-        "tv.toggle": ["key", "play_pause"],
-        "tv.next": ["key", "next"],
-        "tv.previous": ["key", "previous"],
+        "tv.toggle": ["toggle", ""],
+        "tv.next": ["next", ""],
+        "tv.previous": ["previous", ""],
         "tv.up": ["volume_up", "5"],
         "tv.down": ["volume_down", "5"],
         "tv.mute": ["mute", ""],

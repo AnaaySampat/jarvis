@@ -8,7 +8,7 @@
  * something that's gone. `npm run test:live` (replay.live.test.ts) asks a real model
  * the same questions instead.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LLMReply } from "../providers";
 import type { ToolDeclaration, ToolResult } from "../types";
 import fixtures from "./fixtures.json";
@@ -33,6 +33,11 @@ vi.mock("../tools/dispatch", () => ({
 import { runTurn } from "../loop";
 import type { DispatchDeps } from "../tools/dispatch";
 import { groupsFor, LOAD_TOOLS, toolPalette, turnPalette } from "../tools/registry";
+import { scoreSelection, selectionReport, type SelectionScore } from "./evaluation";
+const selectionScores: SelectionScore[] = [];
+afterAll(() => {
+  console.info("Recorded first-reply selection evaluation (scripted replay, not live model accuracy):", selectionReport(selectionScores));
+});
 
 export interface Fixture {
   name: string;
@@ -68,6 +73,9 @@ describe("replayed model turns", () => {
   for (const f of fixtures as Fixture[]) {
     it(f.name, async () => {
       const full = toolPalette(cfg, f.context);
+      if (f.live) selectionScores.push(scoreSelection({ text: f.model[0]?.text ?? "", toolCalls:
+        (f.model[0]?.toolCalls ?? []).map((c, i) => ({ id: String(i), name: c.name, args: c.args ?? {} })) },
+        f.live, turnPalette(full, groupsFor(f.user))));
       const names = new Set([...full.map((t) => t.name), LOAD_TOOLS]);
       for (const step of f.model) {
         for (const c of step.toolCalls ?? [])
@@ -87,7 +95,9 @@ describe("replayed model turns", () => {
       const out = await runTurn(
         [...(f.history ?? []), { role: "user", content: f.user }],
         turnPalette(full, groupsFor(f.user)),
-        { config: cfg } as unknown as DispatchDeps,
+        { config: cfg, verifyCompletion: async () => ({
+          status: "succeeded", completed: ["Scripted fixture objective"], remaining: [],
+        }) } as unknown as DispatchDeps,
         undefined,
         full,
       );

@@ -26,6 +26,73 @@ describe("Android durable cancellation polling", () => {
 
     await expect(androidPlatform.phone.isTaskCancelled?.("task-1")).resolves.toBe(true);
   });
+
+  it("preserves native verification evidence across the bridge", async () => {
+    const verification = { status: "verified", method: "android_audio_manager_readback",
+      expected: { streamIndex: 6 }, observed: { streamIndex: 6 } };
+    invokeMock.mockResolvedValueOnce({ ok: true, summary: "Volume is 40%.", verification });
+    expect(await androidPlatform.system.setVolume(40)).toMatchObject({ ok: true, verification });
+  });
+});
+
+describe("native availability and uncertain outcomes", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    vi.useFakeTimers();
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { __TAURI_INTERNALS__: {} } });
+  });
+  afterEach(() => { vi.useRealTimers(); Reflect.deleteProperty(globalThis, "window"); });
+
+  it("identifies missing access and unsupported Android screen capture", async () => {
+    invokeMock.mockResolvedValue({ ok: true, sdk: 29, permissions: { accessibility: false, notificationAccess: false } });
+    const availability = await androidPlatform.toolAvailability!();
+    expect(availability.phone_task?.state).toBe("permission_required");
+    expect(availability.read_notifications?.state).toBe("permission_required");
+    expect(availability.take_screenshot?.state).toBe("unavailable");
+    expect(availability.record?.state).toBe("unavailable");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("opens the existing permission path without claiming access was granted", async () => {
+    invokeMock.mockResolvedValue({ ok: true, summary: "Notification access settings opened." });
+    const reply = await androidPlatform.requestToolAccess!("read_notifications");
+    expect(reply.summary).toContain("settings opened");
+    expect(invokeMock).toHaveBeenCalledWith("plugin:phone|notification_action", expect.objectContaining({ action: "request_access" }));
+  });
+
+  it("checks current volume and a delayed original receipt without setting volume twice", async () => {
+    let finish!: (r: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => cmd.endsWith("set_volume")
+      ? new Promise((resolve) => { finish = resolve; })
+      : Promise.resolve({ ok: false, volumeReadback: { streamIndex: 6, maxStreamIndex: 15 } }));
+    const pending = androidPlatform.system.setVolume(40);
+    await vi.advanceTimersByTimeAsync(15_000);
+    const unknown = await pending;
+    expect(unknown).toMatchObject({ ok: false, error: "native_outcome_unknown" });
+    const checked = await androidPlatform.reconcileOutcome!(unknown.nativeOutcomeId!);
+    expect(checked.error).toBe("native_outcome_unknown");
+    expect(checked.summary).toContain("40%");
+    finish({ ok: true, summary: "Media volume is 40%.", verification: {
+      status: "verified", method: "android_audio_manager_readback", expected: { streamIndex: 6 }, observed: { streamIndex: 6 },
+    } });
+    await Promise.resolve();
+    expect(await androidPlatform.reconcileOutcome!(unknown.nativeOutcomeId!)).toMatchObject({ ok: true });
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "plugin:phone|set_volume")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("uses a durable verified phone-task receipt after the run registry is lost", async () => {
+    invokeMock.mockResolvedValueOnce({ ok: false, summary: "No such run." })
+      .mockResolvedValueOnce({ ok: true, state: "succeeded", verified: true, result: "Task completed.",
+        verificationReceipt: `aura.verify.v1:model:${"a".repeat(64)}` });
+    expect(await androidPlatform.reconcileOutcome!("operator:task-1")).toMatchObject({ ok: true, summary: "Task completed." });
+    expect(invokeMock.mock.calls.map(([cmd]) => cmd)).toEqual(["plugin:phone|operator_status", "plugin:phone|task_status"]);
+  });
+
+  it("does not accept an unsigned durable success claim", async () => {
+    invokeMock.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, state: "succeeded", verified: true });
+    expect(await androidPlatform.reconcileOutcome!("operator:task-1")).toMatchObject({ ok: false, error: "native_outcome_unknown" });
+  });
 });
 
 /** Each command's non-Option Rust args, as the camelCase keys JS must send. */

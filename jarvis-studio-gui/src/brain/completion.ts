@@ -15,6 +15,7 @@ export async function reviewCompletion(
   results: AgentResult[],
   config: BrainConfig,
   answer = "",
+  onRouteEvent?: (event: import("./ask").RouteEvent) => void,
 ): Promise<CompletionVerdict> {
   const unknown: CompletionVerdict = { status: "unverified", completed: [], remaining: [task] };
   // A model cannot promote an unverified external effect into a verified one.
@@ -37,7 +38,7 @@ export async function reviewCompletion(
     // that wrapper, but never fish a successful verdict out of arbitrary prose.
     let parsed: Record<string, unknown> | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const reply = await chatOverLadder(messages, [], config);
+      const reply = await chatOverLadder(messages, [], config, undefined, { onRouteEvent });
       try {
         if (reply.toolCalls.length) throw new Error("Unexpected tool call");
         const text = reply.text.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, "$1");

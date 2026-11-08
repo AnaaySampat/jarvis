@@ -1,0 +1,18 @@
+{
+  "versionName": "2.5.6-rc.3",
+  "title": "Live tool activity and safer task execution",
+  "features": [
+    { "id": "live-tool-activity", "title": "See tools working in chat", "description": "Follow tool names, approval waits, outcomes and elapsed time inside each reply." },
+    { "id": "nested-task-progress", "title": "Follow longer tasks", "description": "Phone and PC progress and specialist work are grouped under the task that started them, with links to Tasks and STOP." },
+    { "id": "saved-tool-history", "title": "Keep activity with saved chats", "description": "Compact activity records survive reopening and restart. Interrupted calls stay unconfirmed until their outcomes are checked." },
+    { "id": "bounded-orchestration", "title": "Faster, bounded execution", "description": "Independent reads can overlap, progressing tasks can earn limited extra rounds, and clear volume and timer commands avoid unnecessary model calls." },
+    { "id": "in-app-updates", "title": "Updates inside JARVIS", "description": "Review release changes, download an update in the app and install through Android's confirmation screen." }
+  ],
+  "fixes": [
+    { "id": "validated-operations", "title": "Reject invalid and duplicate actions", "description": "Tool arguments are checked before execution, with saved operation identities protecting against duplicate effects." },
+    { "id": "honest-outcomes", "title": "Keep uncertain results honest", "description": "Native timeouts and unconfirmed Clock intents remain unverified. Read-only outcome checks never repeat an action." },
+    { "id": "reply-ownership", "title": "Keep results in the correct conversation", "description": "Late results, nested activity and verified PC screenshots stay with the request that produced them." },
+    { "id": "capability-routing", "title": "Match tools to actual capabilities", "description": "Screenshot routing, permission checks and tool availability reflect the selected provider and installed Android capabilities." },
+    { "id": "private-activity", "title": "Keep activity metadata private", "description": "Tool history excludes credentials, raw arguments, message bodies and image payloads, and stays separate from model conversation context." }
+  ]
+}

@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { IS_MOBILE } from "../hooks/useAssistant";
 import ResponseRenderer from "../components/ResponseRenderer";
+import ChatToolActivity from "../components/ChatToolActivity";
 import Icon from "../components/Icon";
 import StateMessage from "../components/StateMessage";
 import Sheet, { ActionRow, Field, Group, HeaderButton, Toggle } from "../components/Sheet";
@@ -974,8 +975,9 @@ function AgentMessage({ m }) {
   );
 }
 
-const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy, onSetupProvider }) {
+const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy, onSetupProvider, onOpenTasks, onStopTask }) {
   if (m.role === "agents") return <AgentMessage m={m} />;
+  if (m.streaming && !m.text && !m.toolActivity?.length) return null;
   const user = m.role === "user";
   return (
     <div className={`cv-msg cv-msg--${user ? "user" : "jarvis"}`}>
@@ -987,7 +989,11 @@ const ChatMessage = memo(function ChatMessage({ m, runAction, onCopy, onSetupPro
             {m.text}
           </>
         ) : (
-          <ResponseRenderer text={m.text} actions={m.actions} runAction={runAction} />
+          <>
+            <ChatToolActivity rows={m.toolActivity} finished={m.finalized === true} onOpenTasks={onOpenTasks} onStopTask={onStopTask} />
+            {m.activityUnavailable && <p className="chat-tools-overview">Saved tool activity is no longer available.</p>}
+            <ResponseRenderer text={m.text} actions={m.actions} runAction={runAction} />
+          </>
         )}
       </div>
       {!user && onSetupProvider && <div className="cv-provider-setup">
@@ -1065,6 +1071,8 @@ export function AgentRow({ active = "auto", pcPaired, onPick }) {
 }
 
 export function ChatOverlay({
+  onOpenTasks,
+  onStopTask,
   providerRequired = false,
   onSetupProvider,
   open,
@@ -1371,7 +1379,7 @@ export function ChatOverlay({
     >
       <div className="cv" aria-live="polite">
         {messages.map((m) => (
-          <ChatMessage key={m.id} m={m} runAction={runAction} onCopy={copy}
+          <ChatMessage key={m.id} m={m} runAction={runAction} onCopy={copy} onOpenTasks={onOpenTasks} onStopTask={onStopTask}
             onSetupProvider={providerRequired && m === messages.at(-1) && messages.some((item) => item.role === "user") ? onSetupProvider : undefined} />
         ))}
         {/* Until you've said something — the launch greeting alone used to hide these. */}

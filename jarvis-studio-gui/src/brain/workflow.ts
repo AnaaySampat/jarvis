@@ -1,8 +1,9 @@
 /** Conversation-level checkpoints supplement the native phone-task journal.
- * No provider payloads or credentials are persisted. Recovery never replays tools.
+ * No provider payloads or credentials are persisted. Recovery never automatically replays effects.
  */
 import { makeKV, writeJson, type KV } from "./memory/store";
 import { resultId, type AgentResult } from "./results";
+import { newMetrics, type ToolMetrics } from "./toolMetrics";
 
 export interface Workflow {
   version: 1;
@@ -12,20 +13,16 @@ export interface Workflow {
   updated: number;
   plan: string[];
   results: AgentResult[];
-  pending: { id: string; tool: string; state: "intent_recorded" } | null;
+  pending: { id: string; tool: string; state: "intent_recorded"; effect?: boolean } | null;
+  /** Original authority, retained across continuation. Missing on legacy records. */
+  scope?: { onlyTools: string[] | null; informationOnly: boolean };
+  /** Write-ahead effect identities. Hashes only; no raw tool arguments. */
+  operations?: Array<{ id: string; key: string; tool: string; resultId?: string; nativeOutcomeId?: string }>;
   outcome?: import("./results").ResultStatus | "cancelled";
   cancelRequested?: boolean;
   reason?: string;
   completion?: import("./completion").CompletionVerdict;
-  metrics?: {
-    started_at_ms: number;
-    ended_at_ms?: number;
-    elapsed_ms: number;
-    model_decisions: number;
-    tool_calls: number;
-    unverified_results: number;
-    provider_cost: null;
-  };
+  metrics?: ToolMetrics;
 }
 const KEY = "jarvis.android.workflows.v1";
 const liveWorkflows = new Set<string>();
@@ -80,8 +77,18 @@ export class WorkflowJournal {
           !Array.isArray(r.plan) || r.plan.some((step: unknown) => typeof step !== "string") ||
           !["running", "succeeded", "suspended"].includes(r.state) ||
           !Array.isArray(r.results) ||
+          (r.scope !== undefined && (!r.scope || typeof r.scope.informationOnly !== "boolean" ||
+            (r.scope.onlyTools !== null && (!Array.isArray(r.scope.onlyTools) ||
+              r.scope.onlyTools.some((name: unknown) => typeof name !== "string"))))) ||
           r.results.some((result: AgentResult) => !result || typeof result.summary !== "string" || typeof result.ok !== "boolean") ||
-          (r.pending !== null && (!r.pending || typeof r.pending.id !== "string" || typeof r.pending.tool !== "string" || r.pending.state !== "intent_recorded")),
+          (r.operations !== undefined && (!Array.isArray(r.operations) || r.operations.some(
+            (op: NonNullable<Workflow["operations"]>[number]) => !op || typeof op.id !== "string" ||
+              !/^[a-f0-9]{64}$/.test(op.key) || typeof op.tool !== "string" ||
+              (op.resultId !== undefined && typeof op.resultId !== "string") ||
+              (op.nativeOutcomeId !== undefined && typeof op.nativeOutcomeId !== "string"),
+          ))) ||
+          (r.pending !== null && (!r.pending || typeof r.pending.id !== "string" || typeof r.pending.tool !== "string" || r.pending.state !== "intent_recorded" ||
+            (r.pending.effect !== undefined && typeof r.pending.effect !== "boolean"))),
       )
     ) {
       throw new Error("Workflow journal is invalid. Inspect stored work before continuing.");
@@ -119,6 +126,7 @@ export class WorkflowJournal {
     }
   }
   list(): Workflow[] { return this.all(); }
+  isLive(id: string): boolean { return this.live.has(id); }
 
   requestStop(id: string): boolean {
     const run = this.all().find((item) => item.id === id);
@@ -143,6 +151,7 @@ export class WorkflowJournal {
       plan: [],
       results: [],
       pending: null,
+      metrics: newMetrics(),
     };
     this.save(run);
     return run;

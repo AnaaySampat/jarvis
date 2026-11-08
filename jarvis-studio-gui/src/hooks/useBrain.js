@@ -13,9 +13,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createBrain } from "../brain";
 import { WorkflowJournal, subscribeWorkflows } from "../brain/workflow";
 import { workflowTask } from "./workflowTasks";
+import { useChatActivity, publicChatError } from "./useChatActivity";
 import { resolveBrainConfig } from "../brain/resolveConfig";
 import * as quota from "../brain/quota";
-import { dispatch } from "../brain/tools/dispatch";
 import {
   androidPlatform,
   homeNetwork,
@@ -46,7 +46,7 @@ import {
   loadScreenConfig,
   patchScreenConfig,
 } from "../brain/mobile/screenConfig";
-import { RemotePC, sanitizeWakeTargets, screenshotArtifacts } from "../brain/remote/pc";
+import { RemotePC, sanitizeWakeTargets } from "../brain/remote/pc";
 import { TaskPasskeyPrompt } from "../brain/remote/taskPasskeyPrompt";
 import { GestureRequests } from "../gestures/request";
 import { nativeTvShell, normMac, parseLink, tvAddresses } from "../brain/remote/tv";
@@ -61,8 +61,6 @@ import {
   syncWakeWord,
 } from "../brain/platform/wakeword";
 import { syncStopOverlay } from "../brain/platform/stopOverlay";
-import { checkForUpdate } from "../brain/platform/update";
-import { getVersion } from "@tauri-apps/api/app";
 import { subscribeTelemetry } from "../brain/platform/deviceTelemetry";
 import { resolveAmbientLocation, netInfoFrom, fetchPanelWeather } from "../brain/platform/ambient";
 import { discoverModels } from "../brain/providers/models";
@@ -322,6 +320,7 @@ export function useBrain() {
   const [secretsReady, setSecretsReady] = useState(() => !inTauri());
   const [status, setStatus] = useState("idle");
   const [messages, setMessages] = useState([]);
+  const [conversationHydrated, setConversationHydrated] = useState(false);
   const [warnings, setWarnings] = useState([]);
   const [muted, setMutedState] = useState(false);
   const mutedRef = useRef(false); // read inside async sendMessage (state would be stale)
@@ -345,8 +344,8 @@ export function useBrain() {
     refresh();
     return unsubscribe;
   }, []);
-  const visibleWorkflowTasks = stored.ecosystemBeta === true
-    ? workflowTasks.filter((task) => !dismissedWorkflows.has(task.id)) : [];
+  const visibleWorkflowTasks = workflowTasks.filter((task) =>
+    (task.hasWork || task.id === "workflow-storage-error") && !dismissedWorkflows.has(task.id));
   const [permissionRequest, setPermissionRequest] = useState(null);
   const [clarifyRequest, setClarifyRequest] = useState(null);
   const [pcPasskeyRequest, setPcPasskeyRequest] = useState(null);
@@ -378,7 +377,8 @@ export function useBrain() {
 
   const hasKey = secretsReady && Boolean(stored.geminiKey || stored.groqKey || stored.vertexSaJson);
 
-  const memoryRef = useRef(createStore());
+  const memoryRef = useRef(null);
+  if (memoryRef.current == null) memoryRef.current = createStore();
   const locationRef = useRef(new LocationService(stored.pinnedLocation || ""));
 
   const refreshSchedule = useCallback(() => {
@@ -416,12 +416,6 @@ export function useBrain() {
   // so voice-driven actions never reached the activity log and a spoken HUD restyle
   // persisted without re-rendering. The agenda is deliberately NOT here: its store
   // notifies directly (onScheduleChange), covering writes this hook never sees.
-  // Cards produced by tools during the CURRENT turn, drained when the reply lands.
-  // brain.ask() returns only a string — runTurn's toolResults are dropped on the
-  // floor — so an image the model generated had nowhere to go and the chat showed
-  // the caption with no picture. onDispatched is the one hook that sees every tool
-  // result, so collect here and attach when the message is built.
-  const pendingCardsRef = useRef([]);
   // One memory with the PC: set further down, once the memory view exists.
   const syncMemoryRef = useRef(null);
   const memorySyncedRef = useRef(null);
@@ -436,49 +430,16 @@ export function useBrain() {
       if (result?.ok && ["remember", "forget", "routine"].includes(spec?.type)) {
         setTimeout(() => void syncMemoryRef.current?.(), 1500); // one memory with the PC
       }
-      const imageUrl = result?.data?.imageUrl;
-      if (imageUrl && (spec?.type === "generate_image" || spec?.type === "qr_code")) {
-        pendingCardsRef.current.push({
-          type: spec.type === "qr_code" ? "qr" : "generate_image",
-          message: result.summary || "",
-          ok: result.ok !== false,
-          image: imageUrl,
-        });
-      }
+
     },
     [logCommand],
   );
-
-  /** Take everything collected this turn (and reset for the next one). */
-  const drainCards = useCallback(() => {
-    const cards = pendingCardsRef.current;
-    pendingCardsRef.current = [];
-    return cards;
-  }, []);
 
   /** `action` ({ label, run }) adds a button beside the text — e.g. "Get it". */
   const pushWarning = useCallback((text, action) => {
     setWarnings((prev) => [...prev, { text, action, id: uid() }]);
   }, []);
-
-  // "A new version is available": once per launch, at most one GitHub check a day.
-  useEffect(() => {
-    if (!inTauri()) return undefined;
-    let cancelled = false;
-    void getVersion()
-      .then((current) => checkForUpdate(current, Date.now(), stored.updateChannel === "beta" ? "beta" : "stable"))
-      .then((update) => {
-        if (cancelled || !update) return;
-        pushWarning(`JARVIS ${update.version} is available.`, {
-          label: "Get it",
-          run: () => void invoke("plugin:phone|open_url", { url: update.url }).catch(() => {}),
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [pushWarning, stored.updateChannel]);
+  const { begin: beginChat, restore: restoreChat, remove: removeChatActivity } = useChatActivity(memoryRef, setMessages, pushWarning);
 
   // Credentials are hydrated only into React memory. A first launch after upgrade
   // migrates the already-purged legacy values into Android Keystore; React Strict
@@ -573,8 +534,7 @@ export function useBrain() {
 
   const onAgentEvent = useCallback((ev) => {
     if (ev.event === "agent_message") {
-      // One agent handing work to another (dispatch's pc_task) — a card in the chat.
-      setMessages((prev) => [...prev, { ...ev.data, role: "agents", id: uid() }]);
+      // Specialist work is grouped by its request-owned tool activity observer.
       return;
     }
     if (ev.event === "agent_task" && (ev.data?.kind === "phone" || ev.data?.kind === "tv")) {
@@ -917,19 +877,6 @@ export function useBrain() {
       },
       onEvent: (ev) => {
         const e = ev.event;
-        if (e === "task.status" && ev.data?.state === "succeeded" &&
-          ev.data.proof?.passed === true && Array.isArray(ev.data.proof.evidence_ids)) {
-          const images = screenshotArtifacts(ev.data.artifacts).filter(
-            (image) => ev.data.proof.evidence_ids.includes(image.id),
-          );
-          if (images.length) setMessages((prev) => [
-            ...prev,
-            ...images.filter((image) => !prev.some((message) => message.id === image.id)).map(
-              (image) => ({ role: "jarvis", id: image.id, image: image.image,
-                text: "Screenshot from your PC.", finalized: true, actions: [] }),
-            ),
-          ]);
-        }
         if (e === "gesture_result") { gestureRequestsRef.current.receive(ev.data); return; }
         if (e === "memory.synced") void memorySyncedRef.current?.(ev.data);
         if (e === "phone.command") void pcCommandRef.current?.(ev.data);
@@ -1154,9 +1101,10 @@ export function useBrain() {
   // the manual PC-command mode go through here for fresh passkey entry and the
   // fingerprint check. The laptop independently enforces the passkey.
   const runPcTask = useCallback(
-    async (goal, kind = "browser") => {
+    async (goal, kind = "browser", activity) => {
       const pc = pcRef.current;
       if (!pc) return { ok: false, summary: "No PC is paired yet, sir." };
+      activity?.onApproval(true);
       const entry = { passkey: await pcPasskeyGateRef.current.request(goal) };
       if (entry.passkey === null) return { ok: false, error: "cancelled", summary: "The PC task was cancelled. Nothing was sent." };
       try {
@@ -1172,7 +1120,8 @@ export function useBrain() {
         if (pcRef.current !== pc || phoneTaskStopRef.current) {
           return { ok: false, error: "cancelled", summary: "The PC task was cancelled. Nothing was sent." };
         }
-        const result = pc.runTask(goal, kind, entry.passkey);
+        activity?.onApproval(false);
+        const result = pc.runTask(goal, kind, entry.passkey, activity?.onProgress);
         entry.passkey = null;
         return await result;
       } finally {
@@ -1190,7 +1139,7 @@ export function useBrain() {
   const remote = useMemo(() => {
     if (!pcConfigured) return null;
     return {
-      runTask: (goal, kind) => runPcTask(goal, kind),
+      runTask: (goal, kind, activity) => runPcTask(goal, kind, activity),
       wake: () =>
         pcRef.current
           ? pcRef.current.wake(pcWakeRef.current, wolSend)
@@ -1486,35 +1435,6 @@ export function useBrain() {
     [nextControlLeaseEnvelope],
   );
 
-  const buildDeps = useCallback(() => {
-    const cfg = toBrainConfig(stored);
-    if (cfg.pinnedLocation) locationRef.current.setPinned(cfg.pinnedLocation);
-    else locationRef.current.unpin();
-    return {
-      platform: taskPlatform,
-      memory: memoryRef.current,
-      config: cfg,
-      location: locationRef.current,
-      onAgentEvent,
-      onUiCommand: emitUiCommand,
-      onFallback: logModelFallback,
-      shouldStopPhoneTask: () => phoneTaskStopRef.current,
-      authorizePhoneAction,
-      onDispatched,
-      remote,
-      tv,
-    };
-  }, [
-    stored,
-    remote,
-    tv,
-    onAgentEvent,
-    emitUiCommand,
-    taskPlatform,
-    authorizePhoneAction,
-    onDispatched,
-  ]);
-
   const storedRef = useRef(stored);
   useEffect(() => {
     storedRef.current = stored;
@@ -1626,83 +1546,52 @@ export function useBrain() {
   const sendMessage = useCallback(
     async (text, display, photo, targetPc = false) => {
       const t = (text || "").trim();
-      if (!t || busyRef.current) return;
-      // STOP belongs to the previous request. Clear it only once a new turn is
-      // accepted; otherwise loop.ts returns "Stopped." before any model/tool runs.
+      if (!t || busyRef.current || !brainRef.current) return;
       phoneTaskStopRef.current = false;
-      userInteractedRef.current = true; // gates the one-time overlay-permission prompt
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text: display || (targetPc ? `💻 On your PC: ${t}` : t), ...(photo ? { image: photo } : {}), id: uid() },
-      ]);
-      if (targetPc || pcCommandModeRef.current) {
-        busyRef.current = true;
-        setStatus("thinking");
-        let spoken = "";
-        try {
-          // Live-view command mode bypasses the phone brain, so there's no model to
-          // pick a kind — send "auto" and let the DESKTOP classify browser vs native
-          // (that's why "open Windows Explorer" no longer comes back as browser-only).
-          const res = await runPcTask(t, "auto");
-          spoken =
-            (res?.summary || "").trim() ||
-            (res?.ok ? "Done on your PC, sir." : "I couldn't finish that on your PC, sir.");
-        } catch (err) {
-          spoken = `That PC task failed: ${err?.message || err}`;
-        }
-        setMessages((prev) => [
-          ...prev,
-          { role: "jarvis", text: spoken, actions: [], finalized: true, id: uid() },
-        ]);
-        try {
-          if (!mutedRef.current && spoken) {
-            setStatus("speaking");
-            await webSpeechTTS.speak(spoken);
-          }
-        } finally {
-          busyRef.current = false;
-          setStatus("idle");
-        }
-        return;
-      }
-      if (!brainRef.current) return;
+      userInteractedRef.current = true;
       busyRef.current = true;
       setStatus("thinking");
-      const replyId = uid();
-      let spoken = "";
+      const onPc = targetPc || pcCommandModeRef.current;
+      const chat = await beginChat(t, display || (onPc ? `💻 On your PC: ${t}` : undefined), photo);
+      let spoken;
       try {
-        const reply = await brainRef.current.ask(
-          t,
-          display,
+        if (onPc) {
+          const result = await brainRef.current.executeAction({ type: "pc_task", goal: t, kind: "auto", picked: true }, chat.request);
+          spoken = result.summary || "The PC task returned no confirmation.";
+        } else spoken = await brainRef.current.ask(t, display,
           photo ? [photo.slice(photo.indexOf(",") + 1)] : undefined,
-          storedRef.current.agentMode === true && !display ? activeAgentRef.current : "auto",
-        );
-        spoken = reply;
-        setMessages((prev) => [
-          ...prev,
-          { role: "jarvis", text: reply, actions: drainCards(), finalized: true, id: replyId },
-        ]);
+          storedRef.current.agentMode === true && !display ? activeAgentRef.current : "auto", chat.request);
+        await chat.finish(spoken);
       } catch (err) {
-        spoken = `Sorry — I hit an error: ${err?.message || err}`;
-        setMessages((prev) => [
-          ...prev,
-          { role: "jarvis", text: spoken, actions: drainCards(), finalized: true, id: replyId },
-        ]);
+        spoken = publicChatError(err);
+        await chat.finish(spoken);
       }
-      // Speak the reply via the device TTS (unless muted). "speaking" status drives
-      // the HUD waveform; it always returns to idle even if TTS stalls.
       try {
-        if (!mutedRef.current && spoken) {
-          setStatus("speaking");
-          await webSpeechTTS.speak(spoken);
-        }
-      } finally {
-        busyRef.current = false;
-        setStatus("idle");
-      }
-    },
-    [runPcTask, drainCards],
+        if (!mutedRef.current && spoken) { setStatus("speaking"); await webSpeechTTS.speak(spoken); }
+      } finally { busyRef.current = false; setStatus("idle"); }
+    }, [beginChat],
   );
+
+  const checkWorkflowTask = useCallback(async (task) => {
+    if (busyRef.current || !brainRef.current) throw new Error("Wait for the current task to finish.");
+    busyRef.current = true;
+    try { return await brainRef.current.checkWorkflow(task.workflowId); }
+    finally { busyRef.current = false; }
+  }, []);
+
+  const resumeWorkflowTask = useCallback(async (task, token) => {
+    if (busyRef.current || !brainRef.current) throw new Error("Wait for the current task to finish.");
+    busyRef.current = true;
+    phoneTaskStopRef.current = false;
+    setStatus("thinking");
+    const chat = await beginChat(`Continue saved task: ${task.goal}`);
+    try {
+      const reply = await brainRef.current.resumeWorkflow(task.workflowId, token, chat.request);
+      await chat.finish(reply);
+      return reply;
+    } catch (error) { await chat.finish(publicChatError(error)); throw new Error(publicChatError(error), { cause: error }); }
+    finally { busyRef.current = false; setStatus("idle"); }
+  }, [beginChat]);
 
   // ── Commands from the paired PC (desktop phone_link.py) ────────────────────────
   // "Set an alarm on my phone", said at the PC or sent to it on WhatsApp — maybe from
@@ -1737,30 +1626,24 @@ export function useBrain() {
       }
       busyRef.current = true;
       setStatus("thinking");
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text: `💻 From your PC: ${text}`, id: uid() },
-      ]);
+      const chat = await beginChat(text, `💻 From your PC: ${text}`);
       phoneTaskStopRef.current = false;
       let ok = false;
-      let reply = "";
+      let reply;
       try {
-        const res = await brainRef.current.askFromPc(text);
+        const res = await brainRef.current.askFromPc(text, chat.request);
         ok = res.ok;
         reply = res.reply;
       } catch (err) {
-        reply = `That failed on the phone: ${err?.message || err}`;
+        reply = publicChatError(err);
       } finally {
         busyRef.current = false;
         setStatus("idle");
       }
-      setMessages((prev) => [
-        ...prev,
-        { role: "jarvis", text: reply, actions: drainCards(), finalized: true, id: uid() },
-      ]);
+      await chat.finish(reply);
       answer(ok, reply);
     },
-    [drainCards],
+    [beginChat],
   );
   useEffect(() => {
     pcCommandRef.current = runPcCommand;
@@ -1809,29 +1692,23 @@ export function useBrain() {
       }
       busyRef.current = true;
       setStatus("thinking");
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text: `💬 WhatsApp from ${c.sender}: ${c.text}`, id: uid() },
-      ]);
+      const chat = await beginChat(c.text, `💬 WhatsApp from ${c.sender}: ${c.text}`);
       phoneTaskStopRef.current = false;
-      let reply = "";
+      let reply;
       try {
-        const res = await brainRef.current.askFromWhatsApp(c.text, c.sender);
+        const res = await brainRef.current.askFromWhatsApp(c.text, c.sender, chat.request);
         reply = res.reply;
       } catch (err) {
-        reply = `That failed on the phone: ${err?.message || err}`;
+        reply = publicChatError(err);
       } finally {
         busyRef.current = false;
         setStatus("idle");
       }
-      setMessages((prev) => [
-        ...prev,
-        { role: "jarvis", text: reply, actions: drainCards(), finalized: true, id: uid() },
-      ]);
+      await chat.finish(reply);
       const sent = await whatsappReply(c.seq, reply);
       if (!sent.ok) pushWarning(`Couldn't answer ${c.sender} on WhatsApp: ${sent.summary}`);
     },
-    [drainCards, pushWarning],
+    [beginChat, pushWarning],
   );
   // Which commands are handled: the native queue restarts its seq with the process.
   const waCursorRef = useRef({ boot: 0, seq: 0 });
@@ -2078,9 +1955,13 @@ export function useBrain() {
   );
 
   const resetConversation = useCallback(() => {
-    void memoryRef.current.clearConversation();
+    void (async () => {
+      const turns = await memoryRef.current.recentChatTurns();
+      await memoryRef.current.clearConversation();
+      await removeChatActivity(turns);
+    })();
     setMessages([]);
-  }, []);
+  }, [removeChatActivity]);
 
   const listConversationsInner = async () => {
     const recents = await memoryRef.current.listRecents();
@@ -2102,15 +1983,6 @@ export function useBrain() {
     void listConversationsInner();
   }, []);
 
-  const turnsToMessages = (turns) =>
-    turns.map((t) => ({
-      role: t.role === "user" ? "user" : "jarvis",
-      text: t.display ?? t.content,
-      actions: [],
-      finalized: true,
-      id: uid(),
-    }));
-
   const listConversations = useCallback(() => {
     void listConversationsInner();
   }, []);
@@ -2118,19 +1990,23 @@ export function useBrain() {
   const openConversation = useCallback(async (id) => {
     const ok = await memoryRef.current.restoreRecent(id);
     if (!ok) return;
-    const turns = await memoryRef.current.recentTurns();
-    setMessages(turnsToMessages(turns));
-  }, []);
+    const turns = memoryRef.current.readChatTurns();
+    setMessages(restoreChat(turns));
+  }, [restoreChat]);
 
   const deleteConversation = useCallback(async (id) => {
+    const turns = await memoryRef.current.loadRecent(id);
     await memoryRef.current.deleteRecent(id);
+    await removeChatActivity(turns || []);
     void listConversationsInner();
-  }, []);
+  }, [removeChatActivity]);
 
   const clearConversations = useCallback(async () => {
+    const archives = await memoryRef.current.listRecents();
     await memoryRef.current.clearRecents();
+    await removeChatActivity(archives.flatMap((r) => r.turns));
     setConversations([]);
-  }, []);
+  }, [removeChatActivity]);
 
   // ── Memory view (dock → MEMORY, or "open memory") ─────────────────────────────
   // One snapshot of everything stored: facts, playbooks, saved chats. Timestamps
@@ -2278,13 +2154,15 @@ export function useBrain() {
         const hit = listPlaybooks().find((p) => p.workflowId === id);
         if (hit) res = removePlaybook(hit.name);
       } else if (kind === "conversation") {
+        const turns = await memoryRef.current.loadRecent(id);
         await memoryRef.current.deleteRecent(id);
+        await removeChatActivity(turns || []);
         void listConversationsInner();
       }
       if (!res.ok) pushWarning(res.summary);
       await listMemory();
     },
-    [listMemory, pushWarning],
+    [listMemory, pushWarning, removeChatActivity],
   );
 
   useEffect(() => {
@@ -2293,11 +2171,17 @@ export function useBrain() {
     // persisted turns. The turns themselves always survived a restart (they back
     // the model's own context) — only the on-screen chat log was starting empty
     // every launch because nothing re-populated `messages` from them.
+    let active = true;
     void (async () => {
-      const turns = await memoryRef.current.recentTurns();
-      if (turns.length) setMessages(turnsToMessages(turns));
+      try {
+        const turns = await memoryRef.current.recentChatTurns();
+        if (active && turns.length) setMessages((prev) => prev.length ? prev : restoreChat(turns));
+      } finally {
+        if (active) setConversationHydrated(true);
+      }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [restoreChat]);
   const dismissWarning = useCallback(
     (id) => setWarnings((prev) => prev.filter((w) => w.id !== id)),
     [],
@@ -2497,7 +2381,7 @@ export function useBrain() {
   // from the backend; on the phone there's none, so the brain greets itself).
   const greetedRef = useRef(false);
   useEffect(() => {
-    if (greetedRef.current || !hasKey) return;
+    if (greetedRef.current || !hasKey || !conversationHydrated) return;
     greetedRef.current = true;
     const hour = new Date().getHours();
     const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -2506,7 +2390,7 @@ export function useBrain() {
       prev.length ? prev : [{ role: "jarvis", text, actions: [], finalized: true, id: uid() }],
     );
     void speak(text);
-  }, [hasKey, speak]);
+  }, [hasKey, speak, conversationHydrated]);
 
   // ── Live HUD panels (battery / network / weather) ────────────────────────────
   // Real device signals so the Power, Network and Weather panels aren't dead zeros.
@@ -2684,24 +2568,21 @@ export function useBrain() {
     setScreen(patchScreenConfig(patch || {}));
   }, []);
 
-  const runAction = useCallback(
-    async (spec) => {
-      if (!spec || !spec.type) return;
-      try {
-        // Logging and the screen/schedule re-render happen in onDispatched, which
-        // fires for the brain's tool calls too — this path used to own them, which
-        // is why anything JARVIS did by voice was invisible in the activity log.
-        const result = await dispatch(spec, buildDeps());
-        if (spec.type === "ui" && String(spec.do) === "clear_chat") setMessages([]);
-        if (!result.ok && result.summary) pushWarning(result.summary);
-        return result;
-      } catch (err) {
-        pushWarning(String(err?.message || err));
-        return { ok: false, summary: String(err?.message || err) };
-      }
-    },
-    [buildDeps, pushWarning],
-  );
+  const runAction = useCallback(async (spec) => {
+    if (!spec?.type || !brainRef.current) return;
+    const chat = await beginChat(`Run ${spec.type}`, "Run a quick tool");
+    try {
+      const result = await brainRef.current.executeAction(spec, chat.request);
+      await chat.finish(result.summary);
+      if (!result.ok && result.summary) pushWarning(result.summary);
+      return result;
+    } catch (error) {
+      const summary = publicChatError(error);
+      await chat.finish(summary);
+      pushWarning(summary);
+      return { ok: false, summary };
+    }
+  }, [beginChat, pushWarning]);
 
   const setConversationModeOn = useCallback((on) => {
     const v = Boolean(on);
@@ -2868,6 +2749,8 @@ export function useBrain() {
     stopPhoneTask,
     stopTask,
     stopAllTasks,
+    checkWorkflowTask,
+    resumeWorkflowTask,
     pauseControl: () => {},
     sendCorrection: () => {},
     finishListen,

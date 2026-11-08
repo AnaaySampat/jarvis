@@ -37,5 +37,8 @@ local.properties
 
 # Build output — regenerate with `npm run android:build[:debug]`
 *.apk
+*.idsig
+*.apk.idsig
 *.aab
 .test-tmp/
+jarvis-studio-gui/android-update.json

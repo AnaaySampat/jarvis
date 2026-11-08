@@ -11,6 +11,7 @@
 
 import type { BrainConfig } from "../config";
 import type { ChatMessage, ToolCall, ToolDeclaration } from "../types";
+import { parseToolArguments } from "../tools/validation";
 import { toOpenAITools } from "../tools/registry";
 import { platformFetch } from "../tools/httpClient";
 import { GROQ_DEFAULT } from "../resolveConfig";
@@ -110,6 +111,8 @@ export class OpenAICompatProvider implements LLMProvider {
     tools: ToolDeclaration[],
     opts?: ChatOpts,
   ): Promise<LLMReply> {
+    if (messages.some((message) => message.images?.length))
+      throw new Error("This provider client cannot send images. Choose an image-capable route.");
     const keyIndex = opts?.keyIndex ?? 0;
     const key = this.key(keyIndex);
     const model = this.model(opts?.model ?? this.cfg.model);
@@ -163,7 +166,7 @@ export class OpenAICompatProvider implements LLMProvider {
     const toolCalls: ToolCall[] = (msg.tool_calls ?? []).map((tc, i) => ({
       id: tc.id ?? `${this.name}-${i}`,
       name: tc.function?.name ?? "",
-      args: safeParse(tc.function?.arguments),
+      ...parseToolArguments(tc.function?.arguments),
     }));
     const text = (msg.content ?? "").trim();
     // A 200 with nothing in it is a failed call, not an answer: OpenRouter's free
@@ -213,13 +216,4 @@ function toOpenAIMessages(messages: ChatMessage[]) {
     });
   }
   return out;
-}
-
-function safeParse(s: unknown): Record<string, unknown> {
-  if (typeof s !== "string") return {};
-  try {
-    return JSON.parse(s);
-  } catch {
-    return {};
-  }
 }

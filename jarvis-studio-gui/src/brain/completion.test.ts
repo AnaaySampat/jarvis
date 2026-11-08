@@ -8,6 +8,14 @@ const model = vi.mocked(chatOverLadder);
 beforeEach(() => model.mockReset());
 
 describe("completion evaluations", () => {
+  it("cannot turn an accepted alarm intent into verified completion", async () => {
+    const accepted = agentResult({ ok: true, summary: "Alarm request sent; check Clock.", verification: {
+      status: "unverified", method: "android_clock_intent_accepted", expected: { hour: 7, minute: 0 },
+    } }, "Set an alarm for seven", "set_alarm");
+    expect((await reviewCompletion("Set an alarm for seven", [accepted], {} as BrainConfig, "Alarm saved!")).status)
+      .toBe("unverified");
+    expect(model).not.toHaveBeenCalled();
+  });
   const opened = () =>
     agentResult({ ok: true, summary: "Opened Notepad" }, "Open Notepad", "open_application");
   it("keeps a missing save separate from a successful open", async () => {

@@ -54,11 +54,9 @@ describe("toSpec", () => {
     });
   });
 
-  it("falls back to a passthrough spec for an unknown tool name", () => {
-    expect(toSpec("totally_unknown_tool", { foo: "bar" })).toEqual({
-      type: "totally_unknown_tool",
-      foo: "bar",
-    });
+  it("rejects unknown names and cannot inject an internal action type", () => {
+    for (const name of ["totally_unknown_tool", "toString", "constructor", "__proto__"])
+      expect(() => toSpec(name, { type: "message", to: "Mom", text: "hi" })).toThrow(/Unknown/);
   });
 
   it("round-trips control_interface's action into the ui spec", () => {
@@ -73,8 +71,8 @@ describe("capabilitiesFor", () => {
   const cfg = (tier: "vertex" | "gemini" | "groq", keys: Record<string, string[]> = {}) =>
     ({ tier, keys }) as Parameters<typeof capabilitiesFor>[0];
 
-  it("gives vertex both places and web grounding", () => {
-    expect(capabilitiesFor(cfg("vertex"))).toEqual({ placesOk: true, webOk: true });
+  it("does not infer unimplemented search/brand capabilities from Vertex authentication", () => {
+    expect(capabilitiesFor(cfg("vertex"))).toEqual({ placesOk: false, webOk: false });
   });
   it("gives gemini web but not places", () => {
     expect(capabilitiesFor(cfg("gemini", { gemini: ["k"] }))).toEqual({
@@ -91,6 +89,10 @@ describe("capabilitiesFor", () => {
   it("keeps web search when a Gemini key exists even though the tier is groq", () => {
     expect(capabilitiesFor(cfg("groq", { gemini: ["k"], groq: ["g"] })).webOk).toBe(true);
   });
+  it("advertises the implemented Tavily search path even without a Gemini key", () => {
+    const palette = toolPalette({ tier: "groq", model: "m", keys: { groq: ["g"], tavily: ["t"] } });
+    expect(palette.some((t) => t.name === "web_search")).toBe(true);
+  });
   it("advertises web_search for a groq tier holding a Gemini key", () => {
     const palette = toolPalette({
       tier: "groq",
@@ -103,6 +105,24 @@ describe("capabilitiesFor", () => {
 });
 
 describe("toolPalette", () => {
+  it("omits unsupported recording and image generation without its required key", () => {
+    const palette = toolPalette({ tier: "groq", model: "m", keys: { groq: ["g"] } });
+    expect(palette.map((t) => t.name)).not.toContain("record");
+    expect(palette.map((t) => t.name)).not.toContain("generate_image");
+  });
+  it("omits screenshot inspection when the selected routes cannot receive its pixels", () => {
+    const palette = toolPalette({ tier: "gemini", model: "m", keys: { gemini: ["g"] } }, { imagesAvailable: false });
+    expect(palette.some((tool) => tool.name === "take_screenshot")).toBe(false);
+  });
+  it("keeps permission setup discoverable and excludes unavailable capabilities", () => {
+    const palette = toolPalette({ tier: "gemini", model: "m", keys: { gemini: ["g"] } }, { availability: {
+      phone_task: { state: "permission_required", reason: "Enable Accessibility first." },
+      take_screenshot: { state: "unavailable", reason: "Not supported on this runtime." },
+    } });
+    expect(palette.find((t) => t.name === "phone_task")?.description).toContain("ACCESS REQUIRED");
+    expect(palette.some((t) => t.name === "request_tool_access")).toBe(true);
+    expect(palette.some((t) => t.name === "take_screenshot")).toBe(false);
+  });
   it("only advertises pc_task when a PC is paired", () => {
     const cfg = { tier: "groq" as const, model: "x", keys: {}, pinnedLocation: "" };
     const withoutPc = toolPalette(cfg);

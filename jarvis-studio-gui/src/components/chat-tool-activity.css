@@ -1,0 +1,132 @@
+.chat-tools {
+  margin: 6px 0 12px;
+  border: 1px solid var(--border, #ffffff24);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--sp-well, #ffffff05);
+  font-size: 13px;
+}
+.chat-tools-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.chat-tools-count {
+  margin-left: 5px;
+  color: var(--accent, #62c5ef);
+  font-variant-numeric: tabular-nums;
+}
+.chat-tools-overview {
+  color: var(--text-sec, #a6b1be);
+  font-size: 12px;
+}
+.chat-tools-list {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+}
+.chat-tool {
+  border-top: 1px solid var(--border, #ffffff18);
+}
+.chat-tool summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 48px;
+  padding: 8px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+.chat-tool summary::-webkit-details-marker {
+  display: none;
+}
+.chat-tool-icon {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--accent, #62c5ef);
+}
+.chat-tool--completed .chat-tool-icon {
+  color: var(--success, #73c99a);
+}
+.chat-tool--failed .chat-tool-icon,
+.chat-tool--unconfirmed .chat-tool-icon {
+  color: var(--warning, #e6b872);
+}
+.chat-tool-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-tool-name code {
+  color: var(--text-sec, #a6b1be);
+  font-size: 11px;
+}
+.chat-tool-state {
+  max-width: 42%;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-sec, #a6b1be);
+}
+.chat-tool-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0 0 10px 24px;
+  font-size: 12px;
+}
+.chat-tool-details dt {
+  color: var(--text-sec, #a6b1be);
+}
+.chat-tool-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-tool-progress {
+  margin: 4px 12px 12px 24px;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.chat-tool-progress li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-sec);
+}
+.chat-tool-controls {
+  display: flex;
+  gap: 8px;
+  margin: 8px 12px;
+}
+.chat-tool-controls button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.chat-tool .chat-tools {
+  margin: 8px 0 8px 16px;
+}
+.chat-tools button:focus-visible,
+.chat-tool summary:focus-visible {
+  outline: 2px solid var(--accent, #62c5ef);
+  outline-offset: -2px;
+  border-radius: 4px;
+}

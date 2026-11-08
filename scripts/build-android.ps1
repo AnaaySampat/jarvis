@@ -57,7 +57,7 @@ try {
     Write-Host "  $($apk.FullName)"
     Write-Host "  Size: $([math]::Round($apk.Length / 1MB, 1)) MB"
     Write-Host ""
-    Write-Host "Do NOT install .aab bundles or output-metadata.json — only the .apk file."
+    Write-Host "Do NOT install .aab bundles or output-metadata.json -- only the .apk file."
 }
 finally {
     Pop-Location

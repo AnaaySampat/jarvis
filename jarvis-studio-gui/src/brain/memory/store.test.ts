@@ -1,5 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { PersistentStore, keywordRank } from "./store";
+import { makeKV } from "./store";
+
+describe("UI-bound conversation history", () => {
+  it("keeps UI IDs/pending placeholders out of inference and patches an archived request in place", async () => {
+    const store = new PersistentStore(makeKV());
+    await store.appendTurn({ role: "assistant", content: "Earlier answer" });
+    await store.beginChatTurn(
+      { role: "user", content: "Current request", uiId: "user-current" },
+      { role: "assistant", content: "", uiId: "reply-current", uiPending: true },
+    );
+    expect(await store.recentTurns(12, ["user-current", "reply-current"])).toEqual([
+      { role: "assistant", content: "Earlier answer" },
+    ]);
+    await store.archiveConversation();
+    expect(
+      await store.updateChatTurn({
+        role: "assistant",
+        content: "Late answer",
+        uiId: "reply-current",
+      }),
+    ).toBe(true);
+    expect(await store.recentChatTurns()).toEqual([]);
+    const archive = (await store.listRecents())[0];
+    expect(archive.turns[2]).toMatchObject({
+      uiId: "reply-current",
+      content: "Late answer",
+      uiPending: false,
+    });
+    await store.restoreRecent(archive.id);
+    expect(JSON.stringify(await store.recentTurns())).not.toMatch(/uiId|uiPending/);
+    expect((await store.recentChatTurns())[2].uiId).toBe("reply-current");
+    await store.clearConversation();
+    await store.deleteRecent(archive.id);
+    expect(
+      await store.updateChatTurn({
+        role: "assistant",
+        content: "Must not return",
+        uiId: "reply-current",
+      }),
+    ).toBe(false);
+    expect(await store.recentTurns()).toEqual([]);
+  });
+});
 
 describe("keywordRank", () => {
   const facts = [

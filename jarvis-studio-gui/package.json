@@ -1,7 +1,7 @@
 {
   "name": "jarvis-studio-gui",
   "private": true,
-  "version": "2.5.6-rc.1",
+  "version": "2.5.6-rc.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:live": "vitest run replay.live",
+    "test:live": "vitest run replay.live --silent=false",
+    "test:tool-evals": "vitest run src/brain/replay/evaluation.test.ts src/brain/replay/replay.test.ts src/brain/index.test.ts src/brain/loop.test.ts src/brain/directCommands.test.ts src/brain/recovery.test.ts src/brain/toolMetrics.test.ts src/components/AgentActivity.test.jsx --silent=false",
     "test:workflow": "vitest run src/brain/workflow.test.ts src/brain/results.test.ts src/brain/completion.test.ts",
     "test:foundation": "vitest run src/brain/workflow.test.ts src/brain/loop.test.ts src/brain/ecosystemHealth.test.ts src/hooks/workflowTasks.test.ts src/hooks/taskCenter.test.ts src/brain/schedule/routines.test.ts src/brain/remote/pc.test.ts src/brain/remote/tv.test.ts src/brain/whatsapp.test.ts",
     "test:contracts": "node ../scripts/check-contracts.mjs",

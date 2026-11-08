@@ -46,6 +46,26 @@ async function render(element) {
 }
 
 describe("daily task controls", () => {
+  it("switches activities from a shortcut and locks shortcuts during camera startup", async () => {
+    const value = valueFor("voice");
+    const view = await render(<GesturePanel controls={value} />);
+    await act(async () => button(view.root, "Music activity").props.onClick());
+    expect(value.switchMode).toHaveBeenCalledWith("media");
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.act).not.toHaveBeenCalled();
+    expect(button(view.root, "Change activity").props["aria-expanded"]).toBe(false);
+    await act(async () => button(view.root, "Change activity").props.onClick());
+    expect(button(view.root, "Change activity").props["aria-expanded"]).toBe(true);
+    await act(async () =>
+      view.update(<GesturePanel controls={{ ...value, busy: true, status: { starting: true } }} />),
+    );
+    expect(button(view.root, "Music activity").props.disabled).toBe(true);
+    expect(button(view.root, "Hands-free").props.disabled).toBeFalsy();
+    await act(async () => button(view.root, "Hands-free").props.onClick());
+    expect(value.stop).toHaveBeenCalledOnce();
+    await act(async () => view.unmount());
+  });
+
   it("shows the task and one camera switch without setup or tutorial navigation", async () => {
     const value = valueFor();
     const view = await render(<GesturePanel controls={value} />);

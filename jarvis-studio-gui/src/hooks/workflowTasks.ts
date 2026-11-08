@@ -1,4 +1,5 @@
 import type { Workflow } from "../brain/workflow";
+import { recoveryFacts } from "../brain/recovery";
 
 export type TaskDisplayState =
   "queued" | "running" | "needs_you" | "completed" | "partial" | "failed" | "cancelled";
@@ -43,13 +44,14 @@ export function taskDisplayState(task: {
 }
 
 export function workflowTask(run: Workflow) {
-  const completed = run.results.filter((r) => r.ok).map((r) => r.summary);
+  const { completed, uncertain } = recoveryFacts(run);
   const remaining = [
     ...new Set([
       ...(run.completion?.remaining ?? []),
       ...run.results.filter((r) => !r.ok).map((r) => r.summary),
       ...(run.pending
-        ? ["Check the recorded action with its executing device before another attempt."]
+        ? [run.pending.effect === false ? "A read was interrupted; check saved work before continuing."
+          : "Check the recorded action with its executing device before another attempt."]
         : []),
     ]),
   ];
@@ -73,6 +75,9 @@ export function workflowTask(run: Workflow) {
     updatedAt: run.updated,
     deviceLabel: delegated ? "This phone · Windows steps" : "On this phone",
     completed,
+    uncertain,
+    hasWork: run.plan.length > 0 || !!run.pending,
+    canCheck: run.state === "suspended",
     remaining,
     items: run.results.map((r) => ({
       kind: "step",

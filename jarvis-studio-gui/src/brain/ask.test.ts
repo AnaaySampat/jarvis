@@ -162,7 +162,22 @@ describe("chatOverLadder with a photo attached", () => {
   });
 
   it("says a Google key is needed instead of answering unseen", async () => {
-    await expect(chatOverLadder(photo, [], cfg)).rejects.toThrow(/Gemini or Vertex AI key/);
+    await expect(chatOverLadder(photo, [], cfg)).rejects.toThrow(/image-capable Gemini or Vertex AI route/);
+    expect(chat).not.toHaveBeenCalled();
+  });
+  it("keeps a tool screenshot on image-capable clients throughout provider fallback", async () => {
+    const both: BrainConfig = { tier: "groq", model: "openai/gpt-oss-120b", keys: { groq: ["g"], gemini: ["k"] } };
+    const screenshot = [{ role: "tool" as const, toolName: "take_screenshot", toolCallId: "shot", content: "Captured.", images: ["PIXELS"] }];
+    chat.mockRejectedValueOnce(new ProviderError("bad model", { status: 400 }));
+    chat.mockResolvedValue({ text: "I can see the screen.", toolCalls: [] });
+    await chatOverLadder(screenshot, [], both);
+    expect(chat.mock.calls.length).toBeGreaterThan(1);
+    expect(chat.mock.calls.every((call) => /^(gemini|gemma)/.test(call[2].model))).toBe(true);
+    expect(chat.mock.calls.every((call) => call[0][0].images[0] === "PIXELS")).toBe(true);
+  });
+  it("refuses an unseen tool screenshot on a pinned text-only provider", async () => {
+    await expect(chatOverLadder([{ role: "tool", content: "Screen", images: ["PIXELS"] }], [], cfg))
+      .rejects.toThrow(/image-capable/);
     expect(chat).not.toHaveBeenCalled();
   });
 });
@@ -188,10 +203,12 @@ describe("chatOverLadder hedging a slow route", () => {
         ? ((slowSignal = o.signal), new Promise((r) => setTimeout(() => r({ text: "late", toolCalls: [] }), 25_000)))
         : new Promise((r) => setTimeout(() => r({ text: "fast", toolCalls: [] }), 1_500)),
     );
-    const reply = chatOverLadder([{ role: "user", content: "open settings" }], [], nv);
+    const onRouteEvent = vi.fn();
+    const reply = chatOverLadder([{ role: "user", content: "open settings" }], [], nv, undefined, { onRouteEvent });
     await vi.advanceTimersByTimeAsync(7_600);
     await expect(reply).resolves.toEqual({ text: "fast", toolCalls: [] });
     expect(slowSignal?.aborted).toBe(true); // the loser is cancelled
+    expect(onRouteEvent.mock.calls.flat()).toEqual(["request", "hedge", "request", "fallback"]);
     // …and the slow model now goes behind the fast one.
     expect(fastFirst([{ provider: "nvidia", model: "slow/model", keyIndex: 0 },
       { provider: "nvidia", model: "fast/model", keyIndex: 0 }])[0]!.model).toBe("fast/model");
@@ -201,10 +218,12 @@ describe("chatOverLadder hedging a slow route", () => {
     setCatalog({ nvidia: ["a/model", "b/model"] });
     const nv: BrainConfig = { tier: "groq", model: "openai/gpt-oss-120b", keys: { nvidia: ["n1"] } };
     chat.mockImplementation(() => new Promise((r) => setTimeout(() => r({ text: "ok", toolCalls: [] }), 2_000)));
-    const reply = chatOverLadder([{ role: "user", content: "hi" }], [], nv);
+    const onRouteEvent = vi.fn();
+    const reply = chatOverLadder([{ role: "user", content: "hi" }], [], nv, undefined, { onRouteEvent });
     await vi.advanceTimersByTimeAsync(2_100);
     await expect(reply).resolves.toEqual({ text: "ok", toolCalls: [] });
     expect(chat).toHaveBeenCalledTimes(1);
+    expect(onRouteEvent.mock.calls.flat()).toEqual(["request"]);
   });
 });
 

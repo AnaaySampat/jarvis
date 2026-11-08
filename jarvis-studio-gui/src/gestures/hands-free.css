@@ -1,0 +1,505 @@
+/* The activity workspace uses the same accent and bundled HUD fonts as JARVIS. */
+.hands-free.hands-free-console {
+  --hf-accent: var(--accent, #00e5ff);
+  --hf-line: color-mix(in srgb, var(--hf-accent) 18%, transparent);
+  gap: 0;
+  padding: 0;
+  width: min(680px, calc(100% - 32px));
+  height: min(880px, calc(100dvh - 32px));
+  overflow: hidden;
+  color: #e7f2f7;
+  background:
+    radial-gradient(
+      ellipse at 100% 0,
+      color-mix(in srgb, var(--hf-accent) 8%, transparent),
+      transparent 50%
+    ),
+    #070f17;
+  border: 1px solid var(--hf-line);
+  border-radius: 18px;
+  box-shadow:
+    0 28px 100px #000b,
+    0 0 60px color-mix(in srgb, var(--hf-accent) 4%, transparent);
+  font-family: var(--body, Inter, sans-serif);
+  font-size: 14px;
+}
+.hands-free-console .hands-free-header {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 24px 24px 20px;
+  border-bottom: 1px solid var(--hf-line);
+  position: relative;
+}
+.hands-free-console .hands-free-header::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 24px;
+  width: 48px;
+  height: 2px;
+  background: var(--hf-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--hf-accent) 45%, transparent);
+}
+.hands-free-kicker {
+  display: block;
+  margin-bottom: 8px;
+  font: 11px/1.4 var(--mono, monospace);
+  letter-spacing: 1.8px;
+  color: var(--hf-accent);
+}
+.hands-free-kicker > span {
+  color: #829ba9;
+  letter-spacing: 1px;
+  font-size: 9px;
+}
+.hands-free-console .hands-free-title h2 {
+  font: 600 25px/1.35 var(--disp, Orbitron, sans-serif);
+  letter-spacing: -0.6px;
+}
+.hands-free-console .hands-free-header > button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  padding: 0;
+  color: #8ea6b5;
+  background: #0d1923;
+}
+.hands-free-console .hands-free-body {
+  padding: 0 24px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: #23404e transparent;
+  scrollbar-gutter: auto;
+  scroll-padding-top: 136px;
+  touch-action: pan-y;
+}
+.hands-free-console :is(button, select, input, textarea) {
+  border-color: #243845;
+  border-radius: 10px;
+  background-color: #0c1923;
+  font-family: inherit;
+  transition:
+    border-color 150ms,
+    background-color 150ms,
+    box-shadow 150ms;
+}
+.hands-free-console button:disabled {
+  opacity: 0.45;
+}
+.hands-free-console :is(input, textarea, select) {
+  color-scheme: dark;
+}
+.hands-free-console :is(input, textarea):focus {
+  border-color: var(--hf-accent);
+}
+.hands-free-console textarea {
+  resize: vertical;
+  line-height: 1.65;
+}
+.hands-free-console summary {
+  color: #9db9c9;
+  font-size: 13px;
+}
+.hands-free-console .activity-page {
+  border: 1px solid #203643;
+  border-radius: 10px;
+  background: #0b1720;
+  padding: 20px;
+  color: #d7e6ee;
+}
+.hands-free-console :is(.activity-bookmarks, .activity-timer) {
+  border-color: #243845;
+  background: #0b1720;
+}
+.task-panel {
+  --task-accent: var(--accent, #00e5ff);
+  --task-line: color-mix(in srgb, var(--task-accent) 18%, transparent);
+}
+.task-panel .task-toolbar {
+  display: block;
+  margin: 0 0 20px;
+  padding: 20px 0 8px;
+  background: #070f17;
+}
+.task-panel .task-camera-switch {
+  display: flex;
+  width: 100%;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--task-line);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--task-accent) 6%, #0c1822), #0a151e);
+  border-radius: 12px;
+  min-height: 104px;
+  opacity: 1;
+}
+.task-panel .task-camera-switch:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.task-panel .task-camera-switch > .task-camera-emblem {
+  display: grid;
+  place-items: center;
+  flex: 0 0 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--task-accent) 35%, transparent);
+  border-radius: 50%;
+  outline: 1px dashed var(--task-line);
+  outline-offset: 5px;
+  color: var(--task-accent);
+  background: color-mix(in srgb, var(--task-accent) 5%, transparent);
+}
+.task-camera-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.task-camera-copy .task-camera-label {
+  color: #88a4b5;
+  font: 9px/1.4 var(--mono, monospace);
+  letter-spacing: 1.5px;
+}
+.task-camera-copy > strong {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e7f2f7;
+}
+.task-camera-state {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #a9bfce;
+  background: #1a2b37;
+  font: 10px/1.6 var(--mono, monospace);
+  text-transform: uppercase;
+}
+.task-camera-copy > span:last-child {
+  color: #8ca5b5;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.task-camera-switch[data-state="On"] .task-camera-state {
+  color: var(--task-accent);
+  background: color-mix(in srgb, var(--task-accent) 12%, transparent);
+}
+.task-camera-switch:is([data-state="Paused"], [data-state="Testing"], [data-state="Starting"])
+  .task-camera-state {
+  color: #f0c080;
+  background: #342b1f;
+}
+.task-camera-switch .task-switch-track {
+  width: 38px;
+  height: 22px;
+  padding: 3px;
+  background: #29404f;
+  border: 1px solid #3b5565;
+}
+.task-camera-switch .task-switch-track > span {
+  width: 14px;
+  height: 14px;
+  background: #adc4d3;
+}
+.task-camera-switch[aria-checked="true"] .task-switch-track {
+  border-color: var(--task-accent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--task-accent) 20%, transparent);
+}
+.task-camera-switch[aria-checked="true"] .task-switch-track > span {
+  transform: translateX(16px);
+}
+.task-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.task-section-heading > span,
+.task-section-index {
+  color: #8da7b7;
+  font: 10px/1.5 var(--mono, monospace);
+  letter-spacing: 1.2px;
+}
+.task-section-heading > span > span {
+  padding-inline: 4px;
+  color: var(--task-accent);
+}
+.task-panel .task-activity-toggle {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+  color: var(--task-accent);
+  font-size: 14px;
+}
+.task-activity-toggle small {
+  color: #8ca5b5;
+  font-size: 10px;
+}
+.task-activity-picker:has(.task-activity-toggle[aria-expanded="false"]) {
+  border-bottom: 1px solid var(--task-line);
+}
+.task-activity-picker:has(.task-activity-toggle[aria-expanded="false"]) .task-section-heading {
+  margin-bottom: 4px;
+}
+.task-activity-picker:has(.task-activity-toggle[aria-expanded="false"]) + .task-current-activity {
+  margin-top: 16px;
+  padding-top: 0;
+  border-top: 0;
+}
+.task-panel .task-picker {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0;
+  width: 112px;
+}
+.task-picker select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.task-picker-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  color: #a3bac9;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.task-picker:focus-within .task-picker-caption {
+  outline: 2px solid var(--task-accent);
+  outline-offset: 2px;
+}
+.task-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.task-panel .task-shortcuts > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 76px;
+  padding: 12px 8px;
+  border: 1px solid #1c303d;
+  background: #0b1720;
+  color: #8ea9bb;
+  font-size: 12px;
+}
+.task-panel .task-shortcuts > button[aria-pressed="true"] {
+  position: relative;
+  color: var(--task-accent);
+  border-color: color-mix(in srgb, var(--task-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--task-accent) 9%, #0b1720);
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--task-accent) 3%, transparent);
+}
+.task-shortcuts > button[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--task-accent);
+  box-shadow: 0 0 6px var(--task-accent);
+}
+.task-current-activity {
+  margin: 24px 0 16px;
+  padding-top: 20px;
+  border-top: 1px solid var(--task-line);
+}
+.task-current-activity h3 {
+  margin: 8px 0 5px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.task-current-activity p {
+  color: #8ea7b6;
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 42ch;
+}
+.task-action-set .task-action {
+  gap: 10px;
+  min-height: 142px;
+  padding: 18px 8px 12px;
+  border: 1px solid #243b49;
+  border-radius: 12px;
+  background: linear-gradient(155deg, #10222e, #0a1620);
+  color: #d7e7f0;
+}
+.task-action-set .task-action.is-primary {
+  border-color: color-mix(in srgb, var(--task-accent) 55%, #243b49);
+  background: linear-gradient(155deg, color-mix(in srgb, var(--task-accent) 13%, #0c1b26), #0b1b25);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--task-accent) 8%, transparent);
+}
+.task-action-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.task-action-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #88adbf;
+  font: 10px/1.4 var(--mono, monospace);
+}
+.task-action-shortcut > svg {
+  flex: 0 0 23px;
+}
+.task-action.is-primary :is(.task-action-symbols, .task-action-shortcut) {
+  color: var(--task-accent);
+}
+.task-secondary-actions .task-action {
+  flex: 1 1 80px;
+  flex-direction: column;
+  min-height: 76px;
+  gap: 6px;
+  padding: 12px 6px;
+  background: #0a1720;
+}
+.task-secondary-actions .task-action-label {
+  font-size: 11px;
+}
+.task-secondary-actions .task-action-shortcut {
+  font-size: 9px;
+}
+.task-action-set .task-action.is-detected {
+  border-color: var(--task-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--task-accent) 25%, transparent);
+}
+.task-panel .task-footer {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-color: var(--task-line);
+}
+.task-panel .task-footer > button {
+  color: #a2bbca;
+  font-size: 12px;
+  background: #0b1720;
+}
+.task-panel .task-footer > .task-settings-button {
+  border-color: transparent;
+  padding-left: 0;
+  background: transparent;
+}
+.task-panel .task-footer > .task-stop {
+  color: #f1aa9f;
+  border-color: #6c4541;
+}
+.task-panel .task-local-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 18px;
+  color: #7894a6;
+  font: 10px/1.6 var(--mono, monospace);
+}
+.task-panel .task-state {
+  padding: 10px 12px;
+  border-left: 2px solid #6b8b9d;
+  border-radius: 0 6px 6px 0;
+  background: #0e1d28;
+  color: #a7c1d0;
+  font-size: 12px;
+}
+.task-panel:has(.task-preferences) .task-shortcuts {
+  display: none;
+}
+.task-preferences > .task-preferences-heading {
+  top: 132px;
+  background: #070f17;
+  border-bottom: 1px solid var(--task-line);
+}
+.hands-free-console .hands-free-body:has(.task-preferences) {
+  scroll-padding-top: 204px;
+}
+.task-preference-section {
+  border-color: var(--task-line);
+}
+.task-mapping {
+  padding-block: 12px;
+}
+.task-mapping strong {
+  font-size: 13px;
+}
+.task-mapping small {
+  font-size: 11px;
+  color: #8ca9ba;
+}
+@media (hover: hover) {
+  .hands-free-console button:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--hf-accent) 65%, transparent);
+    background-color: #122a36;
+  }
+}
+@media (max-width: 600px) {
+  .hands-free.hands-free-console {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+    border-width: 0;
+  }
+  .hands-free-console .hands-free-header {
+    padding: calc(22px + env(safe-area-inset-top, 0px)) 20px 18px;
+  }
+  .hands-free-console .hands-free-body {
+    padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .task-camera-copy > strong {
+    font-size: 15px;
+  }
+}
+@media (max-width: 359px) {
+  .hands-free-console .hands-free-header {
+    padding-inline: 16px;
+  }
+  .hands-free-console .hands-free-body {
+    padding-inline: 16px;
+  }
+  .task-panel .task-camera-switch {
+    gap: 12px;
+    padding-inline: 12px;
+  }
+  .task-panel .task-camera-switch > .task-camera-emblem {
+    flex-basis: 40px;
+    height: 40px;
+  }
+  .task-camera-copy > strong {
+    font-size: 14px;
+  }
+  .task-section-heading > span {
+    font-size: 9px;
+    letter-spacing: 0.6px;
+  }
+  .task-action-label {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hands-free-console *,
+  .task-panel * {
+    transition: none !important;
+  }
+}

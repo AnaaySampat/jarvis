@@ -1,5 +1,86 @@
 # Status
 
+**2026-11-08 — Signed Android release candidate 2.5.6-rc.3:**
+created `JARVIS-v2.5.6-rc.3-arm64.apk` locally with build number 2005008,
+including the tool execution and chat activity changes below. The 52,570,032-byte
+APK contains only ARM64 native libraries, targets SDK 36 with minimum SDK 24,
+is not debuggable, and has backup disabled. APK v2/v3 signatures and 16 KB ZIP
+alignment passed. Its signing certificate matches the previous RC2 APK
+(`99b9ab96b6577a01567aade7e08525cb1f2e888c822672c76ecfb85d09631370`).
+APK SHA-256: `2187a20bc480085ccedeadbf2306813bfc6cbd8d3b9e0450aacaa5b5d3afce03`.
+All 171 native release unit tests passed with no skips; the 10 contract fixtures,
+3 release-gate tests and 5 updater build tests also passed. Local updater metadata
+and checksums were generated from the signed bytes. No release was published and
+no device installation was performed. Physical-device and two-build updater
+acceptance remain pending; the foundation promotion gate is unchanged.
+
+**2026-11-08 — Chat tool visibility, items 4–6 and combined checks (source changes):**
+phone/TV steps and correlated PC progress are grouped under their initiating tool,
+with planned/reported/failed distinctions, nested information-only consultations,
+and links to Tasks/STOP. All chat entry paths now use request-owned observers and
+artifact collectors: standard chat, fast commands, picked agents, live-view PC,
+incoming PC/WhatsApp, quick tools and checked continuation. Existing authorization
+and incoming tool limits are preserved. Compact, privacy-filtered records survive
+chat reopening, archival and relaunch separately from model context. Interrupted
+work restores as unconfirmed, late receipts update their original chat, and deleted
+chats are not recreated. Records have bounded retention and storage failures surface
+in the UI. Combined validation: 929 JavaScript tests passed (9 existing skips), with
+type checking, lint and production web build passing. All 171 Kotlin unit tests
+were rerun successfully, and both Rust bridge tests passed. Physical-device
+validation and release APK creation remain pending.
+
+**2026-11-08 — Live tool calls in Android chat, items 1–3 (source changes):**
+local JARVIS chat replies show readable action labels and actual tool names while
+tools run, with queued/running/approval/completed/failed/stopped/unconfirmed/not-run
+states sourced from execution. Validation refusals and duplicate prevention are
+shown as not run. Unverified native/Clock receipts cannot become green successes;
+late committed confirmations update their original rows. Completed work collapses
+after the answer, attention rows stay visible, and individual rows show safe numeric
+inputs, short outcomes and elapsed time. Final answers and image/QR cards share the
+same reply. Arbitrary arguments, result bodies and exception payloads are excluded.
+Validation: 916 JavaScript tests passed (9 existing skips), with type checking,
+lint and production web build passing. Nested task steps, other entry paths and
+saved-chat tool-history persistence are not part of this pass. Physical-device
+verification and release APK creation remain pending.
+
+**2026-11-08 — Tool orchestration, direct commands, recovery and measurement (source changes):**
+ordinary turns can earn bounded extra rounds for new progress, independent reads
+overlap in batches of three, and changes remain sequential under a 24-call ceiling.
+Whole unambiguous media-volume/timer commands use the existing dispatcher directly;
+Clock intents remain unverified. Tasks now exposes completed/uncertain/remaining work
+and checked continuation under the original tool scope, single-use expiring tickets,
+fresh observation and protected completed actions. Legacy authority gaps and unknown
+effects block continuation. Timing/counter instrumentation, private numeric diagnostic
+exports, and labelled offline/live selection evaluations are implemented. Validation:
+900 JavaScript tests passed (9 existing skips), 171 Kotlin tests passed, with type
+checking, lint and web build passing. `test:tool-evals` has 113 passing checks.
+No physical-device or live-model validation was run for these changes; APK installation
+remains pending. Repeating a protected completed action requires a fresh user request.
+
+**2026-11-08 — Tool images, availability and uncertain outcomes (source changes):**
+tool screenshots stay on image-transmitting clients through fallbacks and hedges.
+Recording is no longer advertised; credential requirements, native runtime support,
+screen-capture API level and missing access shape the palette and dispatcher.
+Permission/folder setup has an explicit tool path. Native timeouts are unknown
+outcomes with read-only receipt checks and late evidence updates; uncertain actions
+are never resubmitted. Late calendar IDs are linked only to one unchanged agenda
+row. Generic receipts lost on process death remain unconfirmed; native phone tasks
+can recover verified Room evidence. Validation: 854 JavaScript tests passed (9
+existing skips), 170 Kotlin tests passed, and type checking, lint and web build
+passed. Physical-phone verification and APK installation remain pending.
+
+**2026-11-07 — Tool execution correctness (source changes):** model calls are
+validated against the authorized tool schema before dispatch. Duplicate effects
+are guarded before execution with journaled operation identities; repeated reads
+remain possible. Successful single-tool chat turns now receive objective completion
+review. Native volume changes read back the stream index; Clock alarm/timer intent
+acceptance is explicitly unverified, and a saved agenda entry cannot mask an
+unconfirmed reminder alarm. Regression tests cover duplicate sends/alarms, malformed
+and corrected calls, wrong-tool success, native verification passthrough and recovery.
+Validation: 825 JavaScript tests passed (9 existing skips), 170 Kotlin unit tests
+passed, both Rust bridge tests passed, and type checking, lint and web build passed.
+Physical-phone verification and installation of these changes are pending.
+
 **2026-11-04 — Phone menu and gesture setup:** the Android header now has one
 compact row of direct, labeled shortcuts, including Gestures. At narrow widths the
 row scrolls horizontally and retains 44-pixel touch targets. Point-and-pinch can

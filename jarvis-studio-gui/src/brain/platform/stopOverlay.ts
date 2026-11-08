@@ -19,6 +19,8 @@ const POLL_MS = 250;
 let visible = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let lastSeq = -1;
+let generation = 0;
+let stopHandler: () => void = () => {};
 // The cross-app STOP shows for free through the accessibility overlay when that
 // service is on (phone-control users). Voice-only users never enable it, so the
 // overlay falls back to a TYPE_APPLICATION_OVERLAY that needs the "draw over other
@@ -34,31 +36,40 @@ export interface SyncOpts {
   onNeedsPermission?: () => void;
 }
 
-async function poll(onStop: () => void): Promise<void> {
-  let st: { seq?: number } | null = null;
+async function poll(expectedGeneration: number): Promise<void> {
+  let st: { seq?: number; visible?: boolean } | null = null;
   try {
-    st = (await invoke("plugin:phone|poll_stop_overlay")) as { seq?: number };
+    st = await invoke("plugin:phone|poll_stop_overlay");
   } catch {
     return; // transient bridge hiccup — just try again next tick
   }
+  if (!visible || expectedGeneration !== generation) return;
   const seq = typeof st?.seq === "number" ? st.seq : 0;
   if (lastSeq < 0) {
     lastSeq = seq; // first poll: baseline, don't react to a stale prior tap
   } else if (seq > lastSeq) {
     lastSeq = seq;
-    onStop();
+    stopHandler();
+    return;
+  }
+  // Native task completion can hide the view without a JS visibility edge.
+  // Reconcile actual native state, including after a task-to-speech handoff.
+  if (st?.visible === false) {
+    void invoke("plugin:phone|show_stop_overlay").catch(() => {});
   }
 }
 
 /**
  * Idempotent — safe to call on every render with the desired visibility. Only
- * touches native state (and starts/stops its poll) when visibility actually
- * changes, so re-invoking with the same value is a cheap no-op.
+ * starts/stops its poll when desired visibility changes. Polling also restores
+ * an overlay removed by native completion while the JS owner remains active.
  */
 export function syncStopOverlay(active: boolean, onStop: () => void, opts: SyncOpts = {}): void {
   if (!inTauri()) return;
+  stopHandler = onStop;
   if (active === visible) return;
   visible = active;
+  const currentGeneration = ++generation;
   if (active) {
     lastSeq = -1;
     void (async () => {
@@ -82,7 +93,7 @@ export function syncStopOverlay(active: boolean, onStop: () => void, opts: SyncO
         void invoke("plugin:phone|request_overlay_permission").catch(() => {});
       }
     })();
-    pollTimer = setInterval(() => void poll(onStop), POLL_MS);
+    pollTimer = setInterval(() => void poll(currentGeneration), POLL_MS);
   } else {
     if (pollTimer) {
       clearInterval(pollTimer);

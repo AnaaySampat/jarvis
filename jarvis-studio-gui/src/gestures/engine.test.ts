@@ -227,6 +227,40 @@ describe("gesture session policy", () => {
     });
     expect(feed("POINT_UP", 800, 1, start)).toEqual([]);
   });
+
+  it("recognizes vertical hand scrolling with an open palm", () => {
+    const cfg = defaults();
+    cfg.mode = "reading";
+    cfg.mirror = false;
+    const { feed } = stream(cfg),
+      start = hand(),
+      middle = hand().map(([x, y, z]) => [x, y - 0.1, z] as Point),
+      end = hand().map(([x, y, z]) => [x, y - 0.2, z] as Point);
+    expect(feed("OPEN_PALM", 500, 1, start)).toEqual([]);
+    expect(feed("OPEN_PALM", 600, 1, middle)).toEqual([]);
+    expect(feed("OPEN_PALM", 700, 1, end)).toContainEqual({
+      kind: "action",
+      action: "reader.scrollDown",
+      pose: "SWIPE_UP",
+    });
+  });
+
+  it("recognizes hand scrolling in TV mode and falls back to universal scrolling when unassigned", () => {
+    const cfg = defaults();
+    cfg.mode = "tv";
+    cfg.mirror = false;
+    const { feed } = stream(cfg),
+      start = hand(),
+      downMiddle = hand().map(([x, y, z]) => [x, y + 0.1, z] as Point),
+      downEnd = hand().map(([x, y, z]) => [x, y + 0.2, z] as Point);
+    expect(feed("OPEN_PALM", 500, 1, start)).toEqual([]);
+    expect(feed("OPEN_PALM", 600, 1, downMiddle)).toEqual([]);
+    expect(feed("OPEN_PALM", 700, 1, downEnd)).toContainEqual({
+      kind: "action",
+      action: "reader.scrollUp",
+      pose: "SWIPE_DOWN",
+    });
+  });
 });
 describe("recognition reliability", () => {
   it("rejects two sparse detections and requires neutral after tracking gaps", () => {

@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { agentResult, modelToolResult } from "./results";
 
 describe("agent handover evaluations", () => {
+  it("does not promote an accepted Clock intent into a saved alarm", () => {
+    const result = agentResult({ ok: true, summary: "Sent the alarm request. Check Clock to confirm.",
+      verification: { status: "unverified", method: "android_clock_intent_accepted", expected: { hour: 7, minute: 0 } },
+    }, "Set an alarm for seven", "set_alarm");
+    expect(result).toMatchObject({ ok: false, status: "unverified", completed: [], evidence: [] });
+    expect(result.summary).toContain("Check Clock");
+  });
+
+  it("accepts matching native readback and rejects missing or mismatched observed state", () => {
+    for (const observed of [{ streamIndex: 6 }, { streamIndex: 3 }, undefined]) {
+      const result = agentResult({ ok: true, summary: "Volume set.", verification: {
+        status: "verified", method: "android_audio_manager_readback", expected: { streamIndex: 6 }, observed,
+      } }, "Set volume to 40", "set_volume");
+      expect(result.ok).toBe(observed?.streamIndex === 6);
+      if (!result.ok) expect(result.evidence).toEqual([]);
+    }
+  });
   it("passes the last finding and artifact to the next model without private tool fields", () => {
     const result = modelToolResult(
       {
@@ -28,7 +45,7 @@ describe("agent handover evaluations", () => {
   });
 
   it("does not call a claimed PC or phone result successful without a receipt", () => {
-    for (const tool of ["pc_task", "phone_task"]) {
+    for (const tool of ["pc_task", "phone_task", "pc_screenshot"]) {
       expect(agentResult({ ok: true, summary: "Sent!" }, "Send once", tool)).toMatchObject({
         ok: false,
         status: "unverified",

@@ -3,6 +3,11 @@ use tauri::{command, AppHandle, Runtime};
 use crate::models::*;
 use crate::PhoneExt;
 
+#[command]
+pub(crate) async fn app_update<R: Runtime>(app: AppHandle<R>, action: String, options: String) -> crate::Result<serde_json::Value> {
+    app.phone().app_update(AppUpdateRequest { action, options })
+}
+
 /// Every command below is a pure pass-through: wrap its positional args into the
 /// matching request struct (same field names, so `$req { $($arg),* }` shorthand
 /// applies) and forward to the `PhoneExt` method of the same name. One macro

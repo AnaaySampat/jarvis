@@ -8,6 +8,7 @@
 
 import type { BrainConfig } from "../config";
 import type { ChatMessage, ToolCall, ToolDeclaration } from "../types";
+import { parseToolArguments } from "../tools/validation";
 import { toGeminiTools } from "../tools/registry";
 import { platformFetch } from "../tools/httpClient";
 import { GEMINI_DEFAULT, VERTEX_DEFAULT } from "../resolveConfig";
@@ -287,7 +288,7 @@ function parseResponse(
       toolCalls.push({
         id: `gemini-${toolCalls.length}`,
         name: p.functionCall.name ?? "",
-        args: (p.functionCall.args ?? {}) as Record<string, unknown>,
+        ...parseToolArguments(Object.hasOwn(p.functionCall, "args") ? p.functionCall.args : {}),
         ...(typeof p.thoughtSignature === "string" ? { thoughtSignature: p.thoughtSignature } : {}),
       });
     }

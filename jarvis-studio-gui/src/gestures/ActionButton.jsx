@@ -1,6 +1,6 @@
 import { Icon } from "./GestureIcon";
 import GestureGlyph from "./GestureGlyph";
-import { poseForAction } from "./presentation";
+import { poseForAction, poseLabel } from "./presentation";
 
 export default function ActionButton({
   controls,
@@ -38,9 +38,14 @@ export default function ActionButton({
     >
       <span className="task-action-symbols" aria-hidden="true">
         <Icon name={icon} size={24} />
-        {pose && <GestureGlyph pose={pose} size={34} />}
       </span>
-      <span>{label}</span>
+      <span className="task-action-label">{label}</span>
+      {pose && (
+        <span className="task-action-shortcut" aria-hidden="true">
+          <GestureGlyph pose={pose} size={23} />
+          <span>{poseLabel(pose, controls.config)}</span>
+        </span>
+      )}
       {result?.state === "pending" && (
         <span className="task-action-result" aria-hidden="true">
           <Icon name="clock" size={13} />

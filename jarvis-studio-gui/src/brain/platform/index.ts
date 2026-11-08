@@ -7,6 +7,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { ToolResult } from "../types";
+import { NATIVE_TOOLS, type AvailabilityMap } from "../tools/availability";
+import { NativeOutcomeTracker, type NativeActionReply } from "./nativeOutcomes";
 import type {
   OperatorStartResult,
   OperatorStatus,
@@ -144,6 +146,10 @@ export interface DirectControl {
 }
 
 export interface Platform {
+  toolAvailability?(): Promise<AvailabilityMap>;
+  requestToolAccess?(tool: string): Promise<ToolResult>;
+  reconcileOutcome?(id: string): Promise<ToolResult>;
+  watchOutcome?(id: string, listener: () => void): () => void;
   apps: AppControl;
   system: SystemControl;
   files: FileAccess;
@@ -169,6 +175,26 @@ const UNBOUNDED_COMMANDS = new Set([
  *  wedging the whole phone_task loop until the app was restarted. Generous enough
  *  that a slow-but-real action still completes. */
 const PHONE_INVOKE_TIMEOUT_MS = 15_000;
+async function boundedNativeRead<T>(call: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([call, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Native read did not respond.")), PHONE_INVOKE_TIMEOUT_MS);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+const nativeOutcomes = new NativeOutcomeTracker();
+const EFFECT_COMMANDS = new Set(["open_app", "close_app", "open_url", "set_volume",
+  "open_system_settings", "clock_action", "calendar_action", "device_action", "health_export",
+  "task_checkpoint", "task_finish", "task_cancel"]);
+
+async function inspectVolume(): Promise<string | undefined> {
+  const state = await phoneJson<{ volumeReadback?: { streamIndex?: number; maxStreamIndex?: number } }>("media_now", {});
+  const readback = state?.volumeReadback;
+  return typeof readback?.streamIndex === "number" && typeof readback.maxStreamIndex === "number" && readback.maxStreamIndex > 0
+    ? `The current media volume is ${Math.round(readback.streamIndex * 100 / readback.maxStreamIndex)}%.`
+    : undefined;
+}
 
 async function phoneInvoke(
   cmd: string,
@@ -178,23 +204,19 @@ async function phoneInvoke(
     return { ok: false, summary: "This only works on the device.", error: "not_on_device" };
   }
   try {
+    if (EFFECT_COMMANDS.has(cmd)) {
+      const res = await nativeOutcomes.call(() => invoke<NativeActionReply>(`plugin:phone|${cmd}`, args),
+        PHONE_INVOKE_TIMEOUT_MS, cmd === "set_volume" ? inspectVolume : undefined);
+      return toResult(res);
+    }
     const call = invoke(`plugin:phone|${cmd}`, args);
-    const res = (await (UNBOUNDED_COMMANDS.has(cmd)
-      ? call
-      : Promise.race([
-          call,
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`native '${cmd}' did not respond`)),
-              PHONE_INVOKE_TIMEOUT_MS,
-            ),
-          ),
-        ]))) as {
+    const res = (await (UNBOUNDED_COMMANDS.has(cmd) ? call : boundedNativeRead(call))) as {
       ok?: boolean;
       summary?: string;
       code?: string;
       generation?: number;
       eventId?: number;
+      verification?: ToolResult["verification"];
     };
     return {
       ok: Boolean(res?.ok),
@@ -207,6 +229,7 @@ async function phoneInvoke(
       // deleted. The `as Promise<... & {eventId?: number}>` cast at the calendar.add
       // call site was asserting something that was never true.
       ...(typeof res?.eventId === "number" ? { eventId: res.eventId } : {}),
+      ...(res?.verification ? { verification: res.verification } : {}),
     };
   } catch (err) {
     return { ok: false, summary: `Failed: ${String(err)}`, error: "plugin_error" };
@@ -218,12 +241,7 @@ async function phoneInvoke(
 async function phoneJson<T>(cmd: string, args: Record<string, unknown>): Promise<T | null> {
   if (!inTauri()) return null;
   try {
-    return (await Promise.race([
-      invoke<T>(`plugin:phone|${cmd}`, args),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`native '${cmd}' did not respond`)), PHONE_INVOKE_TIMEOUT_MS),
-      ),
-    ])) as T;
+    return await boundedNativeRead(invoke<T>(`plugin:phone|${cmd}`, args));
   } catch {
     return null;
   }
@@ -235,7 +253,7 @@ async function phoneJson<T>(cmd: string, args: Record<string, unknown>): Promise
 async function captureScreenshotBase64(): Promise<string | null> {
   if (!inTauri()) return null;
   try {
-    const res = await invoke<{ ok: boolean; base64?: string }>("plugin:phone|capture_screenshot");
+    const res = await boundedNativeRead(invoke<{ ok: boolean; base64?: string }>("plugin:phone|capture_screenshot"));
     return res?.ok && res.base64 ? res.base64 : null;
   } catch {
     return null;
@@ -419,7 +437,7 @@ const DEVICE_KEYS = { value: 0, query: "", app: "", mode: "" };
 const COMM_KEYS = { to: "", text: "", app: "", name: "", number: "", video: false };
 const NOTIFICATION_KEYS = { app: "", from: "" };
 
-interface NativeReply {
+interface NativeReply extends NativeActionReply {
   ok?: boolean;
   summary?: string;
   code?: string;
@@ -427,8 +445,8 @@ interface NativeReply {
 
 const NO_REPLY: ToolResult = {
   ok: false,
-  summary: "The phone plugin did not respond.",
-  error: "plugin_error",
+  summary: "The phone did not confirm the outcome. It may still have taken effect; check before retrying.",
+  error: "native_outcome_unknown",
 };
 
 function toResult(res: NativeReply | null): ToolResult {
@@ -436,12 +454,21 @@ function toResult(res: NativeReply | null): ToolResult {
   return {
     ok: Boolean(res.ok),
     summary: String(res.summary ?? ""),
-    error: res.ok ? undefined : String(res.code || "native_action_failed"),
+    error: res.ok ? undefined : String(res.code || res.error || "native_action_failed"),
+    ...(res.verification ? { verification: res.verification } : {}),
+    ...(res.nativeOutcomeId ? { nativeOutcomeId: res.nativeOutcomeId } : {}),
+    ...("eventId" in res && typeof res.eventId === "number" ? { eventId: res.eventId } : {}),
+    ...("generation" in res && typeof res.generation === "number" ? { data: { generation: res.generation } } : {}),
   };
 }
 
-const commAction = (action: string, args: Partial<typeof COMM_KEYS>) =>
-  phoneJson<NativeReply & Partial<ContactTarget>>("comm_action", { ...COMM_KEYS, ...args, action });
+const commAction = (action: string, args: Partial<typeof COMM_KEYS>): Promise<(NativeReply & Partial<ContactTarget>) | null> => {
+  if (!inTauri()) return Promise.resolve({ ok: false, code: "not_on_device", summary: "This only works on the device." });
+  const payload = { ...COMM_KEYS, ...args, action };
+  return action === "message" || action === "call"
+    ? nativeOutcomes.call(() => invoke<NativeReply>("plugin:phone|comm_action", payload), PHONE_INVOKE_TIMEOUT_MS)
+    : phoneJson<NativeReply & Partial<ContactTarget>>("comm_action", payload);
+};
 
 // Codes in notifications (OTPs, login and verification codes) never reach the model:
 // a message or web page it read could otherwise talk it into repeating one.
@@ -478,7 +505,7 @@ const tauriPhone: PhoneController = {
   // The operator loop runs natively; see operator/controller.ts for why.
   async operatorStart(spec) {
     const res = await phoneJson<OperatorStartResult>("operator_start", { ...spec });
-    return res ?? { ok: false, summary: "The phone plugin did not respond.", error: "plugin_error" };
+    return res ?? { ok: false, summary: "The start acknowledgement is unavailable; checking the existing phone task.", error: "native_outcome_unknown" };
   },
   async operatorStatus(taskId, since) {
     const res = await phoneJson<OperatorStatus>("operator_status", { taskId, since });
@@ -553,6 +580,55 @@ export function requestCalendarPermission(): Promise<ToolResult> {
 }
 
 export const androidPlatform: Platform = {
+  watchOutcome: (id, listener) => nativeOutcomes.watch(id, listener),
+  async toolAvailability() {
+    const availability: AvailabilityMap = { record: { state: "unavailable", reason: "Direct recording is not implemented." } };
+    if (!inTauri()) {
+      for (const name of NATIVE_TOOLS) availability[name] = { state: "unavailable", reason: "Requires the Android app." };
+      return availability;
+    }
+    const health = await readEcosystemHealth();
+    const needs = (tools: string[], reason: string) => {
+      for (const tool of tools) availability[tool] = { state: "permission_required", reason };
+    };
+    if (health?.ok && health.permissions.accessibility === false)
+      needs(["phone_task", "take_screenshot"], "Call request_tool_access for this tool, then enable JARVIS in Android Accessibility settings.");
+    if (health?.ok && health.permissions.notificationAccess === false)
+      needs(["read_notifications"], "Call request_tool_access for read_notifications, then grant Notification access.");
+    if (health?.ok && health.sdk < 30)
+      availability.take_screenshot = { state: "unavailable", reason: "Screen capture requires Android 11 or newer." };
+    if (!getGrantedFolder()) needs(["read_file", "list_directory"], "Call request_tool_access for this tool and choose an allowed folder.");
+    return availability;
+  },
+  async requestToolAccess(tool) {
+    if (tool === "phone_task" || tool === "take_screenshot") return androidPlatform.openAccessibilitySettings();
+    if (tool === "read_notifications") return requestNotificationAccess();
+    if (tool === "read_file" || tool === "list_directory") return pickGrantedFolder();
+    if (tool === "manage_schedule") return androidPlatform.calendar.requestPermission();
+    return { ok: false, error: "not_supported", summary: "No permission setup is available for that tool." };
+  },
+  async reconcileOutcome(id) {
+    if (id.startsWith("operator:")) {
+      const taskId = id.slice("operator:".length);
+      const status = await tauriPhone.operatorStatus(taskId, 0);
+      if (status.done && status.result) {
+        const r = status.result;
+        return { ok: r.ok, summary: r.summary, error: r.error ?? undefined,
+          data: { findings: r.findings, verificationReceipt: r.verificationReceipt, acted: r.acted === true } };
+      }
+      if (!status.ok) {
+        const saved = await phoneJson<{ ok?: boolean; state?: string; result?: string; verified?: boolean; verificationReceipt?: string }>("task_status", { taskId });
+        if (saved?.ok && saved.state === "succeeded" && saved.verified &&
+            /^aura\.verify\.v1:(model|deterministic):[a-f0-9]{64}$/.test(saved.verificationReceipt ?? ""))
+          return { ok: true, summary: saved.result || "The saved phone task completed.",
+            data: { verificationReceipt: saved.verificationReceipt, acted: true } };
+      }
+      return { ok: false, error: "native_outcome_unknown", nativeOutcomeId: id,
+        summary: status.ok ? "The original phone task is still running. No second task was started."
+          : "The original phone task's receipt is unavailable. Check its saved task and the phone before retrying." };
+    }
+    return toResult(await nativeOutcomes.check(id));
+  },
   apps: {
     open: (name) => phoneInvoke("open_app", { name }),
     close: (name) => phoneInvoke("close_app", { name }),

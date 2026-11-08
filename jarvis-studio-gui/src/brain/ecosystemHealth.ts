@@ -1,5 +1,6 @@
 import type { NativeHealth } from "./platform";
 import { taskDisplayState } from "../hooks/workflowTasks";
+import { DIAGNOSTIC_METRICS } from "./toolMetrics";
 
 export interface HealthRow {
   id: string;
@@ -170,6 +171,9 @@ export function diagnosticReport(
       tool_calls: count(task.metrics?.tool_calls),
       model_decisions: count(task.metrics?.model_decisions),
       unverified_results: count(task.metrics?.unverified_results),
+      ...(task.metrics?.instrumentation_version === 2 ? Object.fromEntries(
+        DIAGNOSTIC_METRICS.map((key) => [key, count(task.metrics?.[key])]),
+      ) : {}),
       provider_cost: null,
     })),
   };

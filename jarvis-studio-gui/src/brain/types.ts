@@ -26,6 +26,9 @@ export interface ChatMessage {
   /** For role:"user" — what the chat shows when it isn't what the model got (a routine
    *  run sends its steps but reads "Run bedtime"). Providers never send it. */
   display?: string;
+  /** Local transcript binding only. Removed by MemoryStore.recentTurns before inference. */
+  uiId?: string;
+  uiPending?: boolean;
 }
 
 /** A function/tool call emitted by the model. */
@@ -34,6 +37,8 @@ export interface ToolCall {
   name: string;
   /** Parsed arguments object (already JSON-decoded). */
   args: Record<string, unknown>;
+  /** A malformed provider payload must reach validation, never become default arguments. */
+  argumentError?: string;
   /**
    * Gemini 2.5+ "thinking" models attach this to functionCall parts; it must be
    * echoed back verbatim on the same part when the call is replayed in a later
@@ -59,10 +64,17 @@ export interface ToolDeclaration {
   };
 }
 
+export interface ToolAvailability {
+  state: "available" | "permission_required" | "unavailable";
+  reason?: string;
+}
+
 export interface ToolParam {
   type: "string" | "integer" | "number" | "boolean";
   description: string;
   enum?: string[];
+  minimum?: number;
+  maximum?: number;
 }
 
 /**
@@ -90,6 +102,17 @@ export interface ToolResult {
   /** True when the action needs the user's on-screen approval before running. */
   needsApproval?: boolean;
   error?: string;
+  /** Opaque reference for checking a timed-out native call without executing it again. */
+  nativeOutcomeId?: string;
+  /** In-memory composition for reconciling compound actions; never serialized to a model or journal. */
+  reconcileOutcome?: () => Promise<ToolResult>;
+  /** Native readback, or an explicit admission that only an intent was accepted. */
+  verification?: {
+    status: "verified" | "unverified";
+    method: string;
+    expected?: Record<string, unknown>;
+    observed?: Record<string, unknown>;
+  };
 }
 
 /** Provider tier — decides which place/web tools are offered (registry.ts). */

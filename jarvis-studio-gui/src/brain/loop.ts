@@ -7,23 +7,26 @@
  *   - the multi-step agent loop in `autopilot.py` (the `phone_task`/`pc_task` path),
  *     which adds cycle/loop guards, a redo-guard, and the vision-first operator.
  *
- * This scaffold implements the SHAPE (bounded tool-call rounds with a truthful
- * final answer) plus a same-repeat guard mirroring the phone operator's cycle guard
- * (ordinary turns use three rounds; scoped research can use a larger bounded budget).
- * With the ordinary turn's budget there's no room for the
- * operator's longer window-based cycle detector to matter — the useful signal at
- * this scale is "the model just repeated an identical call and got an identical
- * result", which means one more round won't help either).
+ * Ordinary turns start with three rounds and can earn up to six through new
+ * successful steps. Explicit scoped budgets remain exact. Independent reads can
+ * overlap in batches of three; effects are sequential. All turns also have a
+ * 24-call ceiling and repeat guards, with receipts checkpointed before use.
  */
 
 import type { ChatMessage, ToolResult } from "./types";
 import type { ToolDeclaration } from "./types";
 import { groupOf, LOAD_TOOLS, requestedGroups, toSpec, turnPalette } from "./tools/registry";
+import { validateToolCall } from "./tools/validation";
+import { hasSideEffect, operationKey, setsAbsoluteState, canonical } from "./tools/operations";
 import { dispatch, type DispatchDeps } from "./tools/dispatch";
 import { chatOverLadder } from "./ask";
 import { agentResult, modelToolResult, type ResultStatus } from "./results";
 import { WorkflowJournal, type Workflow } from "./workflow";
-import { isComplexTask } from "./modelPolicy";
+import { count } from "./toolMetrics";
+import { parallelRead, TOOL_CALL_LIMIT, ADAPTIVE_ROUND_LIMIT, progressing } from "./orchestration";
+import { registerRecovery, continuationTools } from "./recovery";
+import { conversationObjective } from "./conversation";
+import { toolActivity, emitToolActivity, finishToolActivity, reconcileToolActivity, type ToolActivityContext } from "./toolActivity";
 
 const MAX_TOOL_ROUNDS = 3; // backstop against runaway tool loops (cf. cycle guard)
 
@@ -42,7 +45,7 @@ interface CallRecord {
 
 /** Coarse signature for a tool call — same shape twice in a row is the stuck signal. */
 function callSig(name: string, args: Record<string, unknown>): string {
-  return `${name}:${JSON.stringify(args)}`;
+  return `${name}:${JSON.stringify(canonical(args))}`;
 }
 
 /** True when the last recorded call had the exact same call + result as this one. */
@@ -212,13 +215,104 @@ export async function runTurn(
   fullTools?: ToolDeclaration[],
 ): Promise<TurnResult> {
   const journal = deps.journal ?? new WorkflowJournal();
-  const objective = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
-  const run = journal.begin(objective);
+  const objective = deps.resumeRun?.objective ?? conversationObjective(messages);
+  const run = deps.resumeRun ?? journal.begin(objective);
+  if (deps.resumeRun && (!run.scope || run.state !== "running" || !journal.isLive(run.id)))
+    throw new Error("Continuation must claim a checked workflow first.");
+  // The caller has already included the previous verdict in continuation context.
+  if (deps.resumeRun) run.completion = undefined;
+  run.scope ??= { onlyTools: deps.onlyTools ? [...deps.onlyTools] : null, informationOnly: !!deps.informationOnly };
+  journal.save(run);
+  const executionResults: ToolResult[] = run.results.map((result) => ({ ok: result.ok, summary: result.summary, result }));
+  const resultActivities = new Map<string, { context: ToolActivityContext; started: number }>();
   const scopedDeps = {
     ...deps,
+    ...(deps.resumeRun ? { onlyTools: new Set(continuationTools(run,
+      [...(fullTools ?? tools)].map((tool) => tool.name)).filter((name) => !deps.onlyTools || deps.onlyTools.has(name))) } : {}),
+    informationOnly: !!deps.informationOnly || !!run.scope.informationOnly,
     shouldStopPhoneTask: () => journal.shouldStop(run.id) || Boolean(deps.shouldStopPhoneTask?.()),
     readAgentResult: (id: string) => journal.readResult(run.id, id),
+    reconcileActionOutcome: async (id: string): Promise<ToolResult> => {
+      if (run.state !== "running") {
+        if (journal.isLive(run.id)) return { ok: false, summary: "A continuation is running; check its current receipts." };
+        const saved = journal.list().find((item) => item.id === run.id);
+        if (saved) Object.assign(run, saved);
+      }
+      const operation = run.operations?.find((op) => op.resultId === id);
+      const original = run.results.find((r) => r.result_id === id);
+      if (!operation?.nativeOutcomeId || !original || !deps.platform?.reconcileOutcome)
+        return {
+          ok: false,
+          error: "no_native_receipt",
+          summary:
+            "No checkable native receipt exists for that result in this workflow. Check the phone before retrying.",
+        };
+      if (original.status !== "unverified")
+        return {
+          ok: true,
+          summary: `Recorded action outcome: ${original.status}. ${original.summary}`,
+        };
+      const execution = executionResults.find((r) => r.result?.result_id === id);
+      const actual = execution?.reconcileOutcome
+        ? await execution.reconcileOutcome()
+        : await deps.platform.reconcileOutcome(operation.nativeOutcomeId);
+      if (run.state !== "running" && journal.isLive(run.id))
+        return { ok: false, summary: "A continuation is running; check its current receipts." };
+      if (run.state !== "running") {
+        const saved = journal.list().find((item) => item.id === run.id);
+        if (saved) Object.assign(run, saved);
+      }
+      const current = run.results.find((r) => r.result_id === id)!;
+      if (current.status !== "unverified")
+        return {
+          ok: true,
+          summary: `Recorded action outcome: ${current.status}. ${current.summary}`,
+        };
+      const verified = agentResult(actual, original.remaining[0] ?? objective, operation.tool);
+      verified.result_id = original.result_id;
+      if (verified.status === "unverified")
+        verified.completed = [...new Set([...original.completed, ...verified.completed])];
+      const index = run.results.findIndex((r) => r.result_id === id);
+      const previous = run.results[index]!;
+      const previousReason = run.reason;
+      run.results[index] = verified;
+      if (run.state === "suspended")
+        run.reason =
+          verified.status === "unverified"
+          ? "The phone still hasn't confirmed this action. Check it before retrying."
+          : "The phone replied after the chat ended. Its action result is updated; the full task still needs review.";
+      try {
+        journal.save(run);
+      } catch (error) {
+        run.results[index] = previous;
+        run.reason = previousReason;
+        throw error;
+      }
+      if (execution) {
+        execution.result = verified;
+        execution.ok = verified.ok;
+        execution.summary = verified.summary;
+        execution.error = actual.error;
+        execution.verification = actual.verification;
+        execution.nativeOutcomeId =
+          verified.status === "unverified" ? operation.nativeOutcomeId : undefined;
+      }
+      const activity = resultActivities.get(id);
+      if (activity) reconcileToolActivity(deps.onToolActivity, activity.context, verified, activity.started);
+      return {
+        ok: true,
+        summary: `Original action outcome: ${verified.status}. ${verified.summary}`,
+        data: {
+          findings: [
+            `Original result: ${id}`,
+            `Action outcome: ${verified.status}`,
+            verified.summary,
+          ],
+        },
+      };
+    },
   };
+  registerRecovery(run.id, scopedDeps.reconcileActionOutcome);
   try {
     const output = await runTurnSteps(
       messages,
@@ -228,18 +322,37 @@ export async function runTurn(
       fullTools,
       journal,
       run,
+      executionResults,
+      resultActivities,
     );
     if (
-      deps.verifyCompletion &&
       !scopedDeps.shouldStopPhoneTask() &&
       run.state !== "suspended" &&
       run.results.length &&
-      (run.results.length > 1 || isComplexTask(objective)) &&
+      (run.results.length > 1 || run.results[0]!.ok) &&
       !run.pending &&
       !output.toolResults.some((r) => r.error === "cancelled")
     ) {
-      if (run.metrics) run.metrics.model_decisions++;
-      const verdict = await deps.verifyCompletion(objective, run.results, output.reply);
+      const uncertain = run.results.some(
+        (r) => r.status === "unverified" || r.status === "blocked",
+      );
+      if (run.metrics && deps.verifyCompletion && !uncertain) run.metrics.model_decisions++;
+      const verificationStarted = Date.now();
+      const verdict = uncertain
+        ? {
+            status: "unverified" as const,
+            completed: [],
+            remaining: ["An earlier action could not be verified"],
+          }
+        : deps.verifyCompletion
+          ? await deps.verifyCompletion(objective, run.results, output.reply,
+              (event) => count(run.metrics, event === "request" ? "model_requests" : event === "fallback" ? "fallbacks" : "hedges"))
+          : {
+              status: "unverified" as const,
+              completed: [],
+              remaining: ["Objective completion review is unavailable"],
+            };
+      count(run.metrics, "verifying_ms", Date.now() - verificationStarted);
       run.completion = verdict;
       if (verdict.status !== "succeeded") {
         run.state = "suspended";
@@ -268,6 +381,12 @@ export async function runTurn(
             : " Completion could not be verified.");
       }
     }
+    if (output.calledTools.length && !run.results.length) {
+      run.state = "suspended";
+      run.reason = "No requested tool call passed validation and execution.";
+      if (claimedWithoutActing(objective, output.reply, false))
+        output.reply = "No action was executed. I couldn't confirm that the request was completed.";
+    }
     run.state =
       run.state === "suspended" ||
       run.pending ||
@@ -276,7 +395,7 @@ export async function runTurn(
         : output.toolResults.some((r) => !r.ok))
         ? "suspended"
         : "succeeded";
-    // A single result already carries the tool/native verification verdict.
+    // A tool receipt proves its own action. Objective review proves the user's task.
     // Never let final model wording promote a failed or denied action.
     const single = run.results.length === 1 ? run.results[0] : undefined;
     if (!run.completion && single && !single.ok) output.reply = single.summary;
@@ -288,13 +407,15 @@ export async function runTurn(
           ? "succeeded"
           : "unverified");
     run.outcome = output.status;
-    if (scopedDeps.shouldStopPhoneTask() || output.toolResults.some((r) => r.error === "cancelled")) {
+    if (
+      scopedDeps.shouldStopPhoneTask() ||
+      output.toolResults.some((r) => r.error === "cancelled")
+    ) {
       run.state = "suspended";
       run.outcome = "cancelled";
       run.reason = "Stopped by the user. Already-started actions must be checked before retrying.";
       output.status = "unverified";
-      if (!output.toolResults.some((r) => r.error === "cancelled"))
-        output.reply = "Stopped.";
+      if (!output.toolResults.some((r) => r.error === "cancelled")) output.reply = "Stopped.";
     }
     return output;
   } catch (error) {
@@ -315,23 +436,38 @@ async function runTurnSteps(
   fullTools: ToolDeclaration[] | undefined,
   journal: WorkflowJournal,
   run: Workflow,
+  toolResults: ToolResult[],
+  resultActivities: Map<string, { context: ToolActivityContext; started: number }>,
 ): Promise<TurnResult> {
   const convo = [...messages];
-  const toolResults: ToolResult[] = [];
   const calledTools: string[] = [];
   const callHistory: CallRecord[] = [];
-  const userText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  let lastRefusal: ToolResult | undefined;
+  const userText = run.objective;
   let claimChecked = false;
   let phoneActedAndFailed = false;
+  let completedPhoneTask: ToolResult | undefined;
+  let uncertainEffect = Boolean(run.operations?.some((op) => !op.resultId || run.results.find((r) => r.result_id === op.resultId)?.status === "unverified"));
+  let observedForContinuation = !deps.resumeRun;
   // tv_control is only on offer with a TV set up; without one there's nothing to look at.
   const tvOffered = [...tools, ...(fullTools ?? [])].some((t) => t.name === "tv_control");
   // Loaded groups widen the palette for the rest of the turn. A round spent only on
   // load_tools doesn't count against the cap, once.
   const loaded = new Set<string>();
   let freeLoadRound = true;
-  const maxRounds = Number.isFinite(deps.maxToolRounds)
+  let maxRounds = Number.isFinite(deps.maxToolRounds)
     ? Math.max(1, Math.min(12, Math.floor(deps.maxToolRounds!)))
     : MAX_TOOL_ROUNDS;
+  const progressSignatures: string[] = [];
+  let attempted = 0;
+  const ask = async () => {
+    const started = Date.now();
+    try {
+      return await chatOverLadder(convo, tools, deps.config, onFallback, {
+        onRouteEvent: (event) => count(run.metrics, event === "request" ? "model_requests" : event === "fallback" ? "fallbacks" : "hedges"),
+      });
+    } finally { count(run.metrics, "choosing_ms", Date.now() - started); }
+  };
 
   for (let round = 0; round < maxRounds; round++) {
     if (deps.shouldStopPhoneTask?.()) {
@@ -340,7 +476,7 @@ async function runTurnSteps(
       return { reply: "Stopped.", toolResults, calledTools };
     }
     if (run.metrics) run.metrics.model_decisions++;
-    const reply = await chatOverLadder(convo, tools, deps.config, onFallback);
+    const reply = await ask();
     if (deps.shouldStopPhoneTask?.()) {
       run.state = "suspended";
       return { reply: "Stopped.", toolResults, calledTools };
@@ -366,7 +502,12 @@ async function runTurnSteps(
         convo.push({ role: "user", content: note });
         continue;
       }
-      if (claimChecked && claimedWithoutActing(userText, reply.text, ranTools)) {
+      if (
+        claimChecked &&
+        (claimedWithoutActing(userText, reply.text, ranTools) ||
+          answeredPhoneWithoutLooking(userText, ranTools) ||
+          (tvOffered && answeredTvWithoutLooking(userText, ranTools)))
+      ) {
         run.reason = "The assistant claimed an action without an execution result.";
         run.state = "suspended";
         return {
@@ -375,7 +516,11 @@ async function runTurnSteps(
           calledTools,
         };
       }
-      return { reply: reply.text, toolResults, calledTools };
+      return {
+        reply: !ranTools && lastRefusal ? lastRefusal.summary : reply.text,
+        toolResults,
+        calledTools,
+      };
     }
 
     // The model wants to act. Run each call through the single dispatcher, then
@@ -385,16 +530,52 @@ async function runTurnSteps(
       freeLoadRound = false;
       round--;
     }
-    for (const call of reply.toolCalls) {
+    const successful: string[] = [];
+    // Start only contiguous, validated independent reads. A write is always a barrier.
+    const startedReads = new Map<number, Promise<ToolResult>>();
+    const activities = new Map<number, { context: ToolActivityContext; started: number }>();
+    const announce = (index: number) => {
+      let entry = activities.get(index);
+      if (!entry) {
+        const next = reply.toolCalls[index];
+        entry = { context: toolActivity(next.name, next.args), started: Date.now() };
+        activities.set(index, entry);
+        emitToolActivity(deps.onToolActivity, entry.context, "queued");
+      }
+      return entry;
+    };
+    const authorized = [...(fullTools ?? tools), ...tools.filter((tool) => tool.name === LOAD_TOOLS)];
+    for (let callIndex = 0; callIndex < reply.toolCalls.length; callIndex++) {
+      const call = reply.toolCalls[callIndex];
       // STOP may arrive during a model call or the preceding tool in this batch.
       if (deps.shouldStopPhoneTask?.()) {
         run.state = "suspended";
         return { reply: "Stopped.", toolResults, calledTools };
       }
+      if (++attempted > TOOL_CALL_LIMIT) {
+        run.state = "suspended";
+        run.reason = "Tool-call budget reached. Review saved work before continuing.";
+        return { reply: partialReply(toolResults), toolResults, calledTools };
+      }
+      count(run.metrics, "proposed_calls");
+      const activity = announce(callIndex);
+      let didDispatch = startedReads.has(callIndex);
       calledTools.push(call.name);
       const isPhoneTask = call.name === "phone_task";
       let result: ToolResult;
-      if (call.name === LOAD_TOOLS && fullTools) {
+      const invalid = validateToolCall(call, [
+        ...(fullTools ?? tools),
+        ...tools.filter((tool) => tool.name === LOAD_TOOLS),
+      ]);
+      if (deps.onlyTools && call.name !== LOAD_TOOLS && !deps.onlyTools.has(call.name)) {
+        count(run.metrics, "scope_rejections");
+        result = NOT_OFFERED;
+        lastRefusal = result;
+      } else if (invalid) {
+        count(run.metrics, "invalid_calls");
+        result = invalid;
+        lastRefusal = result;
+      } else if (call.name === LOAD_TOOLS && fullTools) {
         // Not an action: nothing is dispatched and it isn't one of toolResults.
         const groups = requestedGroups(call.args);
         groups.forEach((g) => loaded.add(g));
@@ -404,35 +585,175 @@ async function runTurnSteps(
         result = groups.length
           ? { ok: true, summary: `Now available: ${added.join(", ") || "already loaded"}.` }
           : { ok: false, summary: "No such group." };
-      } else if (deps.onlyTools && !deps.onlyTools.has(call.name)) {
-        result = NOT_OFFERED; // nothing ran, so it isn't one of toolResults
+      } else if (isPhoneTask && completedPhoneTask) {
+        // phone_task owns the whole phone goal. A reworded handoff must not
+        // drive the phone again after its verified success (IMEI lookup, 2026-11-08).
+        count(run.metrics, "duplicates_prevented");
+        result = {
+          ok: false,
+          error: "phone_task_already_completed",
+          summary: "Not run. The whole phone task already completed in this request. " +
+            "Use its saved answer and findings; do not reopen apps or repeat it with another goal. " +
+            `Existing result: ${completedPhoneTask.summary}`,
+        };
+        lastRefusal = result;
       } else if (isPhoneTask && phoneActedAndFailed) {
         result = PHONE_RETRY_REFUSED; // nothing ran, so it isn't one of toolResults
+        lastRefusal = result;
+      } else if (!observedForContinuation && hasSideEffect(toSpec(call.name, call.args))) {
+        result = { ok: false, error: "observe_before_continue",
+          summary: "Not run. Inspect current state with a read-only tool before continuing saved work." };
+        lastRefusal = result;
+      } else if (
+        uncertainEffect &&
+        run.operations?.some(
+          (op) => run.results.find((r) => r.result_id === op.resultId)?.status === "unverified",
+        ) &&
+        hasSideEffect(toSpec(call.name, call.args))
+      ) {
+        result = {
+          ok: false,
+          error: "uncertain_previous_effect",
+          summary:
+            "Not run. An earlier action in this request may already have taken effect. Do not retry it through another tool or run further changes. Report the existing results and ask the user to check before starting a new request. Read-only checks remain available.",
+        };
+        lastRefusal = result;
       } else {
-        run.pending = { id: call.id, tool: call.name, state: "intent_recorded" };
-        run.plan.push(call.name);
-        journal.save(run); // commit before the first possible side effect
-        result = await dispatch(toSpec(call.name, call.args), deps);
-        result.result = agentResult(result, JSON.stringify(call.args), call.name);
-        if (!result.result.ok && result.ok) {
-          result = {
-            ...result,
-            ok: false,
-            summary: result.result.summary,
-            error: "unverified_success",
-          };
+        const spec = toSpec(call.name, call.args);
+        const key = hasSideEffect(spec) ? await operationKey(spec) : undefined;
+        if (deps.shouldStopPhoneTask?.()) {
+          run.state = "suspended";
+          return { reply: "Stopped.", toolResults, calledTools };
         }
-        run.results.push(result.result!);
-        run.pending = null;
-        journal.save(run); // commit before another agent/model consumes it
-        toolResults.push(result);
-        if (isPhoneTask && actedAndFailed(result)) phoneActedAndFailed = true;
-        // The user pressed STOP: the turn ends on the task's own words. Another round
-        // called it "I wasn't able to complete that task" and offered a retry (TV task,
-        // live 2026-10-20).
-        if (result.error === "cancelled")
-          return { reply: result.summary, toolResults, calledTools };
+        const previous =
+          key &&
+          (setsAbsoluteState(spec)
+            ? run.operations?.at(-1)?.key === key
+              ? run.operations.at(-1)
+              : undefined
+            : run.operations?.find((op) => op.key === key));
+        if (previous) {
+          count(run.metrics, "duplicates_prevented");
+          const original = run.results.find((r) => r.result_id === previous.resultId);
+          result = original?.ok
+            ? {
+                ok: true,
+                summary: `Already completed once in this request; no additional action ran. ${original.summary}`,
+                result: {
+                  ...original,
+                  summary: `Already completed once; no additional action ran. ${original.summary}`,
+                },
+              }
+            : {
+                ok: false,
+                error: "duplicate_operation",
+                summary:
+                  "Not run: this action was already attempted in this request. Check its existing outcome before retrying; it may already have taken effect.",
+              };
+          lastRefusal = result;
+        } else {
+          const operation: NonNullable<Workflow["operations"]>[number] | undefined = key
+            ? { id: `${run.id}:${key}:${run.operations?.length ?? 0}`, key, tool: call.name }
+            : undefined;
+          if (operation) (run.operations ??= []).push(operation);
+          if (!startedReads.has(callIndex) && parallelRead(call.name)) {
+            const batch: number[] = [];
+            const seen = new Set<string>();
+            for (let i = callIndex; i < Math.min(reply.toolCalls.length, callIndex + 3, callIndex + TOOL_CALL_LIMIT - attempted + 1); i++) {
+              const next = reply.toolCalls[i];
+              const signature = callSig(next.name, next.args);
+              if (!parallelRead(next.name) || validateToolCall(next, authorized) ||
+                  (deps.onlyTools && !deps.onlyTools.has(next.name)) || seen.has(signature)) break;
+              seen.add(signature);
+              batch.push(i);
+            }
+            for (const i of batch) run.plan.push(reply.toolCalls[i].name);
+            journal.save(run);
+            if (batch.length > 1) count(run.metrics, "parallel_reads", batch.length);
+            const reads = batch.map(async (i) => {
+              const next = reply.toolCalls[i];
+              const nextActivity = announce(i);
+              const started = Date.now();
+              const receipt: ToolResult = await dispatch(toSpec(next.name, next.args), { ...deps, toolActivity: nextActivity.context })
+                .catch(() => ({ ok: false, error: "read_failed", summary: "The read failed. No change was requested." }));
+              count(run.metrics, "executing_ms", Date.now() - started);
+              return receipt;
+            });
+            // Drain the bounded batch even after STOP so every started read keeps its receipt.
+            const receipts = await Promise.all(reads);
+            batch.forEach((i, index) => {
+              const next = reply.toolCalls[i];
+              const receipt = receipts[index];
+              receipt.result = agentResult(receipt, JSON.stringify(next.args), next.name);
+              receipt.ok = receipt.result.ok;
+              receipt.summary = receipt.result.summary;
+              run.results.push(receipt.result);
+              toolResults.push(receipt);
+              startedReads.set(i, Promise.resolve(receipt));
+            });
+            journal.save(run);
+          }
+          if (!startedReads.has(callIndex)) {
+            run.pending = { id: operation?.id ?? call.id, tool: call.name, state: "intent_recorded", effect: !!operation };
+            run.plan.push(call.name);
+            journal.save(run); // commit before the first possible side effect
+          }
+          const started = Date.now();
+          didDispatch = true;
+          try { result = await (startedReads.get(callIndex) ?? dispatch(spec, { ...deps, operationId: operation?.id, toolActivity: activity.context })); }
+          finally { if (!startedReads.has(callIndex)) count(run.metrics, "executing_ms", Date.now() - started); }
+          if (!startedReads.has(callIndex)) result.result = agentResult(result, JSON.stringify(call.args), call.name);
+          if (!result.result!.ok && result.ok) {
+            result = {
+              ...result,
+              ok: false,
+              summary: result.result!.summary,
+              error: "unverified_success",
+            };
+          }
+          if (!startedReads.has(callIndex)) run.results.push(result.result!);
+          if (operation) {
+            operation.resultId = result.result!.result_id;
+            if (result.nativeOutcomeId) operation.nativeOutcomeId = result.nativeOutcomeId;
+          }
+          run.pending = null;
+          journal.save(run); // commit before another agent/model consumes it
+          if (!startedReads.has(callIndex)) toolResults.push(result);
+          if (result.ok) successful.push(callSig(call.name, call.args));
+          if (result.ok && !hasSideEffect(spec)) observedForContinuation = true;
+          if (result.nativeOutcomeId) {
+            const id = result.result!.result_id;
+            resultActivities.set(id, activity);
+            deps.platform?.watchOutcome?.(result.nativeOutcomeId, () => {
+              void deps.reconcileActionOutcome?.(id).catch(() => {
+                // Keep the saved uncertain receipt when reconciliation/storage is unavailable.
+              });
+            });
+          }
+          uncertainEffect = Boolean(
+            run.operations?.some(
+              (op) => run.results.find((r) => r.result_id === op.resultId)?.status === "unverified",
+            ),
+          );
+          if (call.name === "check_action_outcome")
+            phoneActedAndFailed = Boolean(
+              run.operations?.some(
+                (op) =>
+                  op.tool === "phone_task" &&
+                  toolResults.some((r) => r.result?.result_id === op.resultId && actedAndFailed(r)),
+              ),
+            );
+          if (isPhoneTask && actedAndFailed(result)) phoneActedAndFailed = true;
+          if (isPhoneTask && result.ok) completedPhoneTask = result;
+          // The user pressed STOP: the turn ends on the task's own words. Another round
+          // called it "I wasn't able to complete that task" and offered a retry (TV task,
+          // live 2026-10-20).
+          if (result.error === "cancelled")
+            return { reply: result.summary, toolResults, calledTools };
+        }
       }
+      if (!didDispatch) finishToolActivity(deps.onToolActivity, activity.context, result, activity.started,
+        call.name === LOAD_TOOLS && !!fullTools && result.ok);
       convo.push({
         role: "tool",
         toolCallId: call.id,
@@ -455,6 +776,12 @@ async function runTurnSteps(
       }
       callHistory.push({ sig, resultSig });
     }
+    if (!Number.isFinite(deps.maxToolRounds) && round === maxRounds - 1 && maxRounds < ADAPTIVE_ROUND_LIMIT &&
+        !uncertainEffect && progressing(progressSignatures, successful)) {
+      maxRounds++;
+      count(run.metrics, "budget_extensions");
+    }
+    progressSignatures.push(...successful);
   }
 
   // Hit the round cap. The canned "couldn't fully finish" threw away everything the tools
@@ -464,7 +791,7 @@ async function runTurnSteps(
   convo.push({ role: "user", content: FINAL_ANSWER_NOTE });
   try {
     if (run.metrics) run.metrics.model_decisions++;
-    const last = await chatOverLadder(convo, tools, deps.config, onFallback);
+    const last = await ask();
     if (!last.toolCalls.length && last.text.trim())
       return { reply: last.text, toolResults, calledTools };
   } catch {

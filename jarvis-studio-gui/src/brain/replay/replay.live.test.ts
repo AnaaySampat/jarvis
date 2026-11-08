@@ -5,11 +5,12 @@
  * only when named, `npm run test:live`, with a key in the environment —
  * GEMINI_API_KEY and/or GROQ_API_KEY (JARVIS_LIVE_MODEL pins a model).
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { chatOverLadder } from "../ask";
 import type { BrainConfig } from "../config";
 import { buildSystemPrompt } from "../index";
-import { groupsFor, LOAD_TOOLS, toolPalette, turnPalette } from "../tools/registry";
+import { groupsFor, toolPalette, turnPalette } from "../tools/registry";
+import { scoreSelection, selectionReport, type SelectionScore } from "./evaluation";
 import fixtures from "./fixtures.json";
 import type { Fixture } from "./replay.test";
 
@@ -24,6 +25,8 @@ const gemini = env.GEMINI_API_KEY ?? "";
 const groq = env.GROQ_API_KEY ?? "";
 const named = (proc?.argv ?? []).some((a) => a.includes("replay.live"));
 const live = named && Boolean(gemini || groq);
+const scores: SelectionScore[] = [];
+afterAll(() => { if (live) console.info("Live labelled selection evaluation:", selectionReport(scores)); });
 
 const cfg: BrainConfig = {
   tier: gemini ? "gemini" : "groq",
@@ -39,6 +42,7 @@ describe.skipIf(!live)("live model behaviour (replay fixtures)", () => {
       async () => {
         const full = toolPalette(cfg, f.context);
         const tools = turnPalette(full, groupsFor(f.user));
+        const started = Date.now();
         const reply = await chatOverLadder(
           [
             {
@@ -51,11 +55,9 @@ describe.skipIf(!live)("live model behaviour (replay fixtures)", () => {
           tools,
           cfg,
         );
-        const first = reply.toolCalls[0];
-        // Asking for a group first is a correct start when the tool wasn't offered.
-        if (first?.name === LOAD_TOOLS && !tools.some((t) => t.name === f.live!.firstTool)) return;
-        expect(first?.name, `replied “${reply.text.slice(0, 120)}”`).toBe(f.live!.firstTool);
-        if (f.live!.firstArgs) expect(first!.args).toMatchObject(f.live!.firstArgs);
+        const score = scoreSelection(reply, f.live!, tools, Date.now() - started);
+        scores.push(score);
+        expect(score.correct, `replied “${reply.text.slice(0, 120)}”`).toBe(true);
       },
       60_000,
     );

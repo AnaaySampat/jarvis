@@ -45,6 +45,7 @@ macro_rules! mobile_command {
 }
 
 impl<R: Runtime> Phone<R> {
+    mobile_command!(app_update(payload: AppUpdateRequest) -> serde_json::Value, "appUpdate");
     mobile_command!(start_gesture_recognition(payload: GestureStartRequest) -> ActionResponse, "startGestureRecognition");
     mobile_command!(take_gesture_photo() -> ActionResponse, "takeGesturePhoto");
     mobile_command!(stop_gesture_recognition() -> ActionResponse, "stopGestureRecognition");

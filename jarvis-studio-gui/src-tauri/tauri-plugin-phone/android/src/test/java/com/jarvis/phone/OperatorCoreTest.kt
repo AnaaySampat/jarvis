@@ -147,6 +147,38 @@ class OperatorCoreTest {
 
     // ── Truthful completion ──
 
+    @Test fun lookupKeepsTheVerifiedAnswerWhenTheCheckerOnlyDescribesNavigation() {
+        val answer = "IMEI 1: 111111111111111; IMEI 2: 222222222222222."
+        val dev = FakeDevice(listOf(screen(node(0, "IMEI information"), node(1, answer))))
+        val out = run("Check my phone's IMEI number", dev,
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"$answer"}"""),
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"Found the IMEI information section in the phone settings."}"""))
+        assertTrue(out.summary, out.ok)
+        assertEquals(answer, out.summary)
+        assertTrue(OperatorLoop.VERIFICATION_RECEIPT_RE.matches(out.verificationReceipt))
+        assertEquals(listOf("tap:0"), dev.actions)
+    }
+
+    @Test fun lookupAnswerIsNotTruncatedToTheCheckersShortSummaryLimit() {
+        val answer = "Build information: " + "verified detail; ".repeat(20) + "Android version 16."
+        val dev = FakeDevice(listOf(screen(node(0, "About phone"), node(1, answer))))
+        val out = run("Read the build information and Android version", dev,
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"$answer"}"""),
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"Found build information."}"""))
+        assertTrue(out.summary, out.ok)
+        assertEquals(answer, out.summary)
+        assertTrue(out.summary.endsWith("Android version 16."))
+    }
+
+    @Test fun changedStateStillUsesTheIndependentCheckersAccount() {
+        val dev = FakeDevice(listOf(screen(node(0, "Bluetooth"))))
+        val out = run("Turn on Bluetooth", dev,
+            ScriptedModel("""{"do":"tap","target":0}""", """{"do":"done","summary":"It was already on."}"""),
+            verifier = ScriptedModel("""{"verdict":"pass","summary":"Turned Bluetooth on."}"""))
+        assertTrue(out.summary, out.ok)
+        assertEquals("Turned Bluetooth on.", out.summary)
+    }
+
     @Test fun rejectsAFalseDoneOnceThenAcceptsWhenTheCheckerPasses() {
         val dev = FakeDevice(listOf(screen(node(0, "Go"))))
         val out = run(

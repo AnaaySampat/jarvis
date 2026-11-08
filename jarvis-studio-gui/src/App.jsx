@@ -6,6 +6,8 @@ import { useAssistant, IS_MOBILE } from "./hooks/useAssistant";
 import { JarvisHUD } from "./hud/HudApp";
 import { DEFAULT_DIRECTION } from "./hud/hudConstants";
 import Settings from "./components/Settings";
+import UpdateDialog from "./components/UpdateDialog";
+import { useAppUpdate } from "./hooks/useAppUpdate";
 import { useGestureModes } from "./gestures/useGestureModes";
 import { androidGestureHost } from "./gestures/androidHost";
 import { nativeGestureCamera } from "./brain/platform/gestures";
@@ -189,6 +191,8 @@ export default function App() {
     stopPhoneTask,
     stopTask,
     stopAllTasks,
+    checkWorkflowTask,
+    resumeWorkflowTask,
   } = useAssistant();
 
   const unifiedTasks = taskCenterTasks || agentTasks || [];
@@ -285,7 +289,7 @@ export default function App() {
   );
   const gestures = useGestureModes({
     camera: nativeGestureCamera,
-    enabled: IS_MOBILE && inTauri(),
+    enabled: IS_MOBILE && inTauri() && typeof sysInfo.needs_setup === "boolean",
     host: gestureHost,
     canListen: status === "idle" && !anyTaskActive,
     listening: status === "listening",
@@ -826,6 +830,11 @@ export default function App() {
   ]);
 
   // Quick controls, in the home screen's header (the desktop's three groups).
+  const appUpdater = useAppUpdate({
+    enabled: IS_MOBILE && inTauri(),
+    channel: sysInfo.update_channel === "beta" ? "beta" : "stable",
+    blocked: Boolean(status !== "idle" || anyTaskActive || phoneTaskActive || permissionRequest || phoneApproval || clarifyRequest || pcPasskeyRequest || showQuickStart || showSettings || paletteOpen || customizeOpen || remoteOpen || screenOpen || handsFreeOpen || (!exploring && (!isConnected || sysInfo.needs_setup))),
+  });
   const toolbar = IS_MOBILE ? (
     <MobileQuickControls
       status={status}
@@ -1012,7 +1021,12 @@ export default function App() {
           onRemember={rememberFact}
           onForget={forgetMemory}
           onSend={sendMessage}
-          onStop={stopSpeech}
+          onStop={() => {
+            if (IS_MOBILE && (status === "thinking" || status === "working")) stopAllTasks?.();
+            else stopSpeech();
+          }}
+          onOpenTasks={() => setActivityOpen(true)}
+          onStopTask={stopTask}
           onReset={resetConversation}
           onUpload={sendUpload}
           onNotify={notify}
@@ -1128,6 +1142,7 @@ export default function App() {
 
       {showSettings && (
         <Settings
+          updater={appUpdater}
           initialPage={settingsPage}
           gestureControls={gestures} onOpenHandsFree={openHandsFree}
           sysInfo={sysInfo}
@@ -1159,6 +1174,8 @@ export default function App() {
         />
       )}
 
+      {appUpdater.show && <UpdateDialog key={appUpdater.state.release?.id || "check"} updater={appUpdater} />}
+
       {toast && (
         <div key={toast.id} className="hud-toast" role="status">
           {toast.text}
@@ -1184,6 +1201,8 @@ export default function App() {
           onClear={clearAgentTasks}
           onStopTask={stopTask}
           onStopAll={stopAllTasks}
+          onCheckWorkflow={checkWorkflowTask}
+          onResumeWorkflow={resumeWorkflowTask}
           onReview={() => {
             setActivityOpen(false);
             setChatOpen(true);

@@ -91,4 +91,17 @@ describe("workflow recovery evaluations", () => {
     expect(() => new WorkflowJournal(kv).recover()).toThrow(/invalid/);
     expect(kv.get("jarvis.android.workflows.v1")).toBe(raw);
   });
+
+  it("preserves an effect identity across interruption without replaying it", () => {
+    const kv = storage();
+    const journal = new WorkflowJournal(kv);
+    const run = journal.begin("Start a timer");
+    const operation = { id: `${run.id}:timer`, key: "a".repeat(64), tool: "set_timer" };
+    run.operations = [operation];
+    run.pending = { id: operation.id, tool: operation.tool, state: "intent_recorded" };
+    journal.save(run);
+    const restored = new WorkflowJournal(kv).recover()[0]!;
+    expect(restored).toMatchObject({ state: "suspended", operations: [operation], pending: { id: operation.id } });
+    expect(restored.results).toEqual([]);
+  });
 });

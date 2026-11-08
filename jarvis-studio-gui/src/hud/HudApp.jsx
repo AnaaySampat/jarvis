@@ -185,6 +185,8 @@ export function JarvisHUD({
   // handlers
   onSend,
   onStop,
+  onOpenTasks,
+  onStopTask,
   onReset,
   onUpload,
   runAction,
@@ -553,6 +555,8 @@ export function JarvisHUD({
         }}
       />
       <ChatOverlay
+        onOpenTasks={onOpenTasks}
+        onStopTask={onStopTask}
         open={chatOpen}
         onClose={() => setChatOpen(false)}
         status={status}

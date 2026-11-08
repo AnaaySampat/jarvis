@@ -292,6 +292,23 @@ it("keeps timer errors in Steps while preserving real timers in other activities
   await act(async () => view.unmount());
 });
 
+it("renders live tool activity inside the matching chat reply and retains it with the final answer", async () => {
+  const call = { id: "call", tool: "set_timer", title: "Set a timer", input: "Duration: 300 seconds",
+    state: "running", at: Date.now(), startedAt: Date.now() };
+  const messages = [{ id: "user", role: "user", text: "Set a timer" },
+    { id: "reply", role: "jarvis", text: "", finalized: false, toolActivity: [call] }];
+  const view = await render(<ChatOverlay open status="thinking" messages={messages} />);
+  expect(text(view.root)).toContain("set_timer");
+  expect(text(view.root)).toContain("Running");
+  await act(async () => view.update(<ChatOverlay open status="idle" messages={[messages[0],
+    { ...messages[1], text: "Clock opened; check the timer.", finalized: true,
+      toolActivity: [{ ...call, state: "unconfirmed", elapsedMs: 800 }] }]} />));
+  expect(text(view.root)).toContain("Unconfirmed");
+  expect(text(view.root)).toContain("Clock opened; check the timer.");
+  expect(view.root.findAllByProps({ "aria-label": "Tools used" })).toHaveLength(1);
+  await act(async () => view.unmount());
+});
+
 it("offers provider setup inside a pending conversation and preserves its draft", async () => {
   const setup = vi.fn();
   const messages = [

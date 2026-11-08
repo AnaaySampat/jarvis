@@ -204,25 +204,21 @@ export interface DeviceIdentityBridge {
 const nativeIdentityBridge: DeviceIdentityBridge = {
   info: () => invoke<IdentityInfo>("plugin:phone|identity_info"),
   signAuth: (input) => invoke<IdentitySigned>("plugin:phone|identity_sign_auth", input),
-  signEnvelope: (input) =>
-    invoke<IdentitySigned>("plugin:phone|identity_sign_envelope", input),
-  signPairing: (input) =>
-    invoke<IdentitySigned>("plugin:phone|identity_sign_pairing", input),
+  signEnvelope: (input) => invoke<IdentitySigned>("plugin:phone|identity_sign_envelope", input),
+  signPairing: (input) => invoke<IdentitySigned>("plugin:phone|identity_sign_pairing", input),
   verifyHostChallenge: (input) =>
     invoke<{ ok: boolean; verified: boolean }>(
       "plugin:phone|identity_verify_host_challenge",
       input,
     ),
   verifyHostEnvelope: (input) =>
-    invoke<{ ok: boolean; verified: boolean }>(
-      "plugin:phone|identity_verify_host_envelope",
-      input,
-    ),
+    invoke<{ ok: boolean; verified: boolean }>("plugin:phone|identity_verify_host_envelope", input),
 };
 
 const OPEN = 1;
 
 interface Pending {
+  onProgress?: (event: RemoteEvent) => void;
   resolve: (r: ToolResult) => void;
   done: boolean;
   taskId: string;
@@ -266,9 +262,15 @@ const LINK_CHECK_MS = 5_000;
 function isTailscaleHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
   const parts = normalized.split(".").map(Number);
-  return normalized.endsWith(".ts.net") || normalized.startsWith("fd7a:115c:a1e0:") ||
-    (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) &&
-      parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127);
+  return (
+    normalized.endsWith(".ts.net") ||
+    normalized.startsWith("fd7a:115c:a1e0:") ||
+    (parts.length === 4 &&
+      parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) &&
+      parts[0] === 100 &&
+      parts[1] >= 64 &&
+      parts[1] <= 127)
+  );
 }
 
 function newId(prefix: string): string {
@@ -358,18 +360,13 @@ class IdentityRejected extends Error {}
 
 function envelopeContent(message: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(message).filter(
-      ([key]) => !["auth", "type", "event", "task_id"].includes(key),
-    ),
+    Object.entries(message).filter(([key]) => !["auth", "type", "event", "task_id"].includes(key)),
   );
 }
 
 const ACTION_DIGEST = /^(?:sha256:)?[0-9a-f]{64}$/i;
 
-function approvalChallengeOf(
-  value: unknown,
-  taskId: string,
-): ActiveApprovalChallenge | null {
+function approvalChallengeOf(value: unknown, taskId: string): ActiveApprovalChallenge | null {
   const data = objectOf(value);
   if (!data) return null;
   const approvalId =
@@ -777,7 +774,10 @@ export class RemotePC {
     }
   }
 
-  private async handleAuthChallenge(data: Record<string, unknown>, ws: WebSocketLike): Promise<void> {
+  private async handleAuthChallenge(
+    data: Record<string, unknown>,
+    ws: WebSocketLike,
+  ): Promise<void> {
     if (this.ws !== ws) return;
     this.sawChallenge = true;
     const hostId = typeof data.host_id === "string" ? data.host_id : "";
@@ -788,26 +788,38 @@ export class RemotePC {
     const signature = typeof data.signature === "string" ? data.signature : "";
     const expiresAt = Number(data.expires_at);
     if (
-      !hostId || !fingerprint || !publicKey || !nonce || !connectionId || !signature ||
-      !Number.isSafeInteger(expiresAt) || expiresAt * 1000 <= Date.now()
-    ) throw new Error("invalid host challenge");
+      !hostId ||
+      !fingerprint ||
+      !publicKey ||
+      !nonce ||
+      !connectionId ||
+      !signature ||
+      !Number.isSafeInteger(expiresAt) ||
+      expiresAt * 1000 <= Date.now()
+    )
+      throw new Error("invalid host challenge");
     // Trust-on-first-use is forbidden: all three pins come from the expiring QR
     // or an existing pairing, never from this untrusted connection.
     if (
-      !this.cfg.hostId || !this.cfg.hostFingerprint || !this.cfg.hostPublicKey ||
+      !this.cfg.hostId ||
+      !this.cfg.hostFingerprint ||
+      !this.cfg.hostPublicKey ||
       hostId !== this.cfg.hostId ||
       fingerprint !== this.cfg.hostFingerprint ||
       publicKey !== this.cfg.hostPublicKey
-    ) throw new IdentityRejected("host pin mismatch — re-scan the pairing QR");
-    const verified = await withIdentityBridgeRetry(() => this.identity.verifyHostChallenge({
-      publicKey,
-      expectedFingerprint: fingerprint,
-      hostId,
-      nonce,
-      expiresAt,
-      connectionId,
-      signature,
-    }));
+    )
+      throw new IdentityRejected("host pin mismatch — re-scan the pairing QR");
+    const verified = await withIdentityBridgeRetry(() =>
+      this.identity.verifyHostChallenge({
+        publicKey,
+        expectedFingerprint: fingerprint,
+        hostId,
+        nonce,
+        expiresAt,
+        connectionId,
+        signature,
+      }),
+    );
     // ok:true + verified:false is a DEFINITIVE bad signature (host key mismatch).
     // ok:false means the native layer itself failed — transient, retry the link.
     if (verified.ok && !verified.verified) {
@@ -825,16 +837,22 @@ export class RemotePC {
       throw new Error("phone authentication signature failed");
     }
     this.deviceId = auth.deviceId;
-    if (!this.sendRaw({
-      type: "auth.response",
-      data: {
-        host_id: hostId,
-        device_id: auth.deviceId,
-        nonce,
-        counter: auth.counter,
-        signature: auth.signature,
-      },
-    }, ws)) throw new Error("authentication connection closed");
+    if (
+      !this.sendRaw(
+        {
+          type: "auth.response",
+          data: {
+            host_id: hostId,
+            device_id: auth.deviceId,
+            nonce,
+            counter: auth.counter,
+            signature: auth.signature,
+          },
+        },
+        ws,
+      )
+    )
+      throw new Error("authentication connection closed");
   }
 
   private async handlePairingRequired(ws: WebSocketLike): Promise<void> {
@@ -850,12 +868,14 @@ export class RemotePC {
       );
     }
     this.pairingAttempted = true;
-    const claim = await withIdentityBridgeRetry(() => this.identity.signPairing({
-      hostId: this.hostId,
-      challengeId,
-      connectionNonce: this.connectionNonce,
-      deviceName: this.cfg.deviceName || "Aura phone",
-    }));
+    const claim = await withIdentityBridgeRetry(() =>
+      this.identity.signPairing({
+        hostId: this.hostId,
+        challengeId,
+        connectionNonce: this.connectionNonce,
+        deviceName: this.cfg.deviceName || "Aura phone",
+      }),
+    );
     if (this.ws !== ws) return;
     if (!claim.ok || !claim.deviceId || !claim.publicKey || !claim.signature) {
       throw new Error("phone pairing signature failed");
@@ -864,45 +884,59 @@ export class RemotePC {
     // The PIN is a plain field, NOT part of the signed material — the host verifies
     // the signature over pairing_signing_bytes (which excludes the PIN) and checks
     // the PIN separately (constant-time), exactly as device_identity.claim_pairing does.
-    if (!this.sendRaw({
-      type: "pairing.claim",
-      data: {
-        challenge_id: challengeId,
-        device_id: claim.deviceId,
-        public_key: claim.publicKey,
-        fingerprint: claim.fingerprint || "",
-        device_name: claim.deviceName || this.cfg.deviceName || "Aura phone",
-        pin,
-        signature: claim.signature,
-      },
-    }, ws)) throw new Error("pairing connection closed");
+    if (
+      !this.sendRaw(
+        {
+          type: "pairing.claim",
+          data: {
+            challenge_id: challengeId,
+            device_id: claim.deviceId,
+            public_key: claim.publicKey,
+            fingerprint: claim.fingerprint || "",
+            device_name: claim.deviceName || this.cfg.deviceName || "Aura phone",
+            pin,
+            signature: claim.signature,
+          },
+        },
+        ws,
+      )
+    )
+      throw new Error("pairing connection closed");
   }
 
-  private async verifyHostMessage(msg: Record<string, unknown>, ws: WebSocketLike): Promise<boolean> {
+  private async verifyHostMessage(
+    msg: Record<string, unknown>,
+    ws: WebSocketLike,
+  ): Promise<boolean> {
     const auth = msg.auth;
     if (!auth || typeof auth !== "object") return false;
     const envelope = auth as Record<string, unknown>;
     const counter = Number(envelope.counter);
     const event = typeof msg.event === "string" ? msg.event : "";
     const data = msg.data;
-    const nestedTask = data && typeof data === "object"
-      ? (data as Record<string, unknown>).task_id
-      : "";
-    const taskId = typeof msg.task_id === "string"
-      ? msg.task_id
-      : typeof nestedTask === "string" ? nestedTask : "";
+    const nestedTask =
+      data && typeof data === "object" ? (data as Record<string, unknown>).task_id : "";
+    const taskId =
+      typeof msg.task_id === "string"
+        ? msg.task_id
+        : typeof nestedTask === "string"
+          ? nestedTask
+          : "";
     if (
-      !this.connectionNonce || !event || !Number.isSafeInteger(counter) ||
-      counter <= this.lastHostCounter || envelope.host_id !== this.hostId ||
+      !this.connectionNonce ||
+      !event ||
+      !Number.isSafeInteger(counter) ||
+      counter <= this.lastHostCounter ||
+      envelope.host_id !== this.hostId ||
       envelope.connection_nonce !== this.connectionNonce ||
       typeof envelope.signature !== "string"
     ) {
       console.error(
         `[RemotePC] host envelope pre-check failed: event=${event} ` +
-        `counter=${String(envelope.counter)} last=${this.lastHostCounter} ` +
-        `hostIdMatch=${envelope.host_id === this.hostId} ` +
-        `nonceMatch=${envelope.connection_nonce === this.connectionNonce} ` +
-        `sig=${typeof envelope.signature}`,
+          `counter=${String(envelope.counter)} last=${this.lastHostCounter} ` +
+          `hostIdMatch=${envelope.host_id === this.hostId} ` +
+          `nonceMatch=${envelope.connection_nonce === this.connectionNonce} ` +
+          `sig=${typeof envelope.signature}`,
       );
       return false;
     }
@@ -913,22 +947,24 @@ export class RemotePC {
     if (this.ws !== ws) return false;
     // Bridge failures propagate (→ transient reconnect); only a definitive
     // negative from a WORKING verifier returns false.
-    const verified = await withIdentityBridgeRetry(() => this.identity.verifyHostEnvelope({
-      publicKey: this.cfg.hostPublicKey || "",
-      expectedFingerprint: this.cfg.hostFingerprint || "",
-      hostId,
-      connectionNonce,
-      counter,
-      messageType: event,
-      taskId,
-      payloadDigest: digest,
-      signature,
-    }));
+    const verified = await withIdentityBridgeRetry(() =>
+      this.identity.verifyHostEnvelope({
+        publicKey: this.cfg.hostPublicKey || "",
+        expectedFingerprint: this.cfg.hostFingerprint || "",
+        hostId,
+        connectionNonce,
+        counter,
+        messageType: event,
+        taskId,
+        payloadDigest: digest,
+        signature,
+      }),
+    );
     if (this.ws !== ws) return false;
     if (!verified.ok || !verified.verified) {
       console.error(
         `[RemotePC] host envelope SIGNATURE failed: event=${event} counter=${counter} ` +
-        `task=${taskId} digest=${digest} ok=${verified.ok}`,
+          `task=${taskId} digest=${digest} ok=${verified.ok}`,
       );
       return false;
     }
@@ -1109,7 +1145,10 @@ export class RemotePC {
   async wake(targets: WakeTarget[], send: WolSend, waitMs = PC_WAKE_WAIT_MS): Promise<ToolResult> {
     if (this.isOnline) return { ok: true, summary: "The PC is already on and connected." };
     if (this._state === "unauthorized") {
-      return { ok: false, summary: "This phone isn't accepted by the PC any more — pair it again." };
+      return {
+        ok: false,
+        summary: "This phone isn't accepted by the PC any more — pair it again.",
+      };
     }
     if (!targets.length) {
       return {
@@ -1159,6 +1198,7 @@ export class RemotePC {
     goal: string,
     kind: "browser" | "computer" | "research" | "auto" = "browser",
     passkey = "",
+    onProgress?: (event: RemoteEvent) => void,
   ): Promise<ToolResult> {
     const g = (goal || "").trim();
     if (!g) return { ok: false, summary: "What should I do on the PC, sir?" };
@@ -1168,7 +1208,11 @@ export class RemotePC {
     const generation = this.taskGeneration;
     const online = await this.ensureOnline();
     if (generation !== this.taskGeneration) {
-      return { ok: false, summary: "The PC request was cancelled before it was sent.", error: "cancelled" };
+      return {
+        ok: false,
+        summary: "The PC request was cancelled before it was sent.",
+        error: "cancelled",
+      };
     }
     if (!online) {
       const why =
@@ -1190,6 +1234,7 @@ export class RemotePC {
     return new Promise<ToolResult>((resolve) => {
       const taskId = newId("task");
       const p: Pending = {
+        onProgress,
         resolve,
         done: false,
         taskId,
@@ -1208,17 +1253,14 @@ export class RemotePC {
         awaitingTimer: null,
       };
       this.pending = p;
-      p.maxTimer = setTimeout(
-        () => {
-          this.cancelPending("deadline_exceeded");
-          this.settle({
-            ok: false,
-            summary: "That PC task exceeded its deadline, sir — I asked the PC to cancel it.",
-            error: "deadline_exceeded",
-          });
-        },
-        this.maxMs,
-      );
+      p.maxTimer = setTimeout(() => {
+        this.cancelPending("deadline_exceeded");
+        this.settle({
+          ok: false,
+          summary: "That PC task exceeded its deadline, sir — I asked the PC to cancel it.",
+          error: "deadline_exceeded",
+        });
+      }, this.maxMs);
       this.bumpIdle();
       const sent = this.submitPending(p);
       if (!sent) {
@@ -1321,58 +1363,69 @@ export class RemotePC {
     const ws = this.ws;
     if (!ws || ws.readyState !== OPEN || !this.authenticated) return null;
     if (!this.connectionNonce || !this.deviceId) return null;
-    const body = payload && typeof payload === "object"
-      ? (payload as Record<string, unknown>)
-      : null;
+    const body =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
     const messageType = typeof body?.type === "string" ? body.type : "";
     const data = body?.data;
-    const nestedTask = data && typeof data === "object"
-      ? (data as Record<string, unknown>).task_id
-      : "";
-    const taskId = typeof body?.task_id === "string"
-      ? body.task_id
-      : typeof nestedTask === "string" ? nestedTask : "";
+    const nestedTask =
+      data && typeof data === "object" ? (data as Record<string, unknown>).task_id : "";
+    const taskId =
+      typeof body?.task_id === "string"
+        ? body.task_id
+        : typeof nestedTask === "string"
+          ? nestedTask
+          : "";
     if (!messageType) return null;
     const nonce = this.connectionNonce;
     let settle: (delivered: boolean) => void = () => {};
     const delivered = new Promise<boolean>((resolve) => {
       settle = resolve;
     });
-    this.outboundChain = this.outboundChain.then(async () => {
-      if (this.ws !== ws || !this.authenticated || this.connectionNonce !== nonce) {
+    this.outboundChain = this.outboundChain
+      .then(async () => {
+        if (this.ws !== ws || !this.authenticated || this.connectionNonce !== nonce) {
+          settle(false);
+          return;
+        }
+        const digest = await payloadDigest(envelopeContent(body!));
+        const signed = await withIdentityBridgeRetry(() =>
+          this.identity.signEnvelope({
+            connectionNonce: nonce,
+            messageType,
+            taskId,
+            payloadDigest: digest,
+          }),
+        );
+        if (!signed.ok || signed.deviceId !== this.deviceId || !signed.signature) {
+          settle(false);
+          throw new Error("native envelope signing failed");
+        }
+        if (this.ws !== ws || !this.authenticated || this.connectionNonce !== nonce) {
+          settle(false);
+          return;
+        }
+        const wrote = this.sendRaw(
+          {
+            ...body,
+            auth: {
+              device_id: signed.deviceId,
+              connection_nonce: nonce,
+              counter: signed.counter,
+              signature: signed.signature,
+            },
+          },
+          ws,
+        );
+        settle(wrote !== false);
+      })
+      .catch((error) => {
         settle(false);
-        return;
-      }
-      const digest = await payloadDigest(envelopeContent(body!));
-      const signed = await withIdentityBridgeRetry(() => this.identity.signEnvelope({
-        connectionNonce: nonce,
-        messageType,
-        taskId,
-        payloadDigest: digest,
-      }));
-      if (!signed.ok || signed.deviceId !== this.deviceId || !signed.signature) {
-        settle(false);
-        throw new Error("native envelope signing failed");
-      }
-      if (this.ws !== ws || !this.authenticated || this.connectionNonce !== nonce) {
-        settle(false);
-        return;
-      }
-      const wrote = this.sendRaw({ ...body, auth: {
-        device_id: signed.deviceId,
-        connection_nonce: nonce,
-        counter: signed.counter,
-        signature: signed.signature,
-      } }, ws);
-      settle(wrote !== false);
-    }).catch((error) => {
-      settle(false);
-      // A local signing failure is NOT an identity verdict — drop and reconnect;
-      // if the identity truly changed, the next handshake surfaces the real
-      // server-side verdict (pairing_required / auth.denied).
-      const why = error instanceof Error ? error.message : String(error);
-      this.bailTransient(ws, `outbound envelope signing failed: ${why}`);
-    });
+        // A local signing failure is NOT an identity verdict — drop and reconnect;
+        // if the identity truly changed, the next handshake surfaces the real
+        // server-side verdict (pairing_required / auth.denied).
+        const why = error instanceof Error ? error.message : String(error);
+        this.bailTransient(ws, `outbound envelope signing failed: ${why}`);
+      });
     return delivered;
   }
 
@@ -1381,17 +1434,14 @@ export class RemotePC {
     const p = this.pending;
     if (!p) return;
     if (p.idleTimer) clearTimeout(p.idleTimer);
-    p.idleTimer = setTimeout(
-      () => {
-        this.cancelPending("client_stalled");
-        this.settle({
-          ok: false,
-          summary: "The PC task stopped making verified progress, sir — I asked it to cancel.",
-          error: "client_stalled",
-        });
-      },
-      this.idleMs,
-    );
+    p.idleTimer = setTimeout(() => {
+      this.cancelPending("client_stalled");
+      this.settle({
+        ok: false,
+        summary: "The PC task stopped making verified progress, sir — I asked it to cancel.",
+        error: "client_stalled",
+      });
+    }, this.idleMs);
   }
 
   /** The PC asked the user something: pause the stall watchdog, start a longer one. */
@@ -1402,17 +1452,14 @@ export class RemotePC {
       p.idleTimer = null;
     }
     if (p.awaitingTimer) clearTimeout(p.awaitingTimer);
-    p.awaitingTimer = setTimeout(
-      () => {
-        this.cancelPending("approval_timeout");
-        this.settle({
-          ok: false,
-          summary: "That PC task needed attention and the approval window expired, sir.",
-          error: "approval_timeout",
-        });
-      },
-      this.awaitingMs,
-    );
+    p.awaitingTimer = setTimeout(() => {
+      this.cancelPending("approval_timeout");
+      this.settle({
+        ok: false,
+        summary: "That PC task needed attention and the approval window expired, sir.",
+        error: "approval_timeout",
+      });
+    }, this.awaitingMs);
   }
 
   /** User answered (or the backend dismissed the prompt): back to normal watchdogging. */
@@ -1601,7 +1648,7 @@ export class RemotePC {
       }
     }
     if (event === "auth.ready") {
-      const ready = data && typeof data === "object" ? data as Record<string, unknown> : null;
+      const ready = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
       if (!ready || ready.device_id !== this.deviceId) {
         throw new Error("authenticated device mismatch");
       }
@@ -1610,8 +1657,16 @@ export class RemotePC {
       delete this.cfg.pin;
       delete this.opts.pin;
       try {
-        this.opts.onPeerInfo?.({ appVersion: typeof ready.app_version === "string" && /^\d{1,3}(\.\d{1,3}){2}([+-][a-z0-9.]{1,24})?$/.test(ready.app_version) ? ready.app_version : "" });
-      } catch { /* Metadata observers cannot break authentication. */ }
+        this.opts.onPeerInfo?.({
+          appVersion:
+            typeof ready.app_version === "string" &&
+            /^\d{1,3}(\.\d{1,3}){2}([+-][a-z0-9.]{1,24})?$/.test(ready.app_version)
+              ? ready.app_version
+              : "",
+        });
+      } catch {
+        /* Metadata observers cannot break authentication. */
+      }
       const wake = sanitizeWakeTargets(ready.wake);
       if (wake.length) {
         try {
@@ -1680,10 +1735,7 @@ export class RemotePC {
       // dialog the user is currently looking at for a different task.
       if (taskId) this.activeApprovals.delete(taskId);
       const parsed = approvalAuthorized
-        ? approvalChallengeOf(
-            event === "task.event" ? eventPayload(data) : data,
-            taskId || "",
-          )
+        ? approvalChallengeOf(event === "task.event" ? eventPayload(data) : data, taskId || "")
         : null;
       if (parsed) this.activeApprovals.set(parsed.taskId, parsed);
       else forward = false;
@@ -1695,13 +1747,21 @@ export class RemotePC {
     // metadata kept out of the legacy data payload.
     if (forward) {
       try {
-        this.opts.onEvent?.({
+        const forwarded = {
           event,
           data,
           taskId,
           seq,
           version: typeof msg.v === "number" ? msg.v : undefined,
-        });
+        };
+        if (correlated && p && !p.done) {
+          try {
+            p.onProgress?.(forwarded);
+          } catch {
+            /* Observer only. */
+          }
+        }
+        this.opts.onEvent?.(forwarded);
       } catch {
         /* a UI callback must never break the socket */
       }
@@ -1816,9 +1876,7 @@ function verifiedTerminalProof(data: Record<string, unknown>): Record<string, un
   const evidenceIds = proof.evidence_ids;
   if (
     evidenceIds.length === 0 ||
-    evidenceIds.some(
-      (id) => typeof id !== "string" || !id.trim() || id.length > 256,
-    )
+    evidenceIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 256)
   ) {
     return null;
   }

@@ -597,9 +597,11 @@ class OperatorLoop(
                     if (v.reason.isEmpty() && VERIFICATION_RECEIPT_RE.matches(v.receipt)) {
                         return OperatorOutcome(
                             true,
-                            // The checker's account, written from the recorded evidence: live, the
-                            // operator switched Bluetooth on and reported it "already turned on".
-                            v.summary.ifEmpty { summary.ifEmpty { "Done, sir." } },
+                            // Preserve a lookup's verified answer verbatim. A checker can
+                            // summarize it as "found the settings section" and lose the values,
+                            // causing the parent to launch the same lookup again.
+                            if (isLookupGoal(opts.goal) && summary.isNotEmpty()) summary.take(1_000)
+                            else v.summary.ifEmpty { summary.ifEmpty { "Done, sir." } },
                             steps = steps,
                             findings = findings,
                             verificationReceipt = v.receipt,
@@ -1336,7 +1338,9 @@ internal const val VERIFY_SYSTEM =
         "- A question or lookup: met when the claimed answer is on the current screen, in claim_evidence or " +
         "in facts_noted, and nothing contradicts it. A number in the claim seen \"nowhere\" — not a count, a " +
         "simple sum, or the same value written another way (a date, a unit) — is made up: not met. Asked " +
-        "several things, the claim must GIVE each one (\"tap X to see it\" is not an answer). A claim that " +
+        "one thing or several, the claim must GIVE each answer and requested value. Merely finding or " +
+        "opening its page or section (\"found the IMEI information section\", \"tap X to see it\") is not " +
+        "an answer. Preserve the exact verified answers and values in your summary. A claim that " +
         "it couldn't be found or done is not met — unless the goal asked WHETHER it exists.\n" +
         "- A change (turn on, set, add, start): met when the current screen shows the requested state, or " +
         "changes_made shows it being set and nothing since undid it. It may already have been that way.\n" +

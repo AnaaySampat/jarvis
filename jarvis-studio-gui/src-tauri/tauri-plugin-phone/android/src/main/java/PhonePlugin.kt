@@ -143,6 +143,12 @@ internal class HealthExportArgs {
 }
 
 @InvokeArg
+internal class AppUpdateArgs {
+    var action: String = "status"
+    var options: String = "{}"
+}
+
+@InvokeArg
 internal class CloseAppArgs {
     var name: String = ""
 }
@@ -481,6 +487,16 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private val autonomyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Command
+    fun appUpdate(invoke: Invoke) {
+        val args = invoke.parseArgs(AppUpdateArgs::class.java)
+        autonomyScope.launch {
+            try {
+                val data = AppUpdates.command(activity.applicationContext, activity, args.action, JSONObject(args.options))
+                invoke.resolve(JSObject().apply { data.keys().forEach { key -> put(key, data.get(key)) } })
+            } catch (e: Exception) { invoke.reject(e.message ?: "Update service unavailable.") }
+        }
+    }
     private val autonomyDao by lazy { AutonomyTaskDatabase.get(activity).tasks() }
     private val deviceIdentity by lazy { DeviceIdentityManager(activity.applicationContext) }
     private val secureSecrets by lazy { SecureSecretStore(activity.applicationContext) }
@@ -488,6 +504,8 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
 
     override fun load(webView: WebView) {
         super.load(webView)
+        AppUpdates.initialize(activity)
+        AppUpdates.listener = { trigger("app-update", JSObject()) }
         createReminderChannel()
         requestNotificationPermission()
         AutonomyRecoveryWorker.enqueue(activity)
@@ -925,6 +943,11 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun hideStopOverlay(invoke: Invoke) {
+        // A delayed WebView update must not remove a native run's emergency stop.
+        if (NativeOperator.isRunning()) {
+            invoke.resolve(result(true, "overlay retained for the active phone task"))
+            return
+        }
         service()?.hideStopOverlay()
         hideAppStopOverlay()
         invoke.resolve(result(true, "overlay hidden"))
@@ -935,6 +958,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     fun pollStopOverlay(invoke: Invoke) {
         invoke.resolve(JSObject().apply {
             put("seq", JarvisAccessibilityService.stopTapSeq.get())
+            put("visible", service()?.stopOverlayRect() != null || appOverlayView != null)
         })
     }
 
@@ -989,6 +1013,7 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     override fun onDestroy() {
+        AppUpdates.listener = null
         // Stop any in-flight speech when the app is closed/swiped away. Without this,
         // a reply already handed to the system TextToSpeech service keeps playing out
         // loud after the app is gone (the user had to force-stop to silence it) — the
@@ -1902,7 +1927,17 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
         val level = args.level.coerceIn(0, 100)
         val vol = (level * max / 100.0).toInt().coerceIn(0, max)
         am.setStreamVolume(AudioManager.STREAM_MUSIC, vol, 0)
-        invoke.resolve(result(true, "Media volume set to $level%."))
+        val observed = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val verified = observed == vol
+        val actualPercent = if (max > 0) observed * 100 / max else 0
+        invoke.resolve(result(verified, if (verified) "Media volume is $actualPercent%."
+            else "The phone's volume did not reach the requested level.").apply {
+            put("verification", JSONObject()
+                .put("status", if (verified) "verified" else "unverified")
+                .put("method", "android_audio_manager_readback")
+                .put("expected", JSONObject().put("streamIndex", vol))
+                .put("observed", JSONObject().put("streamIndex", observed)))
+        })
     }
 
     @Command
@@ -2341,7 +2376,14 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
     /** What's playing on the phone (DirectActions.mediaNow), for "send this to the TV". */
     @Command
     fun mediaNow(invoke: Invoke) {
-        autonomyScope.launch { invoke.resolve(DirectActions.mediaNow(activity)) }
+        autonomyScope.launch {
+            val reply = DirectActions.mediaNow(activity)
+            val audio = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            reply.put("volumeReadback", JSONObject()
+                .put("streamIndex", audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+                .put("maxStreamIndex", audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)))
+            invoke.resolve(reply)
+        }
     }
 
     /** WhatsApp on the phone (WhatsAppInbox): Settings ▸ PC & WhatsApp keeps it in step. */
@@ -2437,7 +2479,12 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                     }
                     val hhmm = String.format(Locale.US, "%02d:%02d", args.hour, args.minute)
                     val repeat = if (args.days.isNotBlank()) " (${args.days.trim()})" else ""
-                    startClockIntent(intent, "Alarm set for $hhmm$repeat in your clock app.")
+                    startClockIntent(intent, "Sent the $hhmm$repeat alarm request to your Clock app. Check there to confirm it was saved.").apply {
+                        if (optBoolean("ok")) put("verification", JSONObject()
+                            .put("status", "unverified").put("method", "android_clock_intent_accepted")
+                            .put("expected", JSONObject().put("hour", args.hour).put("minute", args.minute)
+                                .put("label", label).put("days", args.days)))
+                    }
                 }
             }
 
@@ -2457,7 +2504,11 @@ class PhonePlugin(private val activity: Activity) : Plugin(activity) {
                         mins > 0 -> "$mins minute" + if (mins == 1) "" else "s"
                         else -> "$secs second" + if (secs == 1) "" else "s"
                     }
-                    startClockIntent(intent, "Timer started for $spoken in your clock app.")
+                    startClockIntent(intent, "Sent the $spoken timer request to your Clock app. Check there to confirm it started.").apply {
+                        if (optBoolean("ok")) put("verification", JSONObject()
+                            .put("status", "unverified").put("method", "android_clock_intent_accepted")
+                            .put("expected", JSONObject().put("seconds", args.seconds).put("label", label)))
+                    }
                 }
             }
 

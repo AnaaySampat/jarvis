@@ -18,6 +18,7 @@ import {
 } from "../brain/skillStore";
 import Icon from "./Icon";
 import EcosystemHealth from "./EcosystemHealth";
+import UpdateSettings from "./UpdateSettings";
 import StateMessage from "./StateMessage";
 import GestureControls from "./GestureControls";
 import { ActionRow, Field, Group, More, Toggle, WIDE_QUERY, Warn } from "./Sheet";
@@ -291,6 +292,7 @@ function RoutingSection({ routing, onRerank }) {
 /* ── Settings ──────────────────────────────────────────────────────────────── */
 
 export default function Settings({
+  updater,
   initialPage, // open on this page (the home screen's Status rows link straight in)
   sysInfo,
   onClose,
@@ -1434,6 +1436,7 @@ export default function Settings({
       )}
       {IS_MOBILE && (
         <Group title="Updates">
+          {updater && <UpdateSettings updater={updater} onCloseSettings={onClose} />}
           <Toggle
             label="Include beta updates"
             checked={sysInfo.update_channel === "beta"}

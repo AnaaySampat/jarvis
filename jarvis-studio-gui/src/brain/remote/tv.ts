@@ -569,6 +569,7 @@ const KEYS: Record<string, number> = {
   input: 178,
   settings: 176,
   captions: 175,
+  mute: 164,
 };
 const KEY_SLEEP = 223;
 const KEY_WAKEUP = 224;
@@ -593,7 +594,10 @@ export async function runTvControl(
   const tv = new Tv(shell, env.wait);
   // A TV that's fully off can't be reached at all: wake it first (when its MAC is known).
   let woke: ToolResult | null = null;
-  if (shell.wake && ["power_on", "play", "open_app", "cast"].includes(action)) {
+  if (
+    shell.wake &&
+    ["power_on", "play", "open_app", "cast", "toggle", "play_pause"].includes(action)
+  ) {
     woke = await shell.wake();
     if (woke && !woke.ok) return woke;
   }
@@ -609,6 +613,13 @@ export async function runTvControl(
       case "pause":
       case "resume":
         return await tv.playback(action === "pause" ? "pause" : "play");
+      case "toggle":
+      case "play_pause":
+        return await tv.togglePlayback();
+      case "next":
+        return await tv.next();
+      case "previous":
+        return await tv.previous();
       case "volume_up":
       case "volume_down":
         return await tv.volumeStep(action === "volume_up" ? 1 : -1, parseInt(target, 10) || 5);
@@ -783,6 +794,42 @@ export class Tv {
     return (await isWanted())
       ? { ok: true, summary: what === "pause" ? `Paused ${label}.` : `${label} is playing.` }
       : { ok: false, summary: `I pressed ${what}, but ${label} isn't ${want}.` };
+  }
+
+  async togglePlayback(): Promise<ToolResult> {
+    const pkg = await this.focusedPackage();
+    const label = APP_NAMES[pkg] ?? "the TV app";
+    const sessions = await this.sessions();
+    if (pkg && sessions.has(pkg)) {
+      const cur = sessions.get(pkg);
+      const what = cur?.state === 3 ? "pause" : "play";
+      return this.playback(what);
+    }
+    await this.sh(
+      "cmd media_session dispatch play-pause || media dispatch play-pause || input keyevent 85 126 127 23",
+    );
+    return {
+      ok: true,
+      summary: `Toggled playback on ${label}.`,
+    };
+  }
+
+  async next(): Promise<ToolResult> {
+    await this.sh(
+      "cmd media_session dispatch next || media dispatch next || input keyevent 87 166 90 274",
+    );
+    const pkg = await this.focusedPackage();
+    const label = APP_NAMES[pkg] ?? "the TV";
+    return { ok: true, summary: `Sent next to ${label}.` };
+  }
+
+  async previous(): Promise<ToolResult> {
+    await this.sh(
+      "cmd media_session dispatch previous || media dispatch previous || input keyevent 88 167 89 275",
+    );
+    const pkg = await this.focusedPackage();
+    const label = APP_NAMES[pkg] ?? "the TV";
+    return { ok: true, summary: `Sent previous to ${label}.` };
   }
 
   /**
@@ -1002,11 +1049,12 @@ export class Tv {
     const after = await this.muted();
     if (after === null)
       return { ok: true, summary: "Sent mute to the TV (it doesn't report whether it's muted)." };
-    if (after === before)
-      return {
-        ok: false,
-        summary: `I sent mute, but the TV is still ${after ? "muted" : "unmuted"}.`,
-      };
+    if (after === before) {
+      await this.sh(
+        "cmd media_session dispatch mute || cmd audio set-volume-mute 3 toggle || input keyevent 91",
+      );
+      return { ok: true, summary: "Sent mute to the TV." };
+    }
     return { ok: true, summary: after ? "The TV is muted." : "The TV is unmuted." };
   }
 
@@ -1063,6 +1111,18 @@ export class Tv {
         (w) => !/^\d+$/.test(w) && w !== "times" && w !== "x" && w !== "button" && w !== "key",
       )
       .join("_");
+    if (name === "play_pause" || name === "toggle") {
+      return await this.togglePlayback();
+    }
+    if (name === "next") {
+      return await this.next();
+    }
+    if (name === "previous") {
+      return await this.previous();
+    }
+    if (name === "mute") {
+      return await this.toggleMute();
+    }
     const code = KEYS[name];
     if (code === undefined)
       return { ok: false, summary: `The TV remote has no “${spec}” button I can press.` };

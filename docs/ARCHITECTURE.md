@@ -269,9 +269,133 @@ the turn and dispatches nothing), and a round spent only on it is free, once. A 
 tools still go through `toSpec` → `dispatch` like any other: this decides what is
 *advertised*, never how a call runs. The desktop does the same in `live_tools.py`.
 
-Conversation completion review (2026-10-24) uses a second model only for complex
-objectives or multiple executed tools. A single tool's verified receipt determines
-simple-task status; native phone verification and action approvals are unchanged.
+Every successful model-routed tool turn receives an objective completion review,
+including single-tool turns: opening Clock is not evidence that an alarm was saved.
+Native phone verification and action approvals remain independent of that review.
+Before execution, tool names and arguments are validated against the authorized full
+palette (including unloaded groups): unknown names, undeclared arguments, missing
+values, wrong types, invalid enums and numeric ranges return a correctable tool error.
+Malformed provider JSON is never silently replaced by usable default arguments.
+Effect identities are SHA-256 hashes of canonical lowered actions, written to the
+workflow journal before dispatch. Repeated effects reuse their result or refuse an
+uncertain retry before execution; reads can repeat. Absolute state changes can be
+re-applied after an intervening mutation. Native phone tasks use the committed
+operation identity as their task/idempotency identity.
+An uncertain effect also prevents further changes in that request, including a
+retry through another tool; read-only checks remain available.
+Native verification metadata survives the Rust bridge. Volume reads back the actual
+Android stream index; an accepted Clock alarm/timer intent is explicitly unverified,
+since intent acceptance alone cannot prove the other app saved or started it.
+Unverified Clock results and partially completed reminders cannot be promoted to success.
+
+Tool images obey the same routing restriction as user photos: every fallback and
+hedged request carrying images stays on a client that sends pixels. The compatible
+text client also rejects image-bearing requests defensively rather than dropping
+the images. A provider selection with no eligible image route produces an explicit
+capability error instead of an answer about an unseen screenshot.
+Screenshot inspection is omitted from the palette when the selected provider and
+fallback setting supply no eligible image route.
+
+`platform.toolAvailability()` supplies runtime capability and access status to both
+the palette and dispatcher. Browser previews omit native tools; direct recording is
+not advertised because its implementation is unavailable. Image generation requires
+its actual Gemini Developer API key, and web search accepts Gemini grounding or
+Tavily credentials; a Vertex tier alone does not supply either implemented path.
+Places describes the implemented OpenStreetMap category lookup on every tier.
+Missing Accessibility, notification access or a granted folder is described on the
+tool and enforced before execution. `request_tool_access` uses the existing Android
+settings/folder/calendar permission paths; opening setup never grants permission.
+Screen capture is omitted on Android versions below API 30.
+
+Native side-effect watchdogs return `native_outcome_unknown`, not a failed-action
+claim. `platform/nativeOutcomes.ts` keeps the original invoke promise alive and
+retains late replies in memory. The journal stores an opaque reference on the
+original operation. `check_action_outcome(result_id)` is a read-only lookup scoped
+to the current workflow: it updates the original action receipt before further
+work can consume it, never resubmits the action, and preserves uncertainty if no
+conclusive reply exists. Pending volume checks may report the current AudioManager
+state without claiming that the original invocation has finished. Late replies also
+update saved evidence after the chat ends; this does not automatically promote the
+overall task or start another model call. Missing in-process receipts after restart
+remain unknown. Native phone tasks can recover verified Room receipts; a lost
+operator-start acknowledgement polls that existing task instead of submitting again
+or marking a possibly running task failed. Late calendar writes attach their event
+ID only to one unchanged agenda row; ambiguous links remain unverified.
+
+Ordinary chat starts with three tool rounds and earns one extra round at a time,
+up to six, only after new successful steps without uncertain effects. Explicit
+scoped budgets (including Research's ten rounds) remain exact. Every turn is also
+limited to 24 proposed calls. Up to three contiguous, schema-valid independent
+HTTP/time/file reads overlap; journal receipts and model messages retain call order.
+Phone/PC/TV changes and native UI observation stay sequential. STOP drains receipts
+for already-started reads and prevents queued changes.
+
+`directCommands.ts` recognizes only complete absolute media-volume and single-unit
+timer commands. It rejects relative, compound, quoted, remote-targeted and ambiguous
+input. Local Auto turns without images lower those commands through the same
+schema validation, dispatcher and write-ahead operation journal, even without an AI
+key. The exact native receipt is the answer; Clock intent acceptance stays unverified.
+Incoming PC/WhatsApp and specialist turns keep their existing scoped paths.
+
+New workflows persist original tool authority. Tasks exposes completed, uncertain
+and remaining work outside the ecosystem beta. `WorkflowRecovery.check` only checks
+existing native receipts; it cannot submit an action. Continuation needs a single-use
+60-second ticket bound to the checked checkpoint and claims the same workflow
+synchronously. Missing legacy scope, pending effects and unknown outcomes block it.
+The original results, operation hashes and tool limits survive continuation, and a
+fresh read must precede changes. Completed action families and broad alternate
+executors are withheld, so additional work requiring those actions needs a fresh
+user request. Completed opaque phone/PC tasks permit only read-only continuation.
+No model or action runs automatically during recovery.
+
+Local Android chat turns now render a live `ChatToolActivity` section in the same
+JARVIS reply that later receives the final answer and existing image/QR cards.
+`toolActivity.ts` projects safe execution events: the loop reports rejected/local
+calls, and the dispatcher reports queued, running, approval waits and terminal
+receipts. The observer cannot fail or re-run an action. Numeric volume/timer/alarm
+inputs are allowlisted; arbitrary arguments, tool payloads and exception text are
+excluded. Completed means that tool's own receipt passed its checks, independently
+of the task's later objective review. Unverified Clock/native outcomes stay
+unconfirmed; a late committed receipt updates the original invocation row.
+The chat reducer keys rows by invocation and reply, keeps parallel calls separate,
+and replaces the live reply with its final text without losing tool rows or cards.
+Successful rows collapse after the answer; failures and uncertain outcomes remain
+visible. Each row expands to show its safe input summary, outcome and elapsed time.
+Every accepted chat request now owns opaque user/reply IDs, a tool observer and its
+own artifact collector. Ordinary chat, direct commands, picked agents, incoming
+PC/WhatsApp commands, quick tools, live-view PC commands and checked continuations
+use that context. Explicit actions reuse the brain's existing standalone journal
+and dispatcher. Live-view commands preserve the desktop's `auto` routing and its
+fresh passkey/fingerprint gates. Incoming tool allowlists remain unchanged.
+Information-only consultations carry a parent invocation ID and retain their
+restricted authority. Native phone/TV steps and authenticated, correlated PC events
+become compact reported progress under the parent tool; plans stay labelled as plans.
+PC replay sequence guards run before its request observer. Progress never proves
+whole-task completion. Parent rows link to the existing Tasks panel and STOP controls.
+
+`chatActivityStore.ts` persists a closed UI projection separately from inference
+history. A small index points to individual reply records, so an update reads only
+its current trace. Retention is bounded to 640 traces and 1.5 million serialized
+characters, with up to 128 tool rows and 32 recent steps per row. Older evicted
+activity is labelled unavailable. No provider payloads, message bodies, screen text,
+binary images, headers or credentials enter these records. The transcript stores
+only UI IDs and pending markers alongside its existing text; `recentTurns` removes
+them and excludes the current request before model routing. Archived and active
+turns retain stable IDs. Late completion patches its existing turn, including an
+archived one, and cannot recreate deleted chats. Deletion removes unreferenced
+traces, while restored copies keep their shared records. Restored unfinished calls
+become unconfirmed, without model calls or tool execution. Failed persistence is
+reported without changing an action receipt or retrying an effect.
+
+Version-2 instrumentation records choosing, summed tool-execution and completion-review
+durations, actual TypeScript provider requests/fallback replies/hedges, invalid and
+duplicate attempts, parallel reads, extensions and recovery counts. Tasks summarizes
+instrumented tool work only; legacy and text-only turns are excluded. Diagnostic
+export uses closed numeric projections in both TypeScript and Kotlin. Cost remains
+unknown, and native operator inference is separate. Labelled replay/live evaluations
+score initial tool and argument selection, including valid group loading; production
+turns without ground truth are never assigned a selection-accuracy score.
+
 Local weather questions return the weather tool's complete answer directly through
 the existing dispatcher/journal/memory path, avoiding two redundant model calls.
 Complex review accepts a whole fenced JSON object, retries malformed JSON once,
@@ -287,7 +411,7 @@ not recurring warning popups; real runtime/access failures still use the warning
 
 Roughly what's dispatched today: `weather`, `news`, `search_web`, `places`, `directions`,
 `set_location`, `reminder`, `schedule`, `agenda`, `clock`, `time`, `day`, `remember`,
-`forget`, `playbook`, `routine`, `qr_code`, `generate_image`, `record`, `clipboard`,
+`forget`, `playbook`, `routine`, `qr_code`, `generate_image`, `clipboard`,
 `read_file`, `list_dir`, `open_file`, `open_url`, `open_app`, `close_app`, `set_volume`,
 `system`, `power`, `screen`, `ui`, `screenshot`, `open_a11y_settings`, the one-step phone
 actions (`device`, `navigate`, `play_media`, `message`, `call`, `notifications` — below),
